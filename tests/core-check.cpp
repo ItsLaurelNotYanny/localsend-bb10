@@ -1,0 +1,2396 @@
+#include "protocol/ProtocolTypes.h"
+#include "protocol/ProtocolJson.h"
+#include "protocol/CryptoUtil.h"
+#include "receive/HttpServer.h"
+#include "receive/HttpConnection.h"
+#include "receive/ReceiveServer.h"
+#include "send/SendManager.h"
+#include "app/Application.h"
+#include "discovery/DiscoveryManager.h"
+
+#include <QUdpSocket>
+#include <QTemporaryFile>
+#include <QDir>
+#include <QFile>
+
+#include <QCoreApplication>
+#include <QTime>
+#include <QTcpSocket>
+#include <QThread>
+#include <QCryptographicHash>
+#include <iostream>
+#include <cstdlib>
+#include <cassert>
+#include <unistd.h>
+
+static int g_testCount = 0;
+static int g_passCount = 0;
+static int g_failCount = 0;
+
+#define TEST_CASE(name) \
+    do { \
+        std::cout << "[RUN] " << name << std::endl; \
+        g_testCount++; \
+    } while (0)
+
+#define ASSERT_TRUE(cond, msg) \
+    do { \
+        if (!(cond)) { \
+            std::cerr << "  FAILED: " << msg << " (" << __FILE__ << ":" << __LINE__ << ")" << std::endl; \
+            g_failCount++; \
+            return; \
+        } \
+    } while (0)
+
+#define ASSERT_FALSE(cond, msg) \
+    do { \
+        if ((cond)) { \
+            std::cerr << "  FAILED: " << msg << " (" << __FILE__ << ":" << __LINE__ << ")" << std::endl; \
+            g_failCount++; \
+            return; \
+        } \
+    } while (0)
+
+#define TEST_PASS() \
+    do { \
+        g_passCount++; \
+        std::cout << "  PASS" << std::endl; \
+    } while (0)
+
+// Helper to pump event loop
+static bool waitForCondition(bool *flag, int timeoutMs = 2000)
+{
+    QTime t;
+    t.start();
+    while (t.elapsed() < timeoutMs) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        if (*flag) return true;
+        usleep(5000);
+    }
+    return *flag;
+}
+
+// Test HTTP Receiver Object
+class TestHttpReceiver : public QObject {
+    Q_OBJECT
+public:
+    HttpConnection *lastConn;
+    HttpRequestHead lastHead;
+    QByteArray receivedBody;
+    bool headersReceived;
+    bool requestFinishedReceived;
+    bool disconnectedReceived;
+
+    TestHttpReceiver(QObject *parent = 0)
+        : QObject(parent)
+        , lastConn(0)
+        , headersReceived(false)
+        , requestFinishedReceived(false)
+        , disconnectedReceived(false)
+    {
+    }
+
+public slots:
+    void onConnection(HttpConnection *conn)
+    {
+        lastConn = conn;
+        connect(conn, SIGNAL(headersReady(HttpRequestHead)), this, SLOT(onHeaders(HttpRequestHead)));
+        connect(conn, SIGNAL(bodyChunk(QByteArray)), this, SLOT(onChunk(QByteArray)));
+        connect(conn, SIGNAL(requestFinished()), this, SLOT(onFinished()));
+        connect(conn, SIGNAL(disconnected()), this, SLOT(onDisconnected()));
+    }
+
+    void onHeaders(const HttpRequestHead &head)
+    {
+        lastHead = head;
+        headersReceived = true;
+    }
+
+    void onChunk(const QByteArray &chunk)
+    {
+        receivedBody.append(chunk);
+    }
+
+    void onFinished()
+    {
+        requestFinishedReceived = true;
+    }
+
+    void onDisconnected()
+    {
+        disconnectedReceived = true;
+    }
+};
+
+static bool waitSocketReadyRead(QTcpSocket *socket, int timeoutMs = 2000)
+{
+    QTime t;
+    t.start();
+    while (t.elapsed() < timeoutMs) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        if (socket->bytesAvailable() > 0) return true;
+        usleep(2000);
+    }
+    return socket->bytesAvailable() > 0;
+}
+
+static bool waitSocketConnected(QTcpSocket *socket, int timeoutMs = 2000)
+{
+    QTime t;
+    t.start();
+    while (t.elapsed() < timeoutMs) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        if (socket->state() == QAbstractSocket::ConnectedState) return true;
+        usleep(2000);
+    }
+    return socket->state() == QAbstractSocket::ConnectedState;
+}
+
+class ConnsReceiver : public QObject {
+    Q_OBJECT
+public:
+    QList<HttpConnection*> conns;
+    ConnsReceiver(QObject *parent = 0) : QObject(parent) {}
+public slots:
+    void onConn(HttpConnection *c) { conns.append(c); }
+};
+
+// ==========================================
+// T01 Protocol JSON Tests
+// ==========================================
+
+void testAnnouncementValid()
+{
+    TEST_CASE("Announcement - Valid with known and extra fields");
+    QByteArray json = "{\n"
+                      "  \"alias\": \"Passport\",\n"
+                      "  \"version\": \"2.2\",\n"
+                      "  \"deviceModel\": \"BlackBerry Passport\",\n"
+                      "  \"deviceType\": \"mobile\",\n"
+                      "  \"fingerprint\": \"fp-12345\",\n"
+                      "  \"port\": 53317,\n"
+                      "  \"protocol\": \"http\",\n"
+                      "  \"download\": false,\n"
+                      "  \"announce\": true,\n"
+                      "  \"extraField\": \"ignored\"\n"
+                      "}";
+
+    DeviceInfo info;
+    bool announce = false;
+    QString err;
+    bool ok = ProtocolJson::decodeAnnouncement(json, &info, &announce, &err);
+
+    ASSERT_TRUE(ok, err.toLocal8Bit().constData());
+    ASSERT_TRUE(info.alias == "Passport", "alias mismatch");
+    ASSERT_TRUE(info.version == "2.2", "version mismatch");
+    ASSERT_TRUE(info.deviceType == "mobile", "deviceType mismatch");
+    ASSERT_TRUE(info.port == 53317, "port mismatch");
+    ASSERT_TRUE(info.protocol == "http", "protocol mismatch");
+    ASSERT_FALSE(info.download, "download must be false");
+    ASSERT_TRUE(announce, "announce must be true");
+
+    TEST_PASS();
+}
+
+void testAnnouncementDeviceTypeFallback()
+{
+    TEST_CASE("Announcement - Unknown deviceType falls back to desktop");
+    QByteArray json = "{"
+                      "\"alias\":\"Peer\","
+                      "\"version\":\"2.1\","
+                      "\"deviceType\":\"supercomputer\","
+                      "\"fingerprint\":\"fp-999\","
+                      "\"port\":53317,"
+                      "\"protocol\":\"http\""
+                      "}";
+
+    DeviceInfo info;
+    bool announce = true;
+    QString err;
+    bool ok = ProtocolJson::decodeAnnouncement(json, &info, &announce, &err);
+
+    ASSERT_TRUE(ok, err.toLocal8Bit().constData());
+    ASSERT_TRUE(info.deviceType == "desktop", "unknown deviceType should fall back to desktop");
+    ASSERT_FALSE(info.download, "missing download should default to false");
+    ASSERT_TRUE(announce, "missing announce should default to true");
+
+    TEST_PASS();
+}
+
+void testAnnouncementVersionIncompatible()
+{
+    TEST_CASE("Announcement - Incompatible major version (3.0 and 1.0) rejected");
+    DeviceInfo info;
+    QString err;
+
+    QByteArray v3 = "{\"alias\":\"A\",\"version\":\"3.0\",\"fingerprint\":\"F\",\"port\":53317,\"protocol\":\"http\"}";
+    ASSERT_FALSE(ProtocolJson::decodeAnnouncement(v3, &info, NULL, &err), "v3.0 should be rejected");
+
+    QByteArray v1 = "{\"alias\":\"A\",\"version\":\"1.0\",\"fingerprint\":\"F\",\"port\":53317,\"protocol\":\"http\"}";
+    ASSERT_FALSE(ProtocolJson::decodeAnnouncement(v1, &info, NULL, &err), "v1.0 should be rejected");
+
+    TEST_PASS();
+}
+
+void testAnnouncementInvalidPort()
+{
+    TEST_CASE("Announcement - Invalid port (0, 70000, string) rejected");
+    DeviceInfo info;
+    QString err;
+
+    QByteArray p0 = "{\"alias\":\"A\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":0,\"protocol\":\"http\"}";
+    ASSERT_FALSE(ProtocolJson::decodeAnnouncement(p0, &info, NULL, &err), "port 0 rejected");
+
+    QByteArray pBig = "{\"alias\":\"A\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":70000,\"protocol\":\"http\"}";
+    ASSERT_FALSE(ProtocolJson::decodeAnnouncement(pBig, &info, NULL, &err), "port 70000 rejected");
+
+    QByteArray pStr = "{\"alias\":\"A\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":\"53317\",\"protocol\":\"http\"}";
+    ASSERT_FALSE(ProtocolJson::decodeAnnouncement(pStr, &info, NULL, &err), "string port rejected");
+
+    TEST_PASS();
+}
+
+void testRegisterResponseFieldPreservation()
+{
+    TEST_CASE("Register Response - Preserves target port, protocol, and observed IP");
+    QByteArray resJson = "{\n"
+                         "  \"alias\": \"Fedora LocalSend\",\n"
+                         "  \"version\": \"2.2\",\n"
+                         "  \"deviceModel\": \"ThinkPad\",\n"
+                         "  \"deviceType\": \"desktop\",\n"
+                         "  \"fingerprint\": \"fedora-fp-123\",\n"
+                         "  \"download\": true\n"
+                         "}";
+
+    PeerDevice target;
+    target.address = QHostAddress("192.168.1.105");
+    target.info.port = 53317;
+    target.info.protocol = "http";
+
+    PeerDevice peer;
+    QString err;
+    bool ok = ProtocolJson::decodeRegisterResponse(resJson, target, &peer, &err);
+
+    ASSERT_TRUE(ok, err.toLocal8Bit().constData());
+    ASSERT_TRUE(peer.info.alias == "Fedora LocalSend", "alias mismatch");
+    ASSERT_TRUE(peer.info.port == 53317, "target port must be preserved");
+    ASSERT_TRUE(peer.info.protocol == "http", "target protocol must be preserved");
+    ASSERT_TRUE(peer.address == QHostAddress("192.168.1.105"), "observed address preserved");
+    ASSERT_TRUE(peer.info.download, "download field true");
+
+    TEST_PASS();
+}
+
+void testPrepareRequestValidSingleFile()
+{
+    TEST_CASE("Prepare Request - Single file with Chinese and spaces, 10 MiB");
+    QByteArray reqJson = "{\n"
+                         "  \"info\": {\n"
+                         "    \"alias\": \"PC\",\n"
+                         "    \"version\": \"2.2\",\n"
+                         "    \"fingerprint\": \"pc-fp\",\n"
+                         "    \"port\": 53317,\n"
+                         "    \"protocol\": \"http\"\n"
+                         "  },\n"
+                         "  \"files\": {\n"
+                         "    \"file-abc\": {\n"
+                         "      \"id\": \"file-abc\",\n"
+                         "      \"fileName\": \"\\u6d4b\\u8bd5 document 1.bin\",\n"
+                         "      \"size\": 10485760,\n"
+                         "      \"fileType\": \"application/octet-stream\",\n"
+                         "      \"sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n"
+                         "    }\n"
+                         "  }\n"
+                         "}";
+
+    PrepareUploadRequest req;
+    QString err;
+    bool ok = ProtocolJson::decodePrepareRequest(reqJson, &req, &err);
+
+    ASSERT_TRUE(ok, err.toLocal8Bit().constData());
+    ASSERT_TRUE(req.files.size() == 1, "exactly one file");
+    ASSERT_TRUE(req.files.contains("file-abc"), "file-abc missing");
+
+    const FileMeta &meta = req.files.value("file-abc");
+    ASSERT_TRUE(meta.size == 10485760, "size must be 10485760 (10 MiB)");
+    ASSERT_TRUE(meta.fileName == QString::fromUtf8("测试 document 1.bin"), "unicode filename mismatch");
+    ASSERT_TRUE(meta.sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "sha256 mismatch");
+
+    TEST_PASS();
+}
+
+void testPrepareRequestLargeSize64Bit()
+{
+    TEST_CASE("Prepare Request - 64-bit size (4 GiB: 4294967296)");
+    QByteArray reqJson = "{\n"
+                         "  \"info\": {\"alias\":\"P\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":53317,\"protocol\":\"http\"},\n"
+                         "  \"files\": {\n"
+                         "    \"file-big\": {\n"
+                         "      \"id\": \"file-big\",\n"
+                         "      \"fileName\": \"big.img\",\n"
+                         "      \"size\": 4294967296\n"
+                         "    }\n"
+                         "  }\n"
+                         "}";
+
+    PrepareUploadRequest req;
+    QString err;
+    bool ok = ProtocolJson::decodePrepareRequest(reqJson, &req, &err);
+
+    ASSERT_TRUE(ok, err.toLocal8Bit().constData());
+    ASSERT_TRUE(req.files.value("file-big").size == 4294967296LL, "64-bit size mismatch");
+
+    TEST_PASS();
+}
+
+void testPrepareRequestRejectInvalid()
+{
+    TEST_CASE("Prepare Request - Rejection cases: array files, traversal, bad sizes, id mismatch");
+    PrepareUploadRequest req;
+    QString err;
+
+    // Files is array
+    QByteArray arrFiles = "{\"info\":{\"alias\":\"P\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":53317,\"protocol\":\"http\"},\"files\":[]}";
+    ASSERT_FALSE(ProtocolJson::decodePrepareRequest(arrFiles, &req, &err), "array files must be rejected");
+
+    // Id mismatch between key and inner id
+    QByteArray idMismatch = "{\"info\":{\"alias\":\"P\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":53317,\"protocol\":\"http\"},"
+                           "\"files\":{\"key-1\":{\"id\":\"key-2\",\"fileName\":\"a.txt\",\"size\":10}}}";
+    ASSERT_FALSE(ProtocolJson::decodePrepareRequest(idMismatch, &req, &err), "id mismatch must be rejected");
+
+    // Path traversal in filename
+    QByteArray trav = "{\"info\":{\"alias\":\"P\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":53317,\"protocol\":\"http\"},"
+                      "\"files\":{\"k\":{\"id\":\"k\",\"fileName\":\"../../etc/passwd\",\"size\":10}}}";
+    ASSERT_FALSE(ProtocolJson::decodePrepareRequest(trav, &req, &err), "path traversal must be rejected");
+
+    // Negative size
+    QByteArray negSize = "{\"info\":{\"alias\":\"P\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":53317,\"protocol\":\"http\"},"
+                         "\"files\":{\"k\":{\"id\":\"k\",\"fileName\":\"a.txt\",\"size\":-1}}}";
+    ASSERT_FALSE(ProtocolJson::decodePrepareRequest(negSize, &req, &err), "negative size must be rejected");
+
+    // String size
+    QByteArray strSize = "{\"info\":{\"alias\":\"P\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":53317,\"protocol\":\"http\"},"
+                         "\"files\":{\"k\":{\"id\":\"k\",\"fileName\":\"a.txt\",\"size\":\"1000\"}}}";
+    ASSERT_FALSE(ProtocolJson::decodePrepareRequest(strSize, &req, &err), "string size must be rejected");
+
+    // Fractional size
+    QByteArray fracSize = "{\"info\":{\"alias\":\"P\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":53317,\"protocol\":\"http\"},"
+                          "\"files\":{\"k\":{\"id\":\"k\",\"fileName\":\"a.txt\",\"size\":10.5}}}";
+    ASSERT_FALSE(ProtocolJson::decodePrepareRequest(fracSize, &req, &err), "fractional size must be rejected");
+
+    TEST_PASS();
+}
+
+void testOversizedJsonRejected()
+{
+    TEST_CASE("Oversized JSON (>64 KiB) rejected");
+    DeviceInfo info;
+    QString err;
+
+    QByteArray bigData = "{\"alias\":\"";
+    bigData.append(QByteArray(70000, 'x'));
+    bigData.append("\",\"version\":\"2.2\",\"fingerprint\":\"F\",\"port\":53317,\"protocol\":\"http\"}");
+
+    ASSERT_FALSE(ProtocolJson::decodeAnnouncement(bigData, &info, NULL, &err), "oversized payload must be rejected");
+
+    TEST_PASS();
+}
+
+void testRoundTripEncodeDecode()
+{
+    TEST_CASE("Round trip serialization and deserialization");
+    DeviceInfo info;
+    info.alias = "BlackBerry Passport";
+    info.version = "2.2";
+    info.deviceModel = "SQW100-1";
+    info.deviceType = "mobile";
+    info.fingerprint = "passport-xyz";
+    info.port = 53317;
+    info.protocol = "http";
+    info.download = false;
+
+    QString err;
+    QByteArray encAnnounce = ProtocolJson::encodeAnnouncement(info, true, &err);
+    ASSERT_TRUE(!encAnnounce.isEmpty(), "encodeAnnouncement produced empty output");
+
+    DeviceInfo decInfo;
+    bool announceFlag = false;
+    bool ok = ProtocolJson::decodeAnnouncement(encAnnounce, &decInfo, &announceFlag, &err);
+    ASSERT_TRUE(ok, err.toLocal8Bit().constData());
+    ASSERT_TRUE(decInfo.alias == info.alias, "alias round-trip mismatch");
+    ASSERT_TRUE(decInfo.fingerprint == info.fingerprint, "fingerprint round-trip mismatch");
+    ASSERT_TRUE(announceFlag == true, "announce round-trip mismatch");
+
+    // Prepare response round trip
+    PrepareUploadResponse res;
+    res.sessionId = "session-789";
+    res.fileTokens.insert("file-1", "token-abc");
+
+    QByteArray encRes = ProtocolJson::encodePrepareResponse(res, &err);
+    ASSERT_TRUE(!encRes.isEmpty(), "encodePrepareResponse produced empty output");
+
+    PrepareUploadResponse decRes;
+    ok = ProtocolJson::decodePrepareResponse(encRes, &decRes, &err);
+    ASSERT_TRUE(ok, err.toLocal8Bit().constData());
+    ASSERT_TRUE(decRes.sessionId == "session-789", "sessionId mismatch");
+    ASSERT_TRUE(decRes.fileTokens.value("file-1") == "token-abc", "token mismatch");
+
+    TEST_PASS();
+}
+
+// ==========================================
+// T02 HTTP Server & Stream Parser Tests
+// ==========================================
+
+void testHttpOneByteHeaderFragmentation()
+{
+    TEST_CASE("HTTP - One-byte header fragmentation");
+    HttpServer server;
+    QString err;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0, &err), "server listen failed");
+    quint16 port = server.serverPort();
+
+    TestHttpReceiver receiver;
+    QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)),
+                     &receiver, SLOT(onConnection(HttpConnection*)));
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress::LocalHost, port);
+    ASSERT_TRUE(client.waitForConnected(1000), "client connect failed");
+
+    QByteArray request = "POST /api/test HTTP/1.1\r\nContent-Length: 5\r\n\r\nhello";
+    for (int i = 0; i < request.size(); ++i) {
+        client.write(request.mid(i, 1));
+        client.flush();
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(1000);
+    }
+
+    ASSERT_TRUE(waitForCondition(&receiver.headersReceived), "headersReady not emitted");
+    ASSERT_TRUE(receiver.lastHead.method == "POST", "method mismatch");
+    ASSERT_TRUE(receiver.lastHead.contentLength == 5, "contentLength mismatch");
+
+    // Body streaming requires allowBody()
+    receiver.lastConn->allowBody();
+    ASSERT_TRUE(waitForCondition(&receiver.requestFinishedReceived), "requestFinished not emitted");
+    ASSERT_TRUE(receiver.receivedBody == "hello", "body mismatch");
+
+    // Test response
+    receiver.lastConn->respond(200, "text/plain", "OK");
+    ASSERT_TRUE(client.waitForReadyRead(1000), "client did not receive response");
+    QByteArray clientResp = client.readAll();
+    ASSERT_TRUE(clientResp.contains("HTTP/1.1 200 OK"), "expected 200 OK");
+    ASSERT_TRUE(clientResp.contains("Connection: close"), "expected Connection: close");
+    ASSERT_TRUE(clientResp.endsWith("OK"), "expected body OK");
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testHttpHeadersAndBodyTogether()
+{
+    TEST_CASE("HTTP - Headers and body in same packet");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    TestHttpReceiver receiver;
+    QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)),
+                     &receiver, SLOT(onConnection(HttpConnection*)));
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(client.waitForConnected(1000), "connect failed");
+
+    QByteArray request = "POST /api/upload HTTP/1.1\r\nContent-Length: 9\r\n\r\n123456789";
+    client.write(request);
+    client.flush();
+
+    ASSERT_TRUE(waitForCondition(&receiver.headersReceived), "headersReady not emitted");
+    receiver.lastConn->allowBody();
+    ASSERT_TRUE(waitForCondition(&receiver.requestFinishedReceived), "requestFinished not emitted");
+    ASSERT_TRUE(receiver.receivedBody == "123456789", "body mismatch");
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testHttpContentLengthZero()
+{
+    TEST_CASE("HTTP - Content-Length: 0 completes immediately without body wait");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    TestHttpReceiver receiver;
+    QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)),
+                     &receiver, SLOT(onConnection(HttpConnection*)));
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(client.waitForConnected(1000), "connect failed");
+
+    QByteArray request = "GET /api/info HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
+    client.write(request);
+    client.flush();
+
+    ASSERT_TRUE(waitForCondition(&receiver.headersReceived), "headersReady not emitted");
+    ASSERT_TRUE(waitForCondition(&receiver.requestFinishedReceived), "requestFinished not emitted");
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testHttpChunkedTransfer()
+{
+    TEST_CASE("HTTP - Transfer-Encoding: chunked with trailers");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    TestHttpReceiver receiver;
+    QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)),
+                     &receiver, SLOT(onConnection(HttpConnection*)));
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(client.waitForConnected(1000), "connect failed");
+
+    QByteArray reqHeaders = "POST /api/chunked HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
+    client.write(reqHeaders);
+    client.flush();
+
+    ASSERT_TRUE(waitForCondition(&receiver.headersReceived), "headersReady not emitted");
+    ASSERT_TRUE(receiver.lastHead.chunked, "head.chunked must be true");
+
+    receiver.lastConn->allowBody();
+
+    // Send chunks: "Hello" (size 5), " World!" (size 7), last chunk 0 with trailer
+    client.write("5\r\nHello\r\n");
+    client.flush();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    client.write("7;ext=foo\r\n World!\r\n");
+    client.flush();
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    client.write("0\r\nX-Checksum: abc\r\n\r\n");
+    client.flush();
+
+    ASSERT_TRUE(waitForCondition(&receiver.requestFinishedReceived), "requestFinished not emitted");
+    ASSERT_TRUE(receiver.receivedBody == "Hello World!", "chunked body mismatch");
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testHttpExpect100Continue()
+{
+    TEST_CASE("HTTP - Expect: 100-continue handshake wait and emission");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    TestHttpReceiver receiver;
+    QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)),
+                     &receiver, SLOT(onConnection(HttpConnection*)));
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(client.waitForConnected(1000), "connect failed");
+
+    QByteArray reqHeaders = "POST /api/data HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 4\r\n\r\n";
+    client.write(reqHeaders);
+    client.flush();
+
+    ASSERT_TRUE(waitForCondition(&receiver.headersReceived), "headersReady not emitted");
+
+    // Client should NOT have received 100 yet before allowBody()
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    ASSERT_TRUE(client.bytesAvailable() == 0, "100 continue sent prematurely");
+
+    // Now server allows body
+    receiver.lastConn->allowBody();
+    ASSERT_TRUE(client.waitForReadyRead(1000), "client did not receive 100 Continue");
+    QByteArray interim = client.readAll();
+    ASSERT_TRUE(interim.contains("HTTP/1.1 100 Continue"), "expected 100 Continue");
+
+    // Client sends the 4 bytes
+    client.write("abcd");
+    client.flush();
+
+    ASSERT_TRUE(waitForCondition(&receiver.requestFinishedReceived), "requestFinished not emitted");
+    ASSERT_TRUE(receiver.receivedBody == "abcd", "body mismatch");
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testHttpClTeConflictRejected()
+{
+    TEST_CASE("HTTP - CL+TE conflict rejected with 400");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    TestHttpReceiver receiver;
+    QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)),
+                     &receiver, SLOT(onConnection(HttpConnection*)));
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client), "connect failed");
+
+    QByteArray attackReq = "POST /api/test HTTP/1.1\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\n";
+    client.write(attackReq);
+    client.flush();
+
+    ASSERT_TRUE(waitSocketReadyRead(&client), "expected 400 response");
+    QByteArray resp = client.readAll();
+    ASSERT_TRUE(resp.contains("HTTP/1.1 400 Bad Request"), "must reject CL+TE conflict with 400");
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testHttpUnsupportedTransferEncodingRejected()
+{
+    TEST_CASE("HTTP - Unsupported Transfer-Encoding (gzip) rejected with 501");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client), "connect failed");
+
+    QByteArray gzipReq = "POST /api/test HTTP/1.1\r\nTransfer-Encoding: gzip\r\n\r\n";
+    client.write(gzipReq);
+    client.flush();
+
+    ASSERT_TRUE(waitSocketReadyRead(&client), "expected 501 response");
+    QByteArray resp = client.readAll();
+    ASSERT_TRUE(resp.contains("HTTP/1.1 501 Not Implemented"), "must reject non-chunked Transfer-Encoding with 501");
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testHttpOversizedHeaderRejected()
+{
+    TEST_CASE("HTTP - Oversized headers (>16 KiB) rejected with 431");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client), "connect failed");
+
+    QByteArray bigHeader = "GET / HTTP/1.1\r\nX-Long: ";
+    bigHeader.append(QByteArray(18000, 'A'));
+    bigHeader.append("\r\n\r\n");
+
+    client.write(bigHeader);
+    client.flush();
+
+    ASSERT_TRUE(waitSocketReadyRead(&client), "expected 431 response");
+    QByteArray resp = client.readAll();
+    ASSERT_TRUE(resp.contains("HTTP/1.1 431 Request Header Fields Too Large"), "must return 431");
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testHttpConcurrentConnectionsNonBlocking()
+{
+    TEST_CASE("HTTP - Concurrent connections: pending prepare does not block other connections");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    ConnsReceiver connRecv;
+    QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)),
+                     &connRecv, SLOT(onConn(HttpConnection*)));
+
+    // Client 1 connects and sends prepare request
+    QTcpSocket client1;
+    client1.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client1), "client1 connect failed");
+    client1.write("POST /api/prepare HTTP/1.1\r\nContent-Length: 0\r\n\r\n");
+    client1.flush();
+
+    QTime t;
+    t.start();
+    while (connRecv.conns.isEmpty() && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(!connRecv.conns.isEmpty(), "server did not accept client1");
+    HttpConnection *conn1 = connRecv.conns.first();
+
+    // Client 2 connects while client 1 is pending response!
+    QTcpSocket client2;
+    client2.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client2), "client2 connect failed");
+    client2.write("POST /api/register HTTP/1.1\r\nContent-Length: 0\r\n\r\n");
+    client2.flush();
+
+    t.start();
+    while (connRecv.conns.size() < 2 && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(connRecv.conns.size() == 2, "server did not accept client2 concurrently");
+    HttpConnection *conn2 = connRecv.conns.at(1);
+
+    // Client 2 completes and responds immediately
+    conn2->respond(200, "application/json", "{\"status\":\"ok\"}");
+    ASSERT_TRUE(waitSocketReadyRead(&client2), "client2 response not received");
+    QByteArray resp2 = client2.readAll();
+    ASSERT_TRUE(resp2.contains("200 OK"), "client2 expected 200");
+
+    // Client 1 is still pending and now responds
+    conn1->respond(200, "application/json", "{\"sessionId\":\"123\"}");
+    ASSERT_TRUE(waitSocketReadyRead(&client1), "client1 response not received");
+    QByteArray resp1 = client1.readAll();
+    ASSERT_TRUE(resp1.contains("200 OK"), "client1 expected 200");
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testHttpConnectionLimit()
+{
+    TEST_CASE("HTTP - Socket budget (max 8) rejects 9th connection with 503");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    QList<QTcpSocket*> clients;
+    for (int i = 0; i < HttpServer::MAX_ACTIVE_CONNECTIONS; ++i) {
+        QTcpSocket *c = new QTcpSocket();
+        c->connectToHost(QHostAddress::LocalHost, server.serverPort());
+        ASSERT_TRUE(waitSocketConnected(c), "client connect failed");
+        c->write("POST /test HTTP/1.1\r\nContent-Length: 0\r\n\r\n");
+        c->flush();
+        clients.append(c);
+    }
+
+    QTime t;
+    t.start();
+    while (server.activeConnectionsCount() < HttpServer::MAX_ACTIVE_CONNECTIONS && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(server.activeConnectionsCount() == HttpServer::MAX_ACTIVE_CONNECTIONS, "all 8 connections active");
+
+    // 9th connection attempts to connect
+    QTcpSocket client9;
+    client9.connectToHost(QHostAddress::LocalHost, server.serverPort());
+
+    ASSERT_TRUE(waitSocketReadyRead(&client9), "expected 503 from client9");
+    QByteArray resp = client9.readAll();
+    ASSERT_TRUE(resp.contains("503 Service Unavailable"), "expected 503 Service Unavailable");
+
+    for (int i = 0; i < clients.size(); ++i) {
+        delete clients.at(i);
+    }
+    server.stop();
+    TEST_PASS();
+}
+
+// ==========================================
+// T03 Application & Identity Tests
+// ==========================================
+
+void testAppIdentityAndSettingsPersistence()
+{
+    TEST_CASE("Application - Identity persistence across restarts");
+    {
+        QSettings s("LocalSend", "LocalSend-BB10");
+        s.clear();
+    }
+
+    QString fp1, alias1;
+    {
+        localsend::Application app1;
+        fp1 = app1.localInfo().fingerprint;
+        alias1 = app1.localInfo().alias;
+        ASSERT_TRUE(!fp1.isEmpty(), "fingerprint should not be empty");
+        ASSERT_TRUE(!alias1.isEmpty(), "alias should not be empty");
+
+        app1.setAlias("Custom Alias");
+        app1.setPort(54321);
+    }
+
+    {
+        localsend::Application app2;
+        ASSERT_TRUE(app2.localInfo().fingerprint == fp1, "fingerprint must persist across restarts");
+        ASSERT_TRUE(app2.localInfo().alias == "Custom Alias", "alias must persist across restarts");
+        ASSERT_TRUE(app2.localInfo().port == 54321, "port must persist across restarts");
+
+        QString err;
+        QByteArray ann = ProtocolJson::encodeAnnouncement(app2.localInfo(), true, &err);
+        ASSERT_TRUE(ann.contains("\"port\":54321"), "announcement must contain updated port");
+    }
+
+    TEST_PASS();
+}
+
+void testAppTransferSlotMutex()
+{
+    TEST_CASE("Application - Single transfer slot mutual exclusion");
+    localsend::Application app;
+
+    ASSERT_FALSE(app.isTransferActive(), "initially transfer slot must be free");
+    ASSERT_TRUE(app.beginTransfer("transfer-A"), "beginTransfer transfer-A should succeed");
+    ASSERT_TRUE(app.isTransferActive(), "transfer slot must be active");
+    ASSERT_TRUE(app.activeTransferId() == "transfer-A", "active transfer id mismatch");
+
+    // Second transfer must be rejected (single slot)
+    ASSERT_FALSE(app.beginTransfer("transfer-B"), "concurrent transfer must be rejected");
+
+    // Release with wrong owner should NOT release slot
+    app.endTransfer("transfer-wrong");
+    ASSERT_TRUE(app.isTransferActive(), "wrong owner must not release slot");
+
+    // Release with matching owner
+    app.endTransfer("transfer-A");
+    ASSERT_FALSE(app.isTransferActive(), "transfer slot must be released");
+
+    // Now second transfer can acquire slot
+    ASSERT_TRUE(app.beginTransfer("transfer-B"), "beginTransfer transfer-B should now succeed");
+    app.endTransfer("transfer-B");
+    ASSERT_FALSE(app.isTransferActive(), "slot must be free");
+
+    TEST_PASS();
+}
+
+void testAppOccupiedPortStartupFailure()
+{
+    TEST_CASE("Application - Occupied port reports startup failure cleanly");
+    QTcpServer blocker;
+    ASSERT_TRUE(blocker.listen(QHostAddress::Any, 0), "blocker server listen failed");
+    quint16 blockedPort = blocker.serverPort();
+
+    localsend::Application app;
+    app.setPort(blockedPort);
+
+    QString err;
+    bool ok = app.start(&err);
+    ASSERT_FALSE(ok, "start() must fail when port is occupied");
+    ASSERT_TRUE(!err.isEmpty(), "error message must be provided");
+
+    blocker.close();
+    TEST_PASS();
+}
+
+void testAppLifecycleStartStop()
+{
+    TEST_CASE("Application - Clean lifecycle start/stop without socket leakage");
+    localsend::Application app;
+    app.setPort(0);
+
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start 1 failed");
+    ASSERT_TRUE(app.httpServer()->isListening(), "httpServer must be listening");
+
+    app.stop();
+    ASSERT_FALSE(app.httpServer()->isListening(), "httpServer must stop listening");
+
+    ASSERT_TRUE(app.start(&err), "app restart failed");
+    ASSERT_TRUE(app.httpServer()->isListening(), "httpServer must be listening again");
+
+    app.stop();
+    TEST_PASS();
+}
+
+// ==========================================
+// T04 UDP Multicast & Discovery Tests
+// ==========================================
+
+class TestPeerTracker : public QObject {
+    Q_OBJECT
+public:
+    QList<PeerDevice> updatedPeers;
+    QString lastError;
+
+    TestPeerTracker(QObject *parent = 0) : QObject(parent) {}
+
+public slots:
+    void onPeerUpdated(const PeerDevice &peer)
+    {
+        updatedPeers.append(peer);
+    }
+    void onDiscoveryError(const QString &err)
+    {
+        lastError = err;
+    }
+};
+
+class MockRegisterHandler : public QObject {
+    Q_OBJECT
+public:
+    DeviceInfo receivedReq;
+    bool registerReceived;
+    MockRegisterHandler(QObject *parent = 0)
+        : QObject(parent), registerReceived(false), m_conn(0) {}
+
+public slots:
+    void onConnection(HttpConnection *conn)
+    {
+        connect(conn, SIGNAL(headersReady(HttpRequestHead)), this, SLOT(onHeaders(HttpRequestHead)));
+        connect(conn, SIGNAL(bodyChunk(QByteArray)), this, SLOT(onBody(QByteArray)));
+        connect(conn, SIGNAL(requestFinished()), this, SLOT(onFinished()));
+        m_conn = conn;
+        m_body.clear();
+    }
+    void onHeaders(const HttpRequestHead &head)
+    {
+        m_head = head;
+        m_conn->allowBody();
+    }
+    void onBody(const QByteArray &chunk)
+    {
+        m_body.append(chunk);
+    }
+    void onFinished()
+    {
+        QString err;
+        if (ProtocolJson::decodeRegisterRequest(m_body, &receivedReq, &err)) {
+            registerReceived = true;
+            DeviceInfo resInfo;
+            resInfo.alias = "PC Mock Peer";
+            resInfo.version = "2.2";
+            resInfo.deviceModel = "Linux";
+            resInfo.deviceType = "desktop";
+            resInfo.fingerprint = "pc-mock-fp";
+            resInfo.download = false;
+            QByteArray resBody = ProtocolJson::encodeDeviceResponse(resInfo, &err);
+            m_conn->respond(200, "application/json", resBody);
+        }
+    }
+
+private:
+    HttpConnection *m_conn;
+    HttpRequestHead m_head;
+    QByteArray m_body;
+};
+
+class MockPeerReceiver : public QObject {
+    Q_OBJECT
+public:
+    int prepareStatusCode;
+    int uploadStatusCode;
+    bool holdUpload;
+    PrepareUploadRequest receivedPrepareReq;
+    QByteArray receivedUploadData;
+    HttpRequestHead uploadHead;
+    QString cancelReceivedSession;
+
+    MockPeerReceiver(QObject *parent = 0)
+        : QObject(parent)
+        , prepareStatusCode(200)
+        , uploadStatusCode(200)
+        , holdUpload(false)
+    {}
+
+public slots:
+    void onConnection(HttpConnection *conn)
+    {
+        connect(conn, SIGNAL(headersReady(HttpRequestHead)), this, SLOT(onHeaders(HttpRequestHead)));
+        connect(conn, SIGNAL(bodyChunk(QByteArray)), this, SLOT(onBody(QByteArray)));
+        connect(conn, SIGNAL(requestFinished()), this, SLOT(onFinished()));
+    }
+
+    void onHeaders(const HttpRequestHead &head)
+    {
+        HttpConnection *conn = qobject_cast<HttpConnection*>(sender());
+        if (!conn) return;
+
+        QString path = head.target.path();
+        if (path == "/api/localsend/v2/prepare-upload") {
+            conn->allowBody();
+        } else if (path == "/api/localsend/v2/upload") {
+            uploadHead = head;
+            if (uploadStatusCode != 200 && uploadStatusCode != 422) {
+                conn->respond(uploadStatusCode, "text/plain", "Upload Error");
+                return;
+            }
+            conn->allowBody();
+        } else if (path == "/api/localsend/v2/cancel") {
+            cancelReceivedSession = getUrlQueryItem(head.target, "sessionId");
+            conn->respond(200, "text/plain", "");
+        }
+    }
+
+    void onBody(const QByteArray &chunk)
+    {
+        HttpConnection *conn = qobject_cast<HttpConnection*>(sender());
+        if (!conn) return;
+
+        QString path = conn->requestHead().target.path();
+        if (path == "/api/localsend/v2/upload") {
+            receivedUploadData.append(chunk);
+        } else if (path == "/api/localsend/v2/prepare-upload") {
+            m_prepareBody.append(chunk);
+        }
+    }
+
+    void onFinished()
+    {
+        HttpConnection *conn = qobject_cast<HttpConnection*>(sender());
+        if (!conn) return;
+
+        QString path = conn->requestHead().target.path();
+        if (path == "/api/localsend/v2/prepare-upload") {
+            QString err;
+            ProtocolJson::decodePrepareRequest(m_prepareBody, &receivedPrepareReq, &err);
+            if (prepareStatusCode == 200) {
+                PrepareUploadResponse resp;
+                resp.sessionId = "mock-sess-1";
+                if (!receivedPrepareReq.files.isEmpty()) {
+                    QString fileId = receivedPrepareReq.files.keys().first();
+                    resp.fileTokens.insert(fileId, "mock-tok-1");
+                }
+                QByteArray resBody = ProtocolJson::encodePrepareResponse(resp, &err);
+                conn->respond(200, "application/json", resBody);
+            } else if (prepareStatusCode == 204) {
+                conn->respond(204, "text/plain", "");
+            } else {
+                conn->respond(prepareStatusCode, "text/plain", "Prepare Error");
+            }
+        } else if (path == "/api/localsend/v2/upload") {
+            if (!holdUpload) {
+                conn->respond(uploadStatusCode, "text/plain", "");
+            }
+        }
+    }
+
+private:
+    QByteArray m_prepareBody;
+};
+
+class TestSendTracker : public QObject {
+    Q_OBJECT
+public:
+    QStringList states;
+    qint64 lastProgressDone;
+    qint64 lastProgressTotal;
+    bool finished;
+    QString failedReason;
+    int failedCode;
+
+    TestSendTracker(QObject *parent = 0)
+        : QObject(parent), lastProgressDone(0), lastProgressTotal(0), finished(false), failedCode(0) {}
+
+public slots:
+    void onStateChanged(const QString &reqId, const QString &state) {
+        Q_UNUSED(reqId);
+        states.append(state);
+    }
+    void onProgress(const QString &reqId, qint64 done, qint64 total) {
+        Q_UNUSED(reqId);
+        if (done > lastProgressDone) {
+            lastProgressDone = done;
+        }
+        if (total > lastProgressTotal) {
+            lastProgressTotal = total;
+        }
+    }
+    void onFinished(const QString &reqId) {
+        Q_UNUSED(reqId);
+        finished = true;
+    }
+    void onFailed(const QString &reqId, const QString &reason) {
+        Q_UNUSED(reqId);
+        failedReason = reason;
+    }
+    void onFailedWithReason(const QString &reqId, const QString &reason, int code) {
+        Q_UNUSED(reqId);
+        Q_UNUSED(reason);
+        failedCode = code;
+    }
+};
+
+class AutoAcceptOfferHandler : public QObject {
+    Q_OBJECT
+public:
+    ReceiveServer *server;
+    bool offerReceived;
+    QString acceptedFileId;
+    QString receivedPath;
+
+    AutoAcceptOfferHandler(ReceiveServer *srv, QObject *parent = 0)
+        : QObject(parent), server(srv), offerReceived(false) {}
+
+public slots:
+    void onIncomingOffer(const QString &requestId, const PeerDevice &peer, const QList<FileMeta> &files)
+    {
+        Q_UNUSED(peer);
+        offerReceived = true;
+        if (!files.isEmpty() && server) {
+            acceptedFileId = files.first().id;
+            server->accept(requestId, acceptedFileId);
+        }
+    }
+    void onReceiveFinished(const QString &sessionId, const QString &savedPath)
+    {
+        Q_UNUSED(sessionId);
+        receivedPath = savedPath;
+    }
+};
+
+void testDiscoverySelfIgnored()
+{
+    TEST_CASE("Discovery - Self-announcements ignored without duplicate entry");
+    QNetworkAccessManager nam;
+    DiscoveryManager dm(&nam);
+
+    DeviceInfo localInfo;
+    localInfo.alias = "Local BB10";
+    localInfo.fingerprint = "fp-local-unique";
+    localInfo.port = 53317;
+
+    dm.start(localInfo);
+
+    TestPeerTracker tracker;
+    QObject::connect(&dm, SIGNAL(peerUpdated(PeerDevice)), &tracker, SLOT(onPeerUpdated(PeerDevice)));
+
+    QString err;
+    QByteArray selfAnn = ProtocolJson::encodeAnnouncement(localInfo, true, &err);
+
+    QUdpSocket sender;
+    sender.writeDatagram(selfAnn, QHostAddress::LocalHost, 53317);
+
+    QTime t;
+    t.start();
+    while (t.elapsed() < 300) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(tracker.updatedPeers.isEmpty(), "self-announcement must be ignored");
+    ASSERT_TRUE(dm.peers().isEmpty(), "peer list must be empty");
+
+    dm.stop();
+    TEST_PASS();
+}
+
+void testDiscoveryRepeatedAnnouncementsOneRow()
+{
+    TEST_CASE("Discovery - Repeated announcements update peer without duplicates");
+    QNetworkAccessManager nam;
+    DiscoveryManager dm(&nam);
+
+    DeviceInfo localInfo;
+    localInfo.fingerprint = "fp-local";
+    dm.start(localInfo);
+
+    DeviceInfo peerInfo;
+    peerInfo.alias = "Remote Peer";
+    peerInfo.fingerprint = "fp-remote-999";
+    peerInfo.port = 53317;
+    peerInfo.protocol = "http";
+    peerInfo.version = "2.2";
+
+    // Simulate 20 announcements with announce: false (so no HTTP register is fired)
+    QString err;
+    QByteArray ann = ProtocolJson::encodeAnnouncement(peerInfo, false, &err);
+
+    QUdpSocket sender;
+    for (int i = 0; i < 20; ++i) {
+        sender.writeDatagram(ann, QHostAddress::LocalHost, 53317);
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+
+    QTime t;
+    t.start();
+    while (dm.peers().isEmpty() && t.elapsed() < 500) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(dm.peers().size() == 1, "exactly one peer row must exist");
+    ASSERT_TRUE(dm.findPeer("fp-remote-999").info.alias == "Remote Peer", "peer alias mismatch");
+
+    dm.stop();
+    TEST_PASS();
+}
+
+void testDiscoveryMalformedAndOversizedUdpSafe()
+{
+    TEST_CASE("Discovery - Malformed and oversized UDP datagrams handled safely");
+    QNetworkAccessManager nam;
+    DiscoveryManager dm(&nam);
+
+    DeviceInfo localInfo;
+    localInfo.fingerprint = "fp-local";
+    dm.start(localInfo);
+
+    QUdpSocket sender;
+    sender.writeDatagram("not-valid-json-datagram", QHostAddress::LocalHost, 53317);
+
+    QByteArray bigData(70000, 'X');
+    sender.writeDatagram(bigData, QHostAddress::LocalHost, 53317);
+
+    QTime t;
+    t.start();
+    while (t.elapsed() < 300) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(dm.peers().isEmpty(), "malformed packets must not create peers");
+
+    dm.stop();
+    TEST_PASS();
+}
+
+void testDiscoveryManualRegisterHttp()
+{
+    TEST_CASE("Discovery - Manual HTTP register discovers peer and records observed IP/port");
+    HttpServer mockPeerServer;
+    ASSERT_TRUE(mockPeerServer.listen(QHostAddress::LocalHost, 0), "mock peer listen failed");
+    quint16 mockPort = mockPeerServer.serverPort();
+
+    MockRegisterHandler mockHandler;
+    QObject::connect(&mockPeerServer, SIGNAL(connectionOpened(HttpConnection*)),
+                     &mockHandler, SLOT(onConnection(HttpConnection*)));
+
+    QNetworkAccessManager nam;
+    DiscoveryManager dm(&nam);
+    DeviceInfo localInfo;
+    localInfo.alias = "Local BB10";
+    localInfo.fingerprint = "bb10-fp";
+    dm.start(localInfo);
+
+    TestPeerTracker tracker;
+    QObject::connect(&dm, SIGNAL(peerUpdated(PeerDevice)), &tracker, SLOT(onPeerUpdated(PeerDevice)));
+
+    dm.registerPeer(QHostAddress::LocalHost, mockPort);
+
+    QTime t;
+    t.start();
+    while (tracker.updatedPeers.isEmpty() && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(mockHandler.registerReceived, "mock peer must receive register request");
+    ASSERT_TRUE(mockHandler.receivedReq.alias == "Local BB10", "request alias mismatch");
+    ASSERT_TRUE(!tracker.updatedPeers.isEmpty(), "peerUpdated must be emitted on register response");
+
+    PeerDevice discovered = dm.findPeer("pc-mock-fp");
+    ASSERT_TRUE(discovered.info.alias == "PC Mock Peer", "discovered alias mismatch");
+    ASSERT_TRUE(discovered.info.port == mockPort, "discovered port must match target port");
+    ASSERT_TRUE(discovered.info.protocol == "http", "discovered protocol must match target protocol");
+
+    mockPeerServer.stop();
+    dm.stop();
+    TEST_PASS();
+}
+
+void testSendNonExistentFileFails()
+{
+    TEST_CASE("Sender - Non-existent local file fails with LocalFileNotFound");
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = 53317;
+    peer.info.protocol = "http";
+
+    TestSendTracker tracker;
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+    QString err;
+    bool ok = sm.sendFile(peer, "/tmp/definitely_not_existing_file_12345.bin", &err);
+    ASSERT_FALSE(ok, "sendFile must return false for non-existent file");
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_LocalFileNotFound, "failure reason must be LocalFileNotFound");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must remain free");
+    TEST_PASS();
+}
+
+void testSendHttpsPeerRejected()
+{
+    TEST_CASE("Sender - HTTPS peer rejected before sending plaintext");
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = 53317;
+    peer.info.protocol = "https"; // HTTPS peer
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "temporary file open failed");
+    tmpFile.write("test data");
+    tmpFile.flush();
+
+    QString err;
+    bool ok = sm.sendFile(peer, tmpFile.fileName(), &err);
+    ASSERT_FALSE(ok, "sendFile must reject HTTPS peer");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must remain free");
+    TEST_PASS();
+}
+
+void testSendSuccessfulUpload()
+{
+    TEST_CASE("Sender - Full upload flow: prepare 200, streaming upload, peer 200, completed");
+    HttpServer mockServer;
+    ASSERT_TRUE(mockServer.listen(QHostAddress::LocalHost, 0), "mock server listen failed");
+    quint16 port = mockServer.serverPort();
+
+    MockPeerReceiver mockPeer;
+    QObject::connect(&mockServer, SIGNAL(connectionOpened(HttpConnection*)),
+                     &mockPeer, SLOT(onConnection(HttpConnection*)));
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "temporary file open failed");
+    QByteArray payload(16384, 'K'); // 16 KiB
+    tmpFile.write(payload);
+    tmpFile.flush();
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = port;
+    peer.info.protocol = "http";
+
+    TestSendTracker tracker;
+    QObject::connect(&sm, SIGNAL(sendStateChanged(QString,QString)), &tracker, SLOT(onStateChanged(QString,QString)));
+    QObject::connect(&sm, SIGNAL(sendProgress(QString,qint64,qint64)), &tracker, SLOT(onProgress(QString,qint64,qint64)));
+    QObject::connect(&sm, SIGNAL(sendFinished(QString)), &tracker, SLOT(onFinished(QString)));
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+    QString err;
+    bool ok = sm.sendFile(peer, tmpFile.fileName(), &err);
+    ASSERT_TRUE(ok, "sendFile must succeed");
+
+    QTime t;
+    t.start();
+    while (!tracker.finished && tracker.failedReason.isEmpty() && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(tracker.finished, "sendFinished must be emitted");
+    ASSERT_TRUE(tracker.failedReason.isEmpty(), "send must not fail");
+    ASSERT_TRUE(sm.state() == SendManager::State_Completed, "state must be Completed");
+    ASSERT_TRUE(mockPeer.receivedUploadData == payload, "uploaded data must match file payload");
+    ASSERT_TRUE(tracker.lastProgressDone == 16384, "progress done must reach 16384");
+    ASSERT_TRUE(tracker.lastProgressTotal == 16384, "progress total must be 16384");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must be released after completion");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testSendPeerRejected403()
+{
+    TEST_CASE("Sender - Peer rejected prepare (403) aborts and reports PeerRejected");
+    HttpServer mockServer;
+    ASSERT_TRUE(mockServer.listen(QHostAddress::LocalHost, 0), "mock server listen failed");
+    quint16 port = mockServer.serverPort();
+
+    MockPeerReceiver mockPeer;
+    mockPeer.prepareStatusCode = 403; // Reject
+    QObject::connect(&mockServer, SIGNAL(connectionOpened(HttpConnection*)),
+                     &mockPeer, SLOT(onConnection(HttpConnection*)));
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "temporary file open failed");
+    tmpFile.write("payload");
+    tmpFile.flush();
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = port;
+    peer.info.protocol = "http";
+
+    TestSendTracker tracker;
+    QObject::connect(&sm, SIGNAL(sendFinished(QString)), &tracker, SLOT(onFinished(QString)));
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+    QObject::connect(&sm, SIGNAL(sendFailedWithReason(QString,QString,int)), &tracker, SLOT(onFailedWithReason(QString,QString,int)));
+
+    sm.sendFile(peer, tmpFile.fileName());
+
+    QTime t;
+    t.start();
+    while (tracker.failedReason.isEmpty() && !tracker.finished && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(!tracker.finished, "send must not finish successfully");
+    ASSERT_TRUE(!tracker.failedReason.isEmpty(), "sendFailed must be emitted");
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_PeerRejected, "failureReason must be PeerRejected");
+    ASSERT_TRUE(tracker.failedCode == SendManager::Failure_PeerRejected, "failedCode must match PeerRejected");
+    ASSERT_TRUE(sm.state() == SendManager::State_Failed, "state must be Failed");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must be released");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testSendPeerBusy409()
+{
+    TEST_CASE("Sender - Peer busy (409) aborts and reports PeerBusy");
+    HttpServer mockServer;
+    ASSERT_TRUE(mockServer.listen(QHostAddress::LocalHost, 0), "mock server listen failed");
+    quint16 port = mockServer.serverPort();
+
+    MockPeerReceiver mockPeer;
+    mockPeer.prepareStatusCode = 409; // Busy
+    QObject::connect(&mockServer, SIGNAL(connectionOpened(HttpConnection*)),
+                     &mockPeer, SLOT(onConnection(HttpConnection*)));
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "temporary file open failed");
+    tmpFile.write("payload");
+    tmpFile.flush();
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = port;
+    peer.info.protocol = "http";
+
+    TestSendTracker tracker;
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+    sm.sendFile(peer, tmpFile.fileName());
+
+    QTime t;
+    t.start();
+    while (tracker.failedReason.isEmpty() && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_PeerBusy, "failureReason must be PeerBusy");
+    ASSERT_TRUE(sm.state() == SendManager::State_Failed, "state must be Failed");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must be released");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testSendPeerChecksumMismatch422()
+{
+    TEST_CASE("Sender - Peer reports checksum mismatch (422) on upload");
+    HttpServer mockServer;
+    ASSERT_TRUE(mockServer.listen(QHostAddress::LocalHost, 0), "mock server listen failed");
+    quint16 port = mockServer.serverPort();
+
+    MockPeerReceiver mockPeer;
+    mockPeer.uploadStatusCode = 422; // Checksum mismatch
+    QObject::connect(&mockServer, SIGNAL(connectionOpened(HttpConnection*)),
+                     &mockPeer, SLOT(onConnection(HttpConnection*)));
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "temporary file open failed");
+    tmpFile.write("checksum_payload");
+    tmpFile.flush();
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = port;
+    peer.info.protocol = "http";
+
+    TestSendTracker tracker;
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+    sm.sendFile(peer, tmpFile.fileName());
+
+    QTime t;
+    t.start();
+    while (tracker.failedReason.isEmpty() && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_ChecksumMismatch, "failureReason must be ChecksumMismatch");
+    ASSERT_TRUE(sm.state() == SendManager::State_Failed, "state must be Failed");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must be released");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testSendPeerServerInternalError500()
+{
+    TEST_CASE("Sender - Peer internal server error (500) reports NetworkError and releases slot");
+    HttpServer mockServer;
+    ASSERT_TRUE(mockServer.listen(QHostAddress::LocalHost, 0), "mock server listen failed");
+    quint16 port = mockServer.serverPort();
+
+    MockPeerReceiver mockPeer;
+    mockPeer.uploadStatusCode = 500;
+    QObject::connect(&mockServer, SIGNAL(connectionOpened(HttpConnection*)),
+                     &mockPeer, SLOT(onConnection(HttpConnection*)));
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "temporary file open failed");
+    tmpFile.write("error_payload");
+    tmpFile.flush();
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = port;
+    peer.info.protocol = "http";
+
+    TestSendTracker tracker;
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+    sm.sendFile(peer, tmpFile.fileName());
+
+    QTime t;
+    t.start();
+    while (tracker.failedReason.isEmpty() && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_NetworkError, "failureReason must be NetworkError");
+    ASSERT_TRUE(sm.state() == SendManager::State_Failed, "state must be Failed");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must be released");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testSendLocalCancellation()
+{
+    TEST_CASE("Sender - Local cancellation stops IO, notifies peer, and frees slot");
+    HttpServer mockServer;
+    ASSERT_TRUE(mockServer.listen(QHostAddress::LocalHost, 0), "mock server listen failed");
+    quint16 port = mockServer.serverPort();
+
+    MockPeerReceiver mockPeer;
+    mockPeer.holdUpload = true; // Hold upload open
+    QObject::connect(&mockServer, SIGNAL(connectionOpened(HttpConnection*)),
+                     &mockPeer, SLOT(onConnection(HttpConnection*)));
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "temporary file open failed");
+    QByteArray bigData(32768, 'Z');
+    tmpFile.write(bigData);
+    tmpFile.flush();
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = port;
+    peer.info.protocol = "http";
+
+    sm.sendFile(peer, tmpFile.fileName());
+
+    // Wait until Uploading state
+    QTime t;
+    t.start();
+    while (sm.state() != SendManager::State_Uploading && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(sm.state() == SendManager::State_Uploading, "state must be Uploading before cancel");
+    QString activeSessionId = sm.activeSessionId();
+
+    // Cancel locally
+    sm.cancel();
+
+    ASSERT_TRUE(sm.state() == SendManager::State_Cancelled, "state must be Cancelled");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must be released");
+
+    // Pump events for remote cancel notification
+    t.start();
+    while (mockPeer.cancelReceivedSession.isEmpty() && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(mockPeer.cancelReceivedSession == activeSessionId, "remote peer must receive cancel with sessionId");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testEndToEndBidirectionalTransfer()
+{
+    TEST_CASE("End-to-End - LocalSend transfer between SendManager and ReceiveServer with Chinese name");
+
+    // 1. Setup Receiver
+    localsend::Application rxApp;
+    rxApp.setPort(0); // auto-assigned
+    rxApp.setReceiveDirectory("/tmp/localsend_rx_test");
+    QDir("/tmp/localsend_rx_test").removeRecursively();
+
+    QString rxErr;
+    ASSERT_TRUE(rxApp.start(&rxErr), "rxApp start failed");
+    quint16 rxPort = rxApp.httpServer()->serverPort();
+
+    AutoAcceptOfferHandler offerHandler(rxApp.receiveServer());
+    QObject::connect(rxApp.receiveServer(), SIGNAL(incomingOffer(QString,PeerDevice,QList<FileMeta>)),
+                     &offerHandler, SLOT(onIncomingOffer(QString,PeerDevice,QList<FileMeta>)));
+    QObject::connect(rxApp.receiveServer(), SIGNAL(receiveFinished(QString,QString)),
+                     &offerHandler, SLOT(onReceiveFinished(QString,QString)));
+
+    // 2. Setup Sender & create test file with Chinese name
+    QDir("/tmp/localsend_tx_test").mkpath(".");
+    QString txFilePath = "/tmp/localsend_tx_test/测试传输文件.bin";
+    QFile txFile(txFilePath);
+    ASSERT_TRUE(txFile.open(QIODevice::WriteOnly), "txFile open failed");
+    QByteArray testPayload(65536, 'E'); // 64 KiB test payload
+    txFile.write(testPayload);
+    txFile.close();
+
+    localsend::Application txApp;
+    QNetworkAccessManager nam;
+    SendManager sm(&txApp, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = rxPort;
+    peer.info.protocol = "http";
+
+    TestSendTracker tracker;
+    QObject::connect(&sm, SIGNAL(sendFinished(QString)), &tracker, SLOT(onFinished(QString)));
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+    // 3. Initiate Send
+    QString sendErr;
+    bool ok = sm.sendFile(peer, txFilePath, &sendErr);
+    ASSERT_TRUE(ok, "sendFile must succeed");
+
+    QTime t;
+    t.start();
+    while ((!tracker.finished || offerHandler.receivedPath.isEmpty()) && tracker.failedReason.isEmpty() && t.elapsed() < 5000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(tracker.finished, "sender must finish");
+    ASSERT_TRUE(tracker.failedReason.isEmpty(), "sender must not fail");
+    ASSERT_TRUE(!offerHandler.receivedPath.isEmpty(), "receiver must finish and report saved path");
+
+    // 4. Verify received file integrity
+    QFile rxFile(offerHandler.receivedPath);
+    ASSERT_TRUE(rxFile.exists(), "received file must exist on disk");
+    ASSERT_TRUE(rxFile.open(QIODevice::ReadOnly), "received file must be readable");
+    QByteArray rxPayload = rxFile.readAll();
+    ASSERT_TRUE(rxPayload.size() == testPayload.size(), "received file size must match original");
+    ASSERT_TRUE(rxPayload == testPayload, "received file content must match byte-for-byte");
+
+    // Check SHA-256 match
+    QString txSha = CryptoUtil::sha256File(txFilePath);
+    QString rxSha = CryptoUtil::sha256File(offerHandler.receivedPath);
+    ASSERT_TRUE(!txSha.isEmpty() && txSha == rxSha, "SHA-256 digests must match exactly");
+
+    // Verify both transfer slots released
+    ASSERT_TRUE(!rxApp.isTransferActive(), "receiver transfer slot must be released");
+    ASSERT_TRUE(!txApp.isTransferActive(), "sender transfer slot must be released");
+
+    rxApp.stop();
+    txFile.remove();
+    rxFile.remove();
+    QDir("/tmp/localsend_rx_test").removeRecursively();
+    QDir("/tmp/localsend_tx_test").removeRecursively();
+    TEST_PASS();
+}
+
+// ==========================================
+// R001 - R008 Review Issue Verification Tests
+// ==========================================
+
+class CallbackGuardReceiver : public QObject {
+    Q_OBJECT
+public:
+    enum ActionOnHeaders { Header_Allow, Header_Reject403 };
+    enum ActionOnChunk { Chunk_None, Chunk_Reject500 };
+
+    ActionOnHeaders headerAction;
+    ActionOnChunk chunkAction;
+    int headersCount;
+    int chunksCount;
+    int finishCount;
+    int disconnectCount;
+    qint64 receivedBytes;
+    HttpConnection *conn;
+
+    CallbackGuardReceiver(QObject *parent = 0)
+        : QObject(parent), headerAction(Header_Allow), chunkAction(Chunk_None)
+        , headersCount(0), chunksCount(0), finishCount(0), disconnectCount(0), receivedBytes(0), conn(0) {}
+
+public slots:
+    void onConnection(HttpConnection *c) {
+        conn = c;
+        connect(c, SIGNAL(headersReady(HttpRequestHead)), this, SLOT(onHeaders(HttpRequestHead)));
+        connect(c, SIGNAL(bodyChunk(QByteArray)), this, SLOT(onChunk(QByteArray)));
+        connect(c, SIGNAL(requestFinished()), this, SLOT(onFinished()));
+        connect(c, SIGNAL(disconnected()), this, SLOT(onDisconnected()));
+    }
+    void onHeaders(const HttpRequestHead &) {
+        headersCount++;
+        if (headerAction == Header_Reject403) {
+            conn->respond(403, "text/plain", "Forbidden");
+        } else if (headerAction == Header_Allow) {
+            conn->allowBody();
+        }
+    }
+    void onChunk(const QByteArray &chunk) {
+        chunksCount++;
+        receivedBytes += chunk.size();
+        if (chunkAction == Chunk_Reject500) {
+            conn->respond(500, "text/plain", "Server Error");
+        }
+    }
+    void onFinished() {
+        finishCount++;
+    }
+    void onDisconnected() {
+        disconnectCount++;
+    }
+};
+
+void testHttpBoundedReadsAndCallbackGuards()
+{
+    TEST_CASE("R001/R002 - Bounded reads, callback state changes, and single disconnection");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    // Case 1: Synchronous 403 in headersReady must not emit bodyChunk or requestFinished
+    {
+        CallbackGuardReceiver recv;
+        recv.headerAction = CallbackGuardReceiver::Header_Reject403;
+        QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)), &recv, SLOT(onConnection(HttpConnection*)));
+
+        QTcpSocket client;
+        client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+        ASSERT_TRUE(waitSocketConnected(&client), "client connect failed");
+        client.write("POST /test HTTP/1.1\r\nContent-Length: 10\r\n\r\n0123456789");
+        client.flush();
+
+        ASSERT_TRUE(waitSocketReadyRead(&client), "client wait response failed");
+        QByteArray resp = client.readAll();
+        ASSERT_TRUE(resp.contains("403 Forbidden"), "expected 403 response");
+        ASSERT_TRUE(recv.headersCount == 1, "headersReady must be emitted once");
+        ASSERT_TRUE(recv.chunksCount == 0, "bodyChunk must not be emitted after 403");
+        ASSERT_TRUE(recv.finishCount == 0, "requestFinished must not be emitted after 403");
+    }
+
+    // Case 2: Synchronous 500 in bodyChunk stops subsequent chunks and requestFinished
+    {
+        CallbackGuardReceiver recv;
+        recv.headerAction = CallbackGuardReceiver::Header_Allow;
+        recv.chunkAction = CallbackGuardReceiver::Chunk_Reject500;
+        QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)), &recv, SLOT(onConnection(HttpConnection*)));
+
+        QTcpSocket client;
+        client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+        ASSERT_TRUE(waitSocketConnected(&client), "client connect failed");
+        client.write("POST /test HTTP/1.1\r\nContent-Length: 20\r\n\r\n01234567890123456789");
+        client.flush();
+
+        ASSERT_TRUE(waitSocketReadyRead(&client), "client wait response failed");
+        QByteArray resp = client.readAll();
+        ASSERT_TRUE(resp.contains("500 Internal Server Error"), "expected 500 response");
+        ASSERT_TRUE(recv.finishCount == 0, "requestFinished must not be emitted after 500 abort");
+    }
+
+    // Case 3: abort() emits disconnected exactly once
+    {
+        CallbackGuardReceiver recv;
+        QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)), &recv, SLOT(onConnection(HttpConnection*)));
+
+        QTcpSocket client;
+        client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+        ASSERT_TRUE(waitSocketConnected(&client), "client connect failed");
+        client.write("POST /test HTTP/1.1\r\nContent-Length: 10\r\n\r\n");
+        client.flush();
+
+        QTime t;
+        t.start();
+        while (!recv.conn && t.elapsed() < 1000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+        ASSERT_TRUE(recv.conn != 0, "conn must exist");
+        recv.conn->abort();
+        recv.conn->abort(); // Second call must be idempotent
+        t.restart();
+        while (recv.disconnectCount == 0 && t.elapsed() < 1000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+        ASSERT_TRUE(recv.disconnectCount == 1, "disconnected must be emitted exactly once");
+    }
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testHttpSocketLargeBufferedDrain()
+{
+    TEST_CASE("R001 - Large 1 MiB request drains socket buffer completely without stalling");
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    CallbackGuardReceiver recv;
+    recv.headerAction = CallbackGuardReceiver::Header_Allow;
+    QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)), &recv, SLOT(onConnection(HttpConnection*)));
+
+    int totalBytes = 1048576; // 1 MiB
+    QByteArray bodyPayload(totalBytes, 'K');
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client), "client connect failed");
+
+    QByteArray head = "POST /large HTTP/1.1\r\nContent-Length: " + QByteArray::number(totalBytes) + "\r\n\r\n";
+    client.write(head);
+    client.write(bodyPayload);
+    client.flush();
+
+    QTime t;
+    t.start();
+    while (recv.finishCount == 0 && t.elapsed() < 5000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(recv.finishCount == 1, "requestFinished must be emitted for 1 MiB body");
+    ASSERT_TRUE(recv.receivedBytes == totalBytes, "all 1 MiB body bytes must be read");
+
+    server.stop();
+    TEST_PASS();
+}
+
+void testAppPortChangeRebindAndRollback()
+{
+    TEST_CASE("R003 - Advertised and listening port rebind, rollback, and busy check");
+    localsend::Application app;
+    app.setPort(53317);
+
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start failed");
+    ASSERT_TRUE(app.httpServer()->isListening(), "server must be listening");
+    ASSERT_TRUE(app.httpServer()->serverPort() == 53317, "serverPort must match configured port");
+    ASSERT_TRUE(app.localInfo().port == 53317, "localInfo port must match");
+
+    // 1. Successful port change while running
+    ASSERT_TRUE(app.setPort(53320, &err), "rebind to 53320 should succeed");
+    ASSERT_TRUE(app.httpServer()->isListening(), "server must be listening on new port");
+    ASSERT_TRUE(app.httpServer()->serverPort() == 53320, "serverPort must be 53320");
+    ASSERT_TRUE(app.localInfo().port == 53320, "advertised port must be 53320");
+
+    // 2. Occupied port failure with rollback
+    QTcpServer blocker;
+    ASSERT_TRUE(blocker.listen(QHostAddress::Any, 0), "blocker listen failed");
+    quint16 blockedPort = blocker.serverPort();
+
+    ASSERT_FALSE(app.setPort(blockedPort, &err), "setPort on occupied port must fail");
+    ASSERT_TRUE(app.httpServer()->isListening(), "server must rollback and still listen");
+    ASSERT_TRUE(app.httpServer()->serverPort() == 53320, "serverPort must rollback to 53320");
+    ASSERT_TRUE(app.localInfo().port == 53320, "advertised port must remain 53320");
+    blocker.close();
+
+    // 3. Port change rejected when transfer is active
+    ASSERT_TRUE(app.beginTransfer("active-session-1"), "beginTransfer should succeed");
+    ASSERT_FALSE(app.setPort(53325, &err), "setPort must fail while transfer is active");
+    ASSERT_TRUE(err.contains("transfer is active"), "error message must mention active transfer");
+    ASSERT_TRUE(app.httpServer()->serverPort() == 53320, "port must remain 53320");
+    app.endTransfer("active-session-1");
+
+    app.stop();
+    TEST_PASS();
+}
+
+void testAppUnwritableSettingsReportsError()
+{
+    TEST_CASE("R004 - Unwritable settings failure reporting and Chinese alias persistence");
+    // 1. Unwritable configuration storage reports error
+    {
+        QSettings unwritable("/proc/localsend_unwritable_test.ini", QSettings::IniFormat);
+        localsend::Application app(0, &unwritable);
+        QString err;
+        ASSERT_FALSE(app.start(&err), "app.start must fail with unwritable settings");
+        ASSERT_TRUE(err.contains("Configuration storage error"), "error must report storage failure");
+    }
+
+    // 2. Chinese alias persistence round-trip
+    {
+        QTemporaryFile tempIni;
+        ASSERT_TRUE(tempIni.open(), "open temp ini failed");
+        QString iniPath = tempIni.fileName();
+        tempIni.close();
+
+        QString originalFp;
+        {
+            QSettings s(iniPath, QSettings::IniFormat);
+            localsend::Application app(0, &s);
+            originalFp = app.localInfo().fingerprint;
+            app.setAlias(QString::fromUtf8("黑莓Passport测试机"));
+        }
+
+        {
+            QSettings s2(iniPath, QSettings::IniFormat);
+            localsend::Application app2(0, &s2);
+            ASSERT_TRUE(app2.localInfo().fingerprint == originalFp, "fingerprint must persist across processes");
+            ASSERT_TRUE(app2.localInfo().alias == QString::fromUtf8("黑莓Passport测试机"), "Chinese alias must persist intact");
+        }
+    }
+
+    TEST_PASS();
+}
+
+void testMockRegisterPythonCompatibility()
+{
+    TEST_CASE("R005 - Python mock register response compatibility with False");
+    QByteArray mockPythonResponse = "{\"alias\": \"Mock Peer\", \"version\": \"2.2\", \"deviceModel\": \"Python Test Peer\", \"deviceType\": \"desktop\", \"fingerprint\": \"mock-peer-fp\", \"download\": false}";
+    PeerDevice target;
+    target.address = QHostAddress::LocalHost;
+    PeerDevice parsed;
+    QString err;
+    ASSERT_TRUE(ProtocolJson::decodeRegisterResponse(mockPythonResponse, target, &parsed, &err), "must parse Python mock response");
+    ASSERT_TRUE(parsed.info.alias == "Mock Peer", "alias match");
+    ASSERT_TRUE(parsed.info.download == false, "download boolean False correctly parsed");
+    TEST_PASS();
+}
+
+void testReceiveUnwritableDirectoryFailsCleanly()
+{
+    TEST_CASE("R006 - Unwritable receive destination returns 500, frees slot, and recovers");
+    // Set destination to /proc which cannot be written to even by root
+    localsend::Application app;
+    app.setPort(0);
+    app.setReceiveDirectory("/proc");
+
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start failed");
+
+    FileMeta fm;
+    fm.id = "file-unwritable-1";
+    fm.fileName = "test.bin";
+    fm.size = 1024;
+    fm.fileType = "application/octet-stream";
+    QByteArray reqJson = ProtocolJson::encodePrepareRequest(app.localInfo(), fm, &err);
+
+    QTcpSocket client;
+    client.connectToHost(QHostAddress::LocalHost, app.httpServer()->serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client), "client connect failed");
+    QByteArray httpReq;
+    httpReq.append("POST /api/localsend/v2/prepare-upload HTTP/1.1\r\n");
+    httpReq.append("Content-Type: application/json\r\n");
+    httpReq.append("Content-Length: " + QByteArray::number(reqJson.size()) + "\r\n\r\n");
+    httpReq.append(reqJson);
+    client.write(httpReq);
+    client.flush();
+
+    QTime t;
+    t.start();
+    while (!app.isTransferActive() && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+    ASSERT_TRUE(app.isTransferActive(), "transfer slot occupied during pending offer");
+
+    QString activeReqId = app.activeTransferId();
+    app.receiveServer()->accept(activeReqId, "file-unwritable-1");
+
+    ASSERT_TRUE(waitSocketReadyRead(&client), "client wait response failed");
+    QByteArray resp = client.readAll();
+    ASSERT_TRUE(resp.contains("500 Internal Server Error"), "must respond with 500");
+    ASSERT_TRUE(resp.contains("Failed to create destination temporary file"), "error reason match");
+
+    ASSERT_FALSE(app.isTransferActive(), "transfer slot must be released after 500");
+
+    // Subsequent transfer to valid directory must succeed
+    QString validDir = "/tmp/localsend_writable_recovered";
+    QDir().mkpath(validDir);
+    app.setReceiveDirectory(validDir);
+
+    QTcpSocket client2;
+    client2.connectToHost(QHostAddress::LocalHost, app.httpServer()->serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client2), "client2 connect failed");
+    client2.write(httpReq);
+    client2.flush();
+
+    t.restart();
+    while (!app.isTransferActive() && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+    ASSERT_TRUE(app.isTransferActive(), "second transfer slot occupied");
+
+    QString activeReqId2 = app.activeTransferId();
+    app.receiveServer()->accept(activeReqId2, "file-unwritable-1");
+
+    ASSERT_TRUE(waitSocketReadyRead(&client2), "client2 wait response failed");
+    QByteArray resp2 = client2.readAll();
+    ASSERT_TRUE(resp2.contains("200 OK"), "second transfer to valid directory must succeed with 200");
+
+    app.receiveServer()->cancelLocal(activeReqId2);
+    app.stop();
+    QDir(validDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testTransferRecoveryAfterCancelAndFailWith10MiB()
+{
+    TEST_CASE("R007 - Transfer recovery: cancel/fail followed by successful 10 MiB bidirectional transfers");
+
+    QString rxDir = "/tmp/localsend_r007_rx";
+    QString txDir = "/tmp/localsend_r007_tx";
+    QDir().mkpath(rxDir);
+    QDir().mkpath(txDir);
+
+    localsend::Application rxApp;
+    rxApp.setPort(0);
+    rxApp.setReceiveDirectory(rxDir);
+    QString err;
+    ASSERT_TRUE(rxApp.start(&err), "rxApp start failed");
+
+    localsend::Application txApp;
+    txApp.setPort(0);
+    txApp.setReceiveDirectory(txDir);
+    ASSERT_TRUE(txApp.start(&err), "txApp start failed");
+
+    PeerDevice rxPeer;
+    rxPeer.info = rxApp.localInfo();
+    rxPeer.address = QHostAddress::LocalHost;
+    rxPeer.info.port = rxApp.httpServer()->serverPort();
+    rxPeer.info.protocol = "http";
+
+    // --- PHASE 1: Cancellation during transfer ---
+    {
+        QString phase1Path = txDir + "/cancel_test.bin";
+        QFile f(phase1Path);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly), "file open failed");
+        f.write(QByteArray(1024 * 1024, 'C'));
+        f.close();
+
+        AutoAcceptOfferHandler autoAccept(rxApp.receiveServer());
+        QObject::connect(rxApp.receiveServer(), SIGNAL(incomingOffer(QString,PeerDevice,QList<FileMeta>)),
+                         &autoAccept, SLOT(onIncomingOffer(QString,PeerDevice,QList<FileMeta>)));
+
+        TestSendTracker tracker;
+        QObject::connect(txApp.sendManager(), SIGNAL(sendStateChanged(QString,QString)), &tracker, SLOT(onStateChanged(QString,QString)));
+        QObject::connect(txApp.sendManager(), SIGNAL(sendProgress(QString,qint64,qint64)), &tracker, SLOT(onProgress(QString,qint64,qint64)));
+        QObject::connect(txApp.sendManager(), SIGNAL(sendFinished(QString)), &tracker, SLOT(onFinished(QString)));
+        QObject::connect(txApp.sendManager(), SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+        QString sendErr;
+        bool ok = txApp.sendManager()->sendFile(rxPeer, phase1Path, &sendErr);
+        ASSERT_TRUE(ok, "sendFile failed to start");
+
+        QTime t;
+        t.start();
+        while ((txApp.sendManager()->state() != SendManager::State_Uploading || tracker.lastProgressDone == 0) && t.elapsed() < 3000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+        ASSERT_TRUE(txApp.sendManager()->state() == SendManager::State_Uploading, "must reach Uploading state");
+        ASSERT_TRUE(tracker.lastProgressDone > 0, "initial body bytes must reach receiver before cancellation");
+
+        txApp.sendManager()->cancel();
+
+        t.restart();
+        while ((txApp.isTransferActive() || rxApp.isTransferActive()) && t.elapsed() < 3000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+
+        ASSERT_FALSE(txApp.isTransferActive(), "tx slot must be released after cancel");
+        ASSERT_FALSE(rxApp.isTransferActive(), "rx slot must be released after cancel");
+        ASSERT_TRUE(txApp.sendManager()->state() == SendManager::State_Cancelled, "must report Cancelled state");
+
+        QDir rDir(rxDir);
+        QStringList parts = rDir.entryList(QStringList() << "*.part" << ".*.part", QDir::Files | QDir::Hidden);
+        ASSERT_TRUE(parts.isEmpty(), "no .part files should remain after cancellation");
+        f.remove();
+    }
+
+    // --- PHASE 2: 10 MiB Transfer from txApp -> rxApp with SHA-256 validation ---
+    {
+        QString bigTxPath = txDir + "/10mb_tx_file.bin";
+        QFile f(bigTxPath);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly), "create 10mb file failed");
+        QByteArray chunk(65536, 'X');
+        for (int i = 0; i < 160; ++i) { // 160 * 64 KiB = 10,485,760 bytes (10 MiB)
+            f.write(chunk);
+        }
+        f.close();
+
+        QString expectedSha = CryptoUtil::sha256File(bigTxPath);
+
+        AutoAcceptOfferHandler autoAccept(rxApp.receiveServer());
+        QObject::connect(rxApp.receiveServer(), SIGNAL(incomingOffer(QString,PeerDevice,QList<FileMeta>)),
+                         &autoAccept, SLOT(onIncomingOffer(QString,PeerDevice,QList<FileMeta>)));
+        QObject::connect(rxApp.receiveServer(), SIGNAL(receiveFinished(QString,QString)),
+                         &autoAccept, SLOT(onReceiveFinished(QString,QString)));
+
+        TestSendTracker tracker;
+        QObject::connect(txApp.sendManager(), SIGNAL(sendStateChanged(QString,QString)), &tracker, SLOT(onStateChanged(QString,QString)));
+        QObject::connect(txApp.sendManager(), SIGNAL(sendFinished(QString)), &tracker, SLOT(onFinished(QString)));
+        QObject::connect(txApp.sendManager(), SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+        QString sendErr;
+        bool ok = txApp.sendManager()->sendFile(rxPeer, bigTxPath, &sendErr);
+        ASSERT_TRUE(ok, "sendFile for 10mb file failed");
+
+        QTime t;
+        t.start();
+        while (!tracker.finished && tracker.failedReason.isEmpty() && t.elapsed() < 15000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+
+        ASSERT_TRUE(tracker.finished, "10 MiB transfer must finish successfully");
+        ASSERT_FALSE(txApp.isTransferActive(), "tx slot released");
+        ASSERT_FALSE(rxApp.isTransferActive(), "rx slot released");
+
+        ASSERT_TRUE(!autoAccept.receivedPath.isEmpty(), "received file path must be captured");
+        QString receivedSha = CryptoUtil::sha256File(autoAccept.receivedPath);
+        ASSERT_TRUE(receivedSha == expectedSha, "10 MiB SHA-256 checksums must match exactly");
+
+        // Independent SHA-256 verification using QCryptographicHash
+        QFile checkF(bigTxPath);
+        ASSERT_TRUE(checkF.open(QIODevice::ReadOnly), "open bigTxPath failed");
+        QByteArray indepTxSha = QCryptographicHash::hash(checkF.readAll(), QCryptographicHash::Sha256).toHex();
+        checkF.close();
+
+        QFile checkRxF(autoAccept.receivedPath);
+        ASSERT_TRUE(checkRxF.open(QIODevice::ReadOnly), "open received file failed");
+        QByteArray indepRxSha = QCryptographicHash::hash(checkRxF.readAll(), QCryptographicHash::Sha256).toHex();
+        checkRxF.close();
+
+        ASSERT_TRUE(indepTxSha == indepRxSha, "independent SHA-256 calculation matches");
+        ASSERT_TRUE(expectedSha == QString::fromLatin1(indepTxSha), "CryptoUtil SHA-256 matches independent SHA-256");
+
+        f.remove();
+        QFile::remove(autoAccept.receivedPath);
+    }
+
+    // --- PHASE 3: 10 MiB Transfer in reverse direction (rxApp -> txApp) ---
+    {
+        PeerDevice txPeer;
+        txPeer.info = txApp.localInfo();
+        txPeer.address = QHostAddress::LocalHost;
+        txPeer.info.port = txApp.httpServer()->serverPort();
+        txPeer.info.protocol = "http";
+
+        QString reversePath = rxDir + "/10mb_reverse_file.bin";
+        QFile f(reversePath);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly), "create reverse 10mb file failed");
+        QByteArray chunk(65536, 'Y');
+        for (int i = 0; i < 160; ++i) {
+            f.write(chunk);
+        }
+        f.close();
+
+        QString expectedSha = CryptoUtil::sha256File(reversePath);
+
+        AutoAcceptOfferHandler autoAccept(txApp.receiveServer());
+        QObject::connect(txApp.receiveServer(), SIGNAL(incomingOffer(QString,PeerDevice,QList<FileMeta>)),
+                         &autoAccept, SLOT(onIncomingOffer(QString,PeerDevice,QList<FileMeta>)));
+        QObject::connect(txApp.receiveServer(), SIGNAL(receiveFinished(QString,QString)),
+                         &autoAccept, SLOT(onReceiveFinished(QString,QString)));
+
+        TestSendTracker tracker;
+        QObject::connect(rxApp.sendManager(), SIGNAL(sendStateChanged(QString,QString)), &tracker, SLOT(onStateChanged(QString,QString)));
+        QObject::connect(rxApp.sendManager(), SIGNAL(sendFinished(QString)), &tracker, SLOT(onFinished(QString)));
+        QObject::connect(rxApp.sendManager(), SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+        QString sendErr;
+        bool ok = rxApp.sendManager()->sendFile(txPeer, reversePath, &sendErr);
+        ASSERT_TRUE(ok, "reverse sendFile failed");
+
+        QTime t;
+        t.start();
+        while (!tracker.finished && tracker.failedReason.isEmpty() && t.elapsed() < 15000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        }
+
+        ASSERT_TRUE(tracker.finished, "reverse 10 MiB transfer must finish successfully");
+        ASSERT_FALSE(rxApp.isTransferActive(), "reverse tx slot released");
+        ASSERT_FALSE(txApp.isTransferActive(), "reverse rx slot released");
+
+        ASSERT_TRUE(!autoAccept.receivedPath.isEmpty(), "reverse received file path must be captured");
+        QString receivedSha = CryptoUtil::sha256File(autoAccept.receivedPath);
+        ASSERT_TRUE(receivedSha == expectedSha, "reverse 10 MiB SHA-256 checksums must match exactly");
+
+        // Independent reverse SHA-256 verification
+        QFile checkRevF(reversePath);
+        ASSERT_TRUE(checkRevF.open(QIODevice::ReadOnly), "open reversePath failed");
+        QByteArray indepRevTxSha = QCryptographicHash::hash(checkRevF.readAll(), QCryptographicHash::Sha256).toHex();
+        checkRevF.close();
+
+        QFile checkRevRxF(autoAccept.receivedPath);
+        ASSERT_TRUE(checkRevRxF.open(QIODevice::ReadOnly), "open reverse received file failed");
+        QByteArray indepRevRxSha = QCryptographicHash::hash(checkRevRxF.readAll(), QCryptographicHash::Sha256).toHex();
+        checkRevRxF.close();
+
+        ASSERT_TRUE(indepRevTxSha == indepRevRxSha, "reverse independent SHA-256 calculation matches");
+        ASSERT_TRUE(expectedSha == QString::fromLatin1(indepRevTxSha), "reverse CryptoUtil SHA-256 matches independent SHA-256");
+
+        f.remove();
+        QFile::remove(autoAccept.receivedPath);
+    }
+
+    rxApp.stop();
+    txApp.stop();
+    QDir("/tmp/localsend_r007_rx").removeRecursively();
+    QDir("/tmp/localsend_r007_tx").removeRecursively();
+    TEST_PASS();
+}
+
+void testAppSingleThreadAssertionContract()
+{
+    TEST_CASE("R008 - Single thread state management contract");
+    localsend::Application app;
+    ASSERT_TRUE(app.thread() == QThread::currentThread(), "Application affined with current thread");
+    ASSERT_TRUE(app.beginTransfer("req-thread-1"), "beginTransfer on owning thread succeeds");
+    ASSERT_TRUE(app.isTransferActive(), "transfer slot active");
+    app.endTransfer("req-thread-1");
+    ASSERT_FALSE(app.isTransferActive(), "transfer slot released");
+    TEST_PASS();
+}
+
+void testDiscoveryStopWithPendingRegistersSafe()
+{
+    TEST_CASE("R009 - Discovery stop safely aborts multiple pending registers without crash");
+    HttpServer mockHangServer;
+    ASSERT_TRUE(mockHangServer.listen(QHostAddress::LocalHost, 0), "mock server listen failed");
+    quint16 hangPort = mockHangServer.serverPort();
+
+    QNetworkAccessManager nam;
+    DiscoveryManager dm(&nam);
+    DeviceInfo info;
+    info.fingerprint = "self-fp-r009";
+    ASSERT_TRUE(dm.start(info), "discovery start failed");
+
+    // Queue multiple register requests to non-responding server
+    dm.registerPeer(QHostAddress::LocalHost, hangPort);
+
+    // Call stop() while requests are pending: must not crash with iterator invalidation segfault
+    dm.stop();
+    mockHangServer.stop();
+    TEST_PASS();
+}
+
+void testDiscoveryRegisterTimeout()
+{
+    TEST_CASE("R011 - Register request aborts within 3-second deadline");
+    HttpServer mockHangServer;
+    ASSERT_TRUE(mockHangServer.listen(QHostAddress::LocalHost, 0), "mock server listen failed");
+    quint16 hangPort = mockHangServer.serverPort();
+
+    QNetworkAccessManager nam;
+    DiscoveryManager dm(&nam);
+    DeviceInfo info;
+    info.fingerprint = "self-fp-r011";
+    ASSERT_TRUE(dm.start(info), "discovery start failed");
+
+    TestPeerTracker tracker;
+    QObject::connect(&dm, SIGNAL(discoveryError(QString)), &tracker, SLOT(onDiscoveryError(QString)));
+
+    dm.registerPeer(QHostAddress::LocalHost, hangPort);
+
+    QTime t;
+    t.start();
+    while (tracker.lastError.isEmpty() && t.elapsed() < 4500) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        usleep(5000);
+    }
+
+    ASSERT_TRUE(t.elapsed() >= 2800 && t.elapsed() <= 4500, "timeout must occur around 3000ms");
+    ASSERT_TRUE(!tracker.lastError.isEmpty(), "discoveryError must be emitted on timeout");
+
+    dm.stop();
+    mockHangServer.stop();
+    TEST_PASS();
+}
+
+int main(int argc, char **argv)
+{
+    QCoreApplication app(argc, argv);
+
+    std::cout << "=== Running Protocol Core Checks (T01 & T02 & T03 & T04) ===" << std::endl;
+
+    // T01 Protocol JSON tests
+    testAnnouncementValid();
+    testAnnouncementDeviceTypeFallback();
+    testAnnouncementVersionIncompatible();
+    testAnnouncementInvalidPort();
+    testRegisterResponseFieldPreservation();
+    testPrepareRequestValidSingleFile();
+    testPrepareRequestLargeSize64Bit();
+    testPrepareRequestRejectInvalid();
+    testOversizedJsonRejected();
+    testRoundTripEncodeDecode();
+
+    // T02 HTTP Server & Stream Parser tests
+    testHttpOneByteHeaderFragmentation();
+    testHttpHeadersAndBodyTogether();
+    testHttpContentLengthZero();
+    testHttpChunkedTransfer();
+    testHttpExpect100Continue();
+    testHttpClTeConflictRejected();
+    testHttpUnsupportedTransferEncodingRejected();
+    testHttpOversizedHeaderRejected();
+    testHttpConcurrentConnectionsNonBlocking();
+    testHttpConnectionLimit();
+
+    // T03 Application & Identity tests
+    testAppIdentityAndSettingsPersistence();
+    testAppTransferSlotMutex();
+    testAppOccupiedPortStartupFailure();
+    testAppLifecycleStartStop();
+
+    // T04 Discovery & UDP multicast tests
+    testDiscoverySelfIgnored();
+    testDiscoveryRepeatedAnnouncementsOneRow();
+    testDiscoveryMalformedAndOversizedUdpSafe();
+    testDiscoveryManualRegisterHttp();
+
+    // T04 (Sender Implementation) & End-to-End tests
+    testSendNonExistentFileFails();
+    testSendHttpsPeerRejected();
+    testSendSuccessfulUpload();
+    testSendPeerRejected403();
+    testSendPeerBusy409();
+    testSendPeerChecksumMismatch422();
+    testSendPeerServerInternalError500();
+    testSendLocalCancellation();
+    testEndToEndBidirectionalTransfer();
+
+    // R001 - R011 Review Issue Tests
+    testHttpBoundedReadsAndCallbackGuards();
+    testHttpSocketLargeBufferedDrain();
+    testAppPortChangeRebindAndRollback();
+    testAppUnwritableSettingsReportsError();
+    testMockRegisterPythonCompatibility();
+    testReceiveUnwritableDirectoryFailsCleanly();
+    testTransferRecoveryAfterCancelAndFailWith10MiB();
+    testAppSingleThreadAssertionContract();
+    testDiscoveryStopWithPendingRegistersSafe();
+    testDiscoveryRegisterTimeout();
+
+    std::cout << "================================================" << std::endl;
+    std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;
+
+    return (g_failCount == 0) ? 0 : 1;
+}
+
+#include "core-check.moc"

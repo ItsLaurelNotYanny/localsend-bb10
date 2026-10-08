@@ -1,0 +1,25 @@
+# Build directories and artifacts
+build/
+*.o
+*.obj
+*.so
+*.a
+*.bar
+Makefile
+Makefile.*
+moc_*
+qrc_*
+ui_*
+.qmake.cache
+.qmake.stash
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Test scratch
+/tmp/localsend-*
+tests/fixtures/
