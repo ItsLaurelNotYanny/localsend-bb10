@@ -17,7 +17,8 @@ SOURCES += \
     ../src/receive/ReceiveServer.cpp \
     ../src/send/SendManager.cpp \
     ../src/app/Application.cpp \
-    ../src/discovery/DiscoveryManager.cpp
+    ../src/discovery/DiscoveryManager.cpp \
+    ../src/ui/UiController.cpp
 
 HEADERS += \
     ../src/protocol/ProtocolTypes.h \
@@ -28,4 +29,5 @@ HEADERS += \
     ../src/receive/ReceiveServer.h \
     ../src/send/SendManager.h \
     ../src/app/Application.h \
-    ../src/discovery/DiscoveryManager.h
+    ../src/discovery/DiscoveryManager.h \
+    ../src/ui/UiController.h
