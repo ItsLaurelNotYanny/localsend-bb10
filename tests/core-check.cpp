@@ -7,6 +7,7 @@
 #include "send/SendManager.h"
 #include "app/Application.h"
 #include "discovery/DiscoveryManager.h"
+#include "ui/UiController.h"
 
 #include <QUdpSocket>
 #include <QTemporaryFile>
@@ -2322,6 +2323,153 @@ void testDiscoveryRegisterTimeout()
     TEST_PASS();
 }
 
+void testUiControllerDevicePropertiesAndAlias()
+{
+    TEST_CASE("UiController - Device properties, alias change, and error reporting");
+    localsend::Application app;
+    app.setPort(0);
+    localsend::UiController controller(&app);
+
+    ASSERT_TRUE(controller.deviceAlias() == app.localInfo().alias, "alias matches");
+    ASSERT_TRUE(controller.devicePort() == app.localInfo().port, "port matches");
+    ASSERT_TRUE(controller.receiveDirectory() == app.receiveDirectory(), "directory matches");
+
+    controller.setDeviceAlias("Passport Tester");
+    ASSERT_TRUE(controller.deviceAlias() == "Passport Tester", "alias updated");
+    ASSERT_TRUE(app.localInfo().alias == "Passport Tester", "core app alias updated");
+
+    controller.addManualPeer("invalid_ip", 53317);
+    ASSERT_TRUE(!controller.lastError().isEmpty(), "invalid IP reported in lastError");
+    controller.clearError();
+    ASSERT_TRUE(controller.lastError().isEmpty(), "clearError clears lastError");
+    TEST_PASS();
+}
+
+void testUiControllerFileSelection()
+{
+    TEST_CASE("UiController - File selection, size formatting, and clearing");
+    localsend::Application app;
+    localsend::UiController controller(&app);
+
+    ASSERT_FALSE(controller.hasSelectedFile(), "no file selected initially");
+    controller.setSelectedFilePath("/non_existent/path/12345.xyz");
+    ASSERT_FALSE(controller.hasSelectedFile(), "non-existent file rejected");
+    ASSERT_TRUE(!controller.lastError().isEmpty(), "file error reported");
+
+    controller.clearError();
+    QTemporaryFile tmp;
+    ASSERT_TRUE(tmp.open(), "open tmp file failed");
+    tmp.write(QByteArray(2048, 'F'));
+    tmp.flush();
+
+    controller.setSelectedFilePath(tmp.fileName());
+    ASSERT_TRUE(controller.hasSelectedFile(), "valid file accepted");
+    ASSERT_TRUE(controller.selectedFileName() == QFileInfo(tmp.fileName()).fileName(), "file name matches");
+    ASSERT_TRUE(controller.selectedFileSize() == "2.0 KB", "file size formatted");
+
+    controller.clearSelectedFile();
+    ASSERT_FALSE(controller.hasSelectedFile(), "file cleared");
+    ASSERT_TRUE(controller.selectedFileName().isEmpty(), "name cleared");
+    TEST_PASS();
+}
+
+void testUiControllerPeersModel()
+{
+    TEST_CASE("UiController - Peer list model exposure as QVariantList");
+    localsend::Application app;
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start failed");
+    localsend::UiController controller(&app);
+
+    DeviceInfo info;
+    info.alias = "Laptop Peer";
+    info.deviceModel = "ThinkPad";
+    info.deviceType = "desktop";
+    info.fingerprint = "fp-test-peer-123";
+    info.port = 53317;
+    info.protocol = "http";
+
+    app.discoveryManager()->handleIncomingRegister(info, QHostAddress("192.168.1.150"));
+
+    QVariantList list = controller.peers();
+    ASSERT_TRUE(list.size() == 1, "peer list has 1 item");
+
+    QVariantMap map = list.first().toMap();
+    ASSERT_TRUE(map["alias"].toString() == "Laptop Peer", "peer alias matches");
+    ASSERT_TRUE(map["deviceModel"].toString() == "ThinkPad", "peer model matches");
+    ASSERT_TRUE(map["address"].toString() == "192.168.1.150", "peer address matches");
+    ASSERT_TRUE(map["port"].toInt() == 53317, "peer port matches");
+    ASSERT_TRUE(map["isHttps"].toBool() == false, "peer is not https");
+
+    app.stop();
+    TEST_PASS();
+}
+
+void testUiControllerSendFlowAndRejection()
+{
+    TEST_CASE("UiController - Send rejection when missing file, https peer, or active transfer");
+    localsend::Application app;
+    localsend::UiController controller(&app);
+
+    // 1. Send without file
+    ASSERT_FALSE(controller.sendSelectedFile("any-fp"), "send without file returns false");
+    ASSERT_TRUE(controller.lastError().contains("No file selected"), "lastError reports missing file");
+
+    QTemporaryFile tmp;
+    ASSERT_TRUE(tmp.open(), "open tmp failed");
+    tmp.write("data");
+    tmp.flush();
+    controller.setSelectedFilePath(tmp.fileName());
+
+    // 2. Send to HTTPS peer rejected
+    DeviceInfo httpsInfo;
+    httpsInfo.alias = "Https Peer";
+    httpsInfo.fingerprint = "fp-https-peer";
+    httpsInfo.port = 53317;
+    httpsInfo.protocol = "https";
+    app.discoveryManager()->handleIncomingRegister(httpsInfo, QHostAddress("192.168.1.151"));
+
+    ASSERT_FALSE(controller.sendSelectedFile("fp-https-peer"), "send to https peer returns false");
+    ASSERT_TRUE(controller.lastError().contains("HTTPS"), "lastError reports https unsupported");
+
+    TEST_PASS();
+}
+
+void testUiControllerIncomingOfferAndAccept()
+{
+    TEST_CASE("UiController - Incoming offer prompt, accept, and cancel states");
+    localsend::Application app;
+    localsend::UiController controller(&app);
+
+    ASSERT_FALSE(controller.hasIncomingOffer(), "no incoming offer initially");
+
+    PeerDevice peer;
+    peer.info.alias = "Sender Phone";
+    peer.address = QHostAddress("192.168.1.200");
+
+    QList<FileMeta> files;
+    FileMeta fm;
+    fm.id = "file-id-abc";
+    fm.fileName = "vacation.png";
+    fm.size = 1048576; // 1 MB
+    files.append(fm);
+
+    // Simulate incoming offer signal from ReceiveServer
+    emit app.receiveServer()->incomingOffer("req-999", peer, files);
+
+    ASSERT_TRUE(controller.hasIncomingOffer(), "incoming offer detected");
+    ASSERT_TRUE(controller.incomingPeerAlias() == "Sender Phone", "incoming peer alias matches");
+    ASSERT_TRUE(controller.incomingFileName() == "vacation.png", "incoming file name matches");
+    ASSERT_TRUE(controller.incomingFileSize() == "1.0 MB", "incoming file size formatted");
+    ASSERT_TRUE(controller.incomingRequestId() == "req-999", "request id matches");
+    ASSERT_TRUE(controller.incomingFileId() == "file-id-abc", "file id matches");
+
+    controller.rejectIncoming("req-999");
+    ASSERT_FALSE(controller.hasIncomingOffer(), "incoming offer cleared after reject");
+
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -2386,6 +2534,13 @@ int main(int argc, char **argv)
     testAppSingleThreadAssertionContract();
     testDiscoveryStopWithPendingRegistersSafe();
     testDiscoveryRegisterTimeout();
+
+    // T09 Cascades UI & Controller Tests
+    testUiControllerDevicePropertiesAndAlias();
+    testUiControllerFileSelection();
+    testUiControllerPeersModel();
+    testUiControllerSendFlowAndRejection();
+    testUiControllerIncomingOfferAndAccept();
 
     std::cout << "================================================" << std::endl;
     std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;

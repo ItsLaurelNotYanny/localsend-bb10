@@ -337,6 +337,12 @@ Q_INVOKABLE void cancelTransfer();
 
 **Definition of done**: native Cascades without Qt5 QtQuick.Controls; everyday transfers work without test entry points/manual path edits; errors are understandable and saved files are locatable. If deferred, leave T09 incomplete and deliver P only, not U.
 
+**Implementation Status (Completed)**:
+- C++ ViewModel/Controller implemented in `src/ui/UiController.h` and `src/ui/UiController.cpp`. Exposes all required `Q_INVOKABLE` methods and `Q_PROPERTY` attributes.
+- Native Cascades QML UI implemented in `assets/main.qml` tailored for BlackBerry Passport 1:1 square display (1440x1440) using `TabbedPane` (Send & Radar, Transfers & Incoming Prompt, Settings & Storage).
+- Dual-mode `src/main.cpp` entry point: initializes `bb::cascades::Application` with `assets/main.qml` on BB10/QNX, and provides CLI/daemon fallback on desktop/test environments.
+- 5 unit/integration test suites added in `tests/core-check.cpp` (device properties, file selection validation & formatting, peer list model exposure, send flow rejection, incoming offer handling & accept/reject). Total test count increased to 52 (52/52 PASS).
+
 ### T10 — Interoperability Regression, Evidence, and agy Delivery
 
 **Input**: BB10 BAR/executable, recorded official PC release, LAN, test scripts, fixture files, and hashes.

@@ -5,6 +5,9 @@ build/
 *.so
 *.a
 *.bar
+*.moc
+core-check
+localsend-bb10
 Makefile
 Makefile.*
 moc_*

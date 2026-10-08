@@ -34,6 +34,7 @@ public:
 
 signals:
     void peerUpdated(const PeerDevice &peer);
+    void peerRemoved(const QString &fingerprint);
     void discoveryError(const QString &error);
 
 private slots:

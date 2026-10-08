@@ -15,7 +15,8 @@ HEADERS += \
     src/receive/ReceiveServer.h \
     src/send/SendManager.h \
     src/app/Application.h \
-    src/discovery/DiscoveryManager.h
+    src/discovery/DiscoveryManager.h \
+    src/ui/UiController.h
 
 SOURCES += \
     src/protocol/ProtocolJson.cpp \
@@ -25,7 +26,9 @@ SOURCES += \
     src/receive/ReceiveServer.cpp \
     src/send/SendManager.cpp \
     src/app/Application.cpp \
-    src/discovery/DiscoveryManager.cpp
+    src/discovery/DiscoveryManager.cpp \
+    src/ui/UiController.cpp \
+    src/main.cpp
 
 # BlackBerry 10 Cascades configuration
 contains(CONFIG, cascades10) | qnx {

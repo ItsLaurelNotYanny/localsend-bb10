@@ -337,6 +337,12 @@ Q_INVOKABLE void cancelTransfer();
 
 **完成标准**：原生 Cascades、无 Qt5 QtQuick.Controls，无测试入口/手改路径也能完成日常收发；错误能理解，完成能找到文件。暂缓时标 T09 未完成，交付名称只能是 P，不声称 U。
 
+**实现状态（已完成）**：
+- C++ ViewModel 与 UI 控制器实现于 `src/ui/UiController.h` 与 `src/ui/UiController.cpp`。暴露所有必需的 `Q_INVOKABLE` 方法与 `Q_PROPERTY` 属性。
+- 原生 Cascades QML 界面实现于 `assets/main.qml`，针对 BlackBerry Passport 1:1 正方形屏幕（1440x1440）设计，包含三大核心选项卡 `TabbedPane`（发送与雷达、传输活动与接收弹窗、设置与存储）。
+- 双模式 `src/main.cpp` 程序入口：在 BB10/QNX 环境下初始化 `bb::cascades::Application` 并加载 `assets/main.qml`；在宿主/测试桌面环境下提供命令行（CLI/Daemon）降级运行。
+- 在 `tests/core-check.cpp` 中新增 5 项单元与集成测试（设备属性校验、文件选择与格式化、对端列表模型暴露、发送保护与拒绝、传入请求处理与接受/拒绝）。测试用例扩充至 52 项（52/52 PASS）。
+
 ### T10 — 互通回归、复现实录与 agy 交付
 
 **输入**：BB10 BAR/executable、官方 PC LocalSend 已记录的版本、同一 LAN、测试脚本、测试文件与校验值。
