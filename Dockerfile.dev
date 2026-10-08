@@ -1,0 +1,12 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        qtbase5-dev \
+        libssl-dev \
+        ca-certificates \
+        python3 && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace

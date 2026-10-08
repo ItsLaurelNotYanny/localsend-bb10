@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<qnx xmlns="http://www.qnx.com/schemas/application/1.0">
+    <id>com.localsend.bb10</id>
+    <name>LocalSend</name>
+    <versionNumber>0.1.0</versionNumber>
+    <buildId>1</buildId>
+    <description>Unofficial native LocalSend client for BlackBerry 10</description>
+    <author>Community</author>
+
+    <initialWindow>
+        <systemChrome>none</systemChrome>
+        <transparent>false</transparent>
+        <autoOrients>true</autoOrients>
+    </initialWindow>
+
+    <asset path="assets">assets</asset>
+    <asset path="assets/icon.png">icon.png</asset>
+    <icon>
+        <image>icon.png</image>
+    </icon>
+
+    <entryPointType>Qnx/Cascades</entryPointType>
+    <cascades>
+        <entryPoint>app</entryPoint>
+    </cascades>
+
+    <permission system="true">run_native</permission>
+    <permission>access_internet</permission>
+    <permission>access_shared</permission>
+
+    <env var="LD_LIBRARY_PATH" value="app/native/lib:/usr/lib/qt4/lib"/>
+</qnx>
