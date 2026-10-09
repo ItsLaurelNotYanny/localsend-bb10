@@ -123,9 +123,14 @@ TabbedPane {
                         bottomPadding: 8.0
 
                         property int peerCount: app.peerCount
+                        property int peersRevision: app.peersRevision
                         property variant activeCards: []
 
                         onPeerCountChanged: {
+                            renderPeers();
+                        }
+
+                        onPeersRevisionChanged: {
                             renderPeers();
                         }
 
@@ -161,19 +166,70 @@ TabbedPane {
                         }
 
                         onCreationCompleted: {
-                            try {
-                                if (app && app.peersChanged) {
-                                    app.peersChanged.connect(renderPeers);
-                                }
-                            } catch (e) {
-                            }
                             renderPeers();
                         }
 
                         attachedObjects: [
                             ComponentDefinition {
                                 id: peerCardDef
-                                source: "asset:///PeerCard.qml"
+                                Container {
+                                    id: cardRoot
+                                    property string peerFingerprint: ""
+                                    property string peerAlias: ""
+                                    property string peerModel: ""
+                                    property string peerAddress: ""
+                                    property bool isHttps: false
+
+                                    topPadding: 16.0
+                                    bottomPadding: 16.0
+                                    leftPadding: 16.0
+                                    rightPadding: 16.0
+                                    bottomMargin: 12.0
+                                    background: Color.create("#F7FAFC")
+
+                                    Container {
+                                        layout: StackLayout {
+                                            orientation: LayoutOrientation.LeftToRight
+                                        }
+
+                                        // Left: Device details
+                                        Container {
+                                            layoutProperties: StackLayoutProperties {
+                                                spaceQuota: 3.0
+                                            }
+
+                                            Label {
+                                                text: cardRoot.peerAlias
+                                                textStyle.base: SystemDefaults.TextStyles.TitleText
+                                                textStyle.color: Color.create("#2D3748")
+                                            }
+                                            Label {
+                                                text: cardRoot.peerModel + " • " + cardRoot.peerAddress
+                                                textStyle.base: SystemDefaults.TextStyles.SmallText
+                                                textStyle.color: Color.create("#718096")
+                                            }
+                                            Label {
+                                                visible: cardRoot.isHttps
+                                                text: "HTTPS not supported in MVP"
+                                                textStyle.base: SystemDefaults.TextStyles.SmallText
+                                                textStyle.color: Color.create("#E53E3E")
+                                            }
+                                        }
+
+                                        // Right: Send button
+                                        Button {
+                                            text: "Send"
+                                            enabled: app.hasSelectedFile && !app.transferActive && !cardRoot.isHttps
+                                            layoutProperties: StackLayoutProperties {
+                                                spaceQuota: 1.0
+                                            }
+                                            verticalAlignment: VerticalAlignment.Center
+                                            onClicked: {
+                                                app.sendSelectedFile(cardRoot.peerFingerprint);
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         ]
                     }

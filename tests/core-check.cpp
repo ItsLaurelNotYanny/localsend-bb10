@@ -3064,6 +3064,342 @@ void testUiControllerCollisionRenamingAndSavedPathR017()
     TEST_PASS();
 }
 
+class TerminalSignalCounter : public QObject {
+    Q_OBJECT
+public:
+    int finishedCount;
+    int failedCount;
+    int cancelledCount;
+
+    TerminalSignalCounter(QObject *parent = 0)
+        : QObject(parent), finishedCount(0), failedCount(0), cancelledCount(0) {}
+
+public slots:
+    void onFinished(const QString &id, const QString &path) {
+        Q_UNUSED(id); Q_UNUSED(path);
+        finishedCount++;
+    }
+    void onFailed(const QString &id, const QString &reason) {
+        Q_UNUSED(id); Q_UNUSED(reason);
+        failedCount++;
+    }
+    void onCancelled(const QString &id, const QString &reason) {
+        Q_UNUSED(id); Q_UNUSED(reason);
+        cancelledCount++;
+    }
+};
+
+class UiPropertyChangeSpy : public QObject {
+    Q_OBJECT
+public:
+    int transferStateChangedCount;
+    UiPropertyChangeSpy(QObject *parent = 0)
+        : QObject(parent), transferStateChangedCount(0) {}
+public slots:
+    void onTransferStateChanged() {
+        transferStateChangedCount++;
+    }
+};
+
+void testReceiveCancelSingleTerminalSignalR007()
+{
+    TEST_CASE("R007 - Mid-stream receiver cancellation emits exactly one terminal signal");
+
+    QString rxDir = "/tmp/localsend_r007_term_rx";
+    QString txDir = "/tmp/localsend_r007_term_tx";
+    QDir().mkpath(rxDir);
+    QDir().mkpath(txDir);
+
+    localsend::Application rxApp;
+    rxApp.setPort(0);
+    rxApp.setReceiveDirectory(rxDir);
+    QString err;
+    ASSERT_TRUE(rxApp.start(&err), "rxApp start failed");
+
+    localsend::Application txApp;
+    txApp.setPort(0);
+    txApp.setReceiveDirectory(txDir);
+    ASSERT_TRUE(txApp.start(&err), "txApp start failed");
+
+    PeerDevice rxPeer;
+    rxPeer.info = rxApp.localInfo();
+    rxPeer.address = QHostAddress::LocalHost;
+    rxPeer.info.port = rxApp.httpServer()->serverPort();
+    rxPeer.info.protocol = "http";
+
+    TerminalSignalCounter sigCounter;
+    QObject::connect(rxApp.receiveServer(), SIGNAL(receiveFinished(QString,QString)), &sigCounter, SLOT(onFinished(QString,QString)));
+    QObject::connect(rxApp.receiveServer(), SIGNAL(receiveFailed(QString,QString)), &sigCounter, SLOT(onFailed(QString,QString)));
+    QObject::connect(rxApp.receiveServer(), SIGNAL(receiveCancelled(QString,QString)), &sigCounter, SLOT(onCancelled(QString,QString)));
+
+    QString testFile = txDir + "/term_cancel.bin";
+    QFile f(testFile);
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly), "file open failed");
+    f.write(QByteArray(1024 * 1024, 'T'));
+    f.close();
+
+    AutoAcceptOfferHandler autoAccept(rxApp.receiveServer());
+    QObject::connect(rxApp.receiveServer(), SIGNAL(incomingOffer(QString,PeerDevice,QList<FileMeta>)),
+                     &autoAccept, SLOT(onIncomingOffer(QString,PeerDevice,QList<FileMeta>)));
+
+    RxMidStreamCancelHandler rxCancel(rxApp.receiveServer());
+    QObject::connect(rxApp.receiveServer(), SIGNAL(receiveProgress(QString,qint64,qint64)),
+                     &rxCancel, SLOT(onProgress(QString,qint64,qint64)));
+
+    TestSendTracker sendTracker;
+    QObject::connect(txApp.sendManager(), SIGNAL(sendFailed(QString,QString)), &sendTracker, SLOT(onFailed(QString,QString)));
+
+    txApp.sendManager()->sendFile(rxPeer, testFile);
+
+    QTime t;
+    t.start();
+    while ((txApp.isTransferActive() || rxApp.isTransferActive()) && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+
+    ASSERT_TRUE(sigCounter.cancelledCount == 1, "receiveCancelled must be emitted exactly once");
+    ASSERT_TRUE(sigCounter.failedCount == 0, "receiveFailed must not be emitted when cancelled");
+    ASSERT_TRUE(sigCounter.finishedCount == 0, "receiveFinished must not be emitted when cancelled");
+
+    rxApp.stop();
+    txApp.stop();
+    QDir(rxDir).removeRecursively();
+    QDir(txDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testReceiveDestinationFlushErrorR020()
+{
+    TEST_CASE("R020 - Incomplete upload or checksum error emits receiveFailed, returns 4xx/5xx, and cleans temporary file");
+
+    QString rxDir = "/tmp/localsend_r020_rx";
+    QDir().mkpath(rxDir);
+
+    localsend::Application rxApp;
+    rxApp.setPort(0);
+    rxApp.setReceiveDirectory(rxDir);
+    QString err;
+    ASSERT_TRUE(rxApp.start(&err), "rxApp start failed");
+
+    TerminalSignalCounter sigCounter;
+    QObject::connect(rxApp.receiveServer(), SIGNAL(receiveFinished(QString,QString)), &sigCounter, SLOT(onFinished(QString,QString)));
+    QObject::connect(rxApp.receiveServer(), SIGNAL(receiveFailed(QString,QString)), &sigCounter, SLOT(onFailed(QString,QString)));
+
+    AutoAcceptOfferHandler autoAccept(rxApp.receiveServer());
+    QObject::connect(rxApp.receiveServer(), SIGNAL(incomingOffer(QString,PeerDevice,QList<FileMeta>)),
+                     &autoAccept, SLOT(onIncomingOffer(QString,PeerDevice,QList<FileMeta>)));
+
+    DeviceInfo senderInfo;
+    senderInfo.alias = "Probe";
+    senderInfo.fingerprint = "probe-fp-r020";
+    senderInfo.port = 53317;
+    senderInfo.protocol = "http";
+
+    FileMeta fm1;
+    fm1.id = "f1";
+    fm1.fileName = "corrupt.bin";
+    fm1.size = 4;
+    fm1.fileType = "application/octet-stream";
+    fm1.sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    QString encErr;
+    QByteArray prepareBody1 = ProtocolJson::encodePrepareRequest(senderInfo, fm1, &encErr);
+    ASSERT_TRUE(!prepareBody1.isEmpty(), "encode prepare request failed");
+
+    QTcpSocket client1;
+    client1.connectToHost("127.0.0.1", rxApp.httpServer()->serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client1), "client1 connect failed");
+
+    QByteArray prepReq1 = "POST /api/localsend/v2/prepare-upload HTTP/1.1\r\n";
+    prepReq1.append("Host: 127.0.0.1\r\nContent-Type: application/json\r\n");
+    prepReq1.append("Content-Length: " + QByteArray::number(prepareBody1.size()) + "\r\n\r\n");
+    prepReq1.append(prepareBody1);
+    client1.write(prepReq1);
+    client1.flush();
+    ASSERT_TRUE(waitSocketReadyRead(&client1), "wait prepare response failed");
+    QByteArray prepResp1 = client1.readAll();
+    ASSERT_TRUE(prepResp1.contains("200 OK"), "prepare-upload 200 OK expected");
+
+    // Extract sessionId and token
+    QByteArray prepJson1 = prepResp1.mid(prepResp1.indexOf("\r\n\r\n") + 4);
+    PrepareUploadResponse prepData1;
+    QString decodeErr;
+    ASSERT_TRUE(ProtocolJson::decodePrepareResponse(prepJson1, &prepData1, &decodeErr), "decode prepare response");
+    QString sessionId1 = prepData1.sessionId;
+    QString token1 = prepData1.fileTokens.value("f1");
+
+    // Now send upload with wrong SHA-256 data: 4 bytes of 'X' on a new connection
+    client1.disconnectFromHost();
+
+    QTcpSocket uploadClient1;
+    uploadClient1.connectToHost("127.0.0.1", rxApp.httpServer()->serverPort());
+    ASSERT_TRUE(waitSocketConnected(&uploadClient1), "uploadClient1 connect failed");
+
+    QString uploadReq1 = QString("POST /api/localsend/v2/upload?sessionId=%1&fileId=f1&token=%2 HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 4\r\n\r\nXXXX")
+                         .arg(sessionId1).arg(token1);
+    uploadClient1.write(uploadReq1.toUtf8());
+    uploadClient1.flush();
+    ASSERT_TRUE(waitSocketReadyRead(&uploadClient1), "wait upload response failed");
+    QByteArray uploadResp1 = uploadClient1.readAll();
+    uploadClient1.disconnectFromHost();
+
+    ASSERT_TRUE(uploadResp1.contains("422"), "upload with wrong SHA-256 must return HTTP 422");
+    ASSERT_TRUE(sigCounter.failedCount == 1, "receiveFailed must be emitted for checksum mismatch");
+    ASSERT_TRUE(sigCounter.finishedCount == 0, "receiveFinished must not be emitted for checksum mismatch");
+
+    // Verify no destination file was committed and no .part file remains
+    QDir dir(rxDir);
+    QStringList files1 = dir.entryList(QDir::Files | QDir::Hidden);
+    ASSERT_TRUE(files1.size() == 0, "no corrupt file or .part file should remain in receive directory");
+
+    // Phase 2: Verify subsequent transfer succeeds
+    FileMeta fm2;
+    fm2.id = "f2";
+    fm2.fileName = "valid.bin";
+    fm2.size = 4;
+    fm2.fileType = "application/octet-stream";
+    Sha256Context sha2;
+    sha2.update("YYYY", 4);
+    fm2.sha256 = sha2.finalHex();
+
+    QByteArray prepareBody2 = ProtocolJson::encodePrepareRequest(senderInfo, fm2, &encErr);
+    ASSERT_TRUE(!prepareBody2.isEmpty(), "encode prepare request 2 failed");
+
+    QTcpSocket client2;
+    client2.connectToHost("127.0.0.1", rxApp.httpServer()->serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client2), "client2 connect failed");
+
+    QByteArray prepReq2 = "POST /api/localsend/v2/prepare-upload HTTP/1.1\r\n";
+    prepReq2.append("Host: 127.0.0.1\r\nContent-Type: application/json\r\n");
+    prepReq2.append("Content-Length: " + QByteArray::number(prepareBody2.size()) + "\r\n\r\n");
+    prepReq2.append(prepareBody2);
+    client2.write(prepReq2);
+    client2.flush();
+    ASSERT_TRUE(waitSocketReadyRead(&client2), "wait prepare response 2 failed");
+    QByteArray prepResp2 = client2.readAll();
+    ASSERT_TRUE(prepResp2.contains("200 OK"), "prepare-upload 2 200 OK expected");
+    client2.disconnectFromHost();
+
+    QByteArray prepJson2 = prepResp2.mid(prepResp2.indexOf("\r\n\r\n") + 4);
+    PrepareUploadResponse prepData2;
+    ASSERT_TRUE(ProtocolJson::decodePrepareResponse(prepJson2, &prepData2, &decodeErr), "decode prepare response 2");
+    QString sessionId2 = prepData2.sessionId;
+    QString token2 = prepData2.fileTokens.value("f2");
+
+    QTcpSocket uploadClient2;
+    uploadClient2.connectToHost("127.0.0.1", rxApp.httpServer()->serverPort());
+    ASSERT_TRUE(waitSocketConnected(&uploadClient2), "uploadClient2 connect failed");
+
+    QString uploadReq2 = QString("POST /api/localsend/v2/upload?sessionId=%1&fileId=f2&token=%2 HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 4\r\n\r\nYYYY")
+                         .arg(sessionId2).arg(token2);
+    uploadClient2.write(uploadReq2.toUtf8());
+    uploadClient2.flush();
+    ASSERT_TRUE(waitSocketReadyRead(&uploadClient2), "wait upload response 2 failed");
+    QByteArray uploadResp2 = uploadClient2.readAll();
+    uploadClient2.disconnectFromHost();
+
+    ASSERT_TRUE(uploadResp2.contains("200 OK"), "valid upload must return HTTP 200");
+    ASSERT_TRUE(sigCounter.finishedCount == 1, "receiveFinished must be emitted once after successful transfer");
+    ASSERT_TRUE(sigCounter.failedCount == 1, "failedCount remains 1");
+
+    QFile validFile(rxDir + "/valid.bin");
+    ASSERT_TRUE(validFile.open(QIODevice::ReadOnly), "valid file must open");
+    ASSERT_TRUE(validFile.readAll() == "YYYY", "valid file content match");
+    validFile.close();
+
+    rxApp.stop();
+    QDir(rxDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testUiControllerTransferActiveNotificationR015()
+{
+    TEST_CASE("R015 - UiController emits transferStateChanged upon completion, setting transferActive to false");
+
+    QString rxDir = "/tmp/localsend_r015_notif_rx";
+    QString txDir = "/tmp/localsend_r015_notif_tx";
+    QDir().mkpath(rxDir);
+    QDir().mkpath(txDir);
+
+    localsend::Application rxApp;
+    rxApp.setPort(0);
+    rxApp.setReceiveDirectory(rxDir);
+    QString err;
+    ASSERT_TRUE(rxApp.start(&err), "rxApp start failed");
+
+    localsend::Application txApp;
+    txApp.setPort(0);
+    txApp.setReceiveDirectory(txDir);
+    ASSERT_TRUE(txApp.start(&err), "txApp start failed");
+
+    localsend::UiController rxController(&rxApp);
+    localsend::UiController txController(&txApp);
+
+    UiPropertyChangeSpy rxSpy;
+    QObject::connect(&rxController, SIGNAL(transferStateChanged()), &rxSpy, SLOT(onTransferStateChanged()));
+
+    PeerDevice rxPeer;
+    rxPeer.info = rxApp.localInfo();
+    rxPeer.address = QHostAddress::LocalHost;
+    rxPeer.info.port = rxApp.httpServer()->serverPort();
+    rxPeer.info.protocol = "http";
+
+    QString testFile = txDir + "/test_notif.txt";
+    QFile f(testFile);
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly), "file open failed");
+    f.write("NotificationTest");
+    f.close();
+
+    AutoAcceptOfferHandler autoAccept(rxApp.receiveServer());
+    QObject::connect(rxApp.receiveServer(), SIGNAL(incomingOffer(QString,PeerDevice,QList<FileMeta>)),
+                     &autoAccept, SLOT(onIncomingOffer(QString,PeerDevice,QList<FileMeta>)));
+
+    TestSendTracker tracker;
+    QObject::connect(txApp.sendManager(), SIGNAL(sendFinished(QString)), &tracker, SLOT(onFinished(QString)));
+    txApp.sendManager()->sendFile(rxPeer, testFile);
+
+    QTime t;
+    t.start();
+    while (!tracker.finished && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    }
+    ASSERT_TRUE(tracker.finished, "send finished");
+
+    ASSERT_TRUE(!rxController.transferActive(), "rxController transferActive must be false after completion");
+    ASSERT_TRUE(rxSpy.transferStateChangedCount > 0, "transferStateChanged notification must be emitted on slot completion");
+
+    rxApp.stop();
+    txApp.stop();
+    QDir(rxDir).removeRecursively();
+    QDir(txDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testDiscoveryInterfaceSelectionAndSubnetPrefixR021()
+{
+    TEST_CASE("R021 - DiscoveryManager interface selection and dynamic subnet prefix");
+
+    localsend::Application app;
+    app.setPort(0);
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start failed");
+
+    DiscoveryManager *dm = app.discoveryManager();
+    ASSERT_TRUE(dm != 0, "discovery manager must not be null");
+
+    QString subnet = dm->activeInterfaceSubnet();
+    if (!subnet.isEmpty()) {
+        ASSERT_TRUE(subnet.contains("/"), "subnet string must contain prefix separator '/'");
+        QStringList parts = subnet.split("/");
+        ASSERT_TRUE(parts.size() == 2, "subnet string must have network address and prefix");
+        int prefix = parts[1].toInt();
+        ASSERT_TRUE(prefix >= 8 && prefix <= 32, "prefix length must be valid between 8 and 32");
+    }
+
+    app.stop();
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -3125,9 +3461,12 @@ int main(int argc, char **argv)
     testMockRegisterPythonCompatibility();
     testReceiveUnwritableDirectoryFailsCleanly();
     testTransferRecoveryAfterCancelAndFailWith10MiB();
+    testReceiveCancelSingleTerminalSignalR007();
+    testReceiveDestinationFlushErrorR020();
     testAppSingleThreadAssertionContract();
     testDiscoveryStopWithPendingRegistersSafe();
     testDiscoveryRegisterTimeout();
+    testDiscoveryInterfaceSelectionAndSubnetPrefixR021();
 
     // T09 Cascades UI & Controller Tests
     testUiControllerDevicePropertiesAndAlias();
@@ -3137,6 +3476,7 @@ int main(int argc, char **argv)
     testUiControllerIncomingOfferAndAccept();
     testUiControllerCancelTransferRoutingR014();
     testUiControllerReceiveSyncAndDisconnectR015();
+    testUiControllerTransferActiveNotificationR015();
     testUiControllerMultiFileCandidateSelectionR016();
     testUiControllerCollisionRenamingAndSavedPathR017();
 

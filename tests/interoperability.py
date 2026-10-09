@@ -317,34 +317,81 @@ class MockPeerHandler(BaseHTTPRequestHandler):
                 return
 
             meta = sess["meta"].get(file_id, {})
-            filename = meta.get("fileName", f"upload_{file_id}.bin")
+            raw_filename = meta.get("fileName", f"upload_{file_id}.bin")
             expected_size = meta.get("size", 0)
+            expected_sha = meta.get("sha256", "").strip().lower()
+
+            # Security: Sanitize filename and prevent path traversal
+            safe_basename = os.path.basename(raw_filename.replace("\\", "/"))
+            if not safe_basename or safe_basename in (".", ".."):
+                safe_basename = f"upload_{file_id}.bin"
 
             os.makedirs(self.storage_dir, exist_ok=True)
-            save_path = os.path.join(self.storage_dir, filename)
+            storage_real = os.path.realpath(self.storage_dir)
+            save_path = os.path.realpath(os.path.join(storage_real, safe_basename))
 
-            # Receive binary body with streaming write
+            # Path escape containment check
+            if not save_path.startswith(storage_real + os.sep) and save_path != storage_real:
+                self.send_response(400)
+                self.send_header("Content-Length", "0")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                return
+
+            part_path = save_path + f".{os.getpid()}_{time.time()}.part"
             bytes_received = 0
             hasher = hashlib.sha256()
             start_t = time.time()
+            write_failed = False
 
-            with open(save_path, "wb") as f:
-                remaining = content_len
-                while remaining > 0:
-                    read_size = min(65536, remaining)
-                    chunk = self.rfile.read(read_size)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    hasher.update(chunk)
-                    bytes_received += len(chunk)
-                    remaining -= len(chunk)
+            try:
+                with open(part_path, "wb") as f:
+                    remaining = content_len
+                    while remaining > 0:
+                        read_size = min(65536, remaining)
+                        chunk = self.rfile.read(read_size)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        hasher.update(chunk)
+                        bytes_received += len(chunk)
+                        remaining -= len(chunk)
+                    f.flush()
+            except Exception:
+                write_failed = True
+
+            if write_failed or bytes_received != expected_size:
+                if os.path.exists(part_path):
+                    try:
+                        os.remove(part_path)
+                    except Exception:
+                        pass
+                self.send_response(400)
+                self.send_header("Content-Length", "0")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                return
+
+            calculated_sha = hasher.hexdigest().lower()
+            if expected_sha and calculated_sha != expected_sha:
+                if os.path.exists(part_path):
+                    try:
+                        os.remove(part_path)
+                    except Exception:
+                        pass
+                self.send_response(422)
+                self.send_header("Content-Length", "0")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                return
+
+            # Atomic commit
+            os.replace(part_path, save_path)
 
             elapsed = max(0.001, time.time() - start_t)
             speed_mbps = (bytes_received / (1024 * 1024)) / elapsed
-            calculated_sha = hasher.hexdigest()
 
-            print(f"  [MockPeer] Upload complete: '{filename}' ({bytes_received} bytes) in {elapsed:.2f}s ({speed_mbps:.2f} MB/s)")
+            print(f"  [MockPeer] Upload complete: '{safe_basename}' ({bytes_received} bytes) in {elapsed:.2f}s ({speed_mbps:.2f} MB/s)")
             print(f"             SHA-256: {calculated_sha}")
             print(f"             Saved to: {save_path}")
 

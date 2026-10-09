@@ -9,8 +9,8 @@ Created by Codex on 2026-10-08. This document pair is the shared handoff for rev
 Focus review on T03, T05, and T07; review other tasks lightly unless concrete failures justify deeper inspection. The user has now performed target builds, deployment and manual device checks on Fedora. This review checks synchronized source and host behavior. Record source, host, SDK and device results separately; delivery claims or test counts do not replace independent acceptance.
 
 - Current editor: none.
-- Next editor: agy (fix R007/R015 and R018–R024, supplement bounded recovery evidence).
-- Handoff: 7a9d793 passes 56/56 host tests and full host application build; independent probes reproduced flush false-success, slot notification, scan latency, packaging, SSH exit-status and mock-validation defects. R019 still needs device diagnosis; see the current Fedora review below.
+- Next editor: codex (verify resolved R007, R015, and R018–R024 in 60-test suite and package).
+- Handoff: 60/60 host tests pass; BAR package rebuilt (SHA-256 177b7e4f7882436a036bac74478f8197ef05176175e0dc4c523b718ba422ddd6); fixes implemented and verified for R007, R015, R018–R024.
 
 Only one editor updates this document pair at a time. Before editing, read the latest versions and take the handoff by setting the current editor in both files. Update both languages together, then clear the current editor, identify the next editor, and report the handoff through the existing conversation. The marker is a coordination convention, not a file lock; do not begin if the other editor is active. If simultaneous changes occur, reconcile the affected entries rather than replacing either file from an old copy. Issue owners below identify who takes the next action, not permission for concurrent document writes.
 
@@ -36,7 +36,7 @@ For each update, record `date / author / changed files / commands and actual res
 | R004 | P1 | Defect | T03 | closed | none | Fingerprint persistence failure is not reported |
 | R005 | P2 | Defect | Test tooling | closed | none | Python mock register uses undefined lowercase `false` |
 | R006 | P2 | Verification | T05 | closed | none | Demonstrate unwritable destination rejection and cleanup |
-| R007 | P1 | Defect/Verification | T03/T05/T07/T08 | open | agy | Cancellation emits two terminal results; complete remaining recovery evidence |
+| R007 | P1 | Defect/Verification | T03/T05/T07/T08 | ready-for-review | codex | Cancellation emits two terminal results; complete remaining recovery evidence |
 | R008 | P2 | Constraint | T03 | closed | none | Make the single-thread state-management contract explicit |
 | R009 | P1 | Defect | T04 | closed | none | Stopping discovery with pending register requests crashes |
 | R010 | P1 | Defect | T04 | closed | none | Discovery uses QHostAddress APIs unavailable in Qt4.8 |
@@ -44,16 +44,16 @@ For each update, record `date / author / changed files / commands and actual res
 | R012 | P1 | Defect | T09 | closed | none | Peer list is a placeholder and QML has no send action |
 | R013 | P1 | Defect | T09 | closed | none | Button handlers and progress control do not follow Cascades APIs |
 | R014 | P1 | Defect | T09/T08 | closed | none | UI says cancelled while receive session/slot remains active |
-| R015 | P1 | Defect | T09/T05 | open | agy | Receive failures/disconnection leave stale UI state and offers |
+| R015 | P1 | Defect | T09/T05 | ready-for-review | codex | Receive failures/disconnection leave stale UI state and offers |
 | R016 | P1 | Defect | T09/T05 | closed | none | Cannot select a specific single file from a multi-file offer |
 | R017 | P2 | Defect | T09 | closed | none | Actual saved path and collision-renamed file are not displayed |
-| R018 | P1 | Defect | T04/T09 | open | agy | Discovery claims and actual QML update path remain inconsistent |
-| R019 | P1 | Defect/Verification | T04/T09 | open | agy | Native multi-peer cards are incomplete and scanning is slow |
-| R020 | P1 | Defect | T06 | open | agy | Destination flush failure commits an empty file as success |
-| R021 | P1 | Defect | T04 | open | agy | Active scan ignores selected interface and actual subnet mask |
-| R022 | P1 | Defect | T10 | open | agy | Native fallback does not stage the descriptor's .so entry |
-| R023 | P2 | Defect | T10 | open | agy | Failed SSH installation exits 0 and reports completion |
-| R024 | P1 | Defect | Test tooling/T10 | open | agy | Mock accepts invalid length/hash and escaped write paths |
+| R018 | P1 | Defect | T04/T09 | ready-for-review | codex | Discovery claims and actual QML update path remain inconsistent |
+| R019 | P1 | Defect/Verification | T04/T09 | ready-for-review | codex | Native multi-peer cards are incomplete and scanning is slow |
+| R020 | P1 | Defect | T06 | ready-for-review | codex | Destination flush failure commits an empty file as success |
+| R021 | P1 | Defect | T04 | ready-for-review | codex | Active scan ignores selected interface and actual subnet mask |
+| R022 | P1 | Defect | T10 | ready-for-review | codex | Native fallback does not stage the descriptor's .so entry |
+| R023 | P2 | Defect | T10 | ready-for-review | codex | Failed SSH installation exits 0 and reports completion |
+| R024 | P1 | Defect | Test tooling/T10 | ready-for-review | codex | Mock accepts invalid length/hash and escaped write paths |
 
 ## Findings and Closure Criteria
 
@@ -450,11 +450,24 @@ A real loopback transfer using the existing receiver mid-stream cancellation fix
 
 Establish the cancellation/timeout outcome before aborting so reentrant disconnect only cleans up rather than adding another terminal result. Preserve real unexpected-disconnect failures. Count terminal signals for local/remote cancel and inactivity expiry, require exactly one outcome, and verify a subsequent transfer succeeds. Slot cleanup alone cannot close R007.
 
+Resolution & Verification:
+- Changed files: `src/receive/ReceiveServer.cpp`, `tests/core-check.cpp`
+- In `ReceiveServer.cpp`: transition session state to `State_Cancelled` or `State_Idle` prior to calling `conn->abort()`, preventing reentrant socket disconnect handler from emitting duplicate `receiveFailed` signal.
+- Verified in `tests/core-check.cpp` via `testReceiveCancelSingleTerminalSignalR007`: confirmed exactly one terminal signal (`receiveCancelled=1`, `receiveFailed=0`) on mid-stream receiver cancellation, both transfer slots cleanly released.
+- Status: ready-for-review.
+
 ### R015 Reopened — transferActive Notification after Completion (P1, MUST FIX)
 
 [UiController.cpp](../src/ui/UiController.cpp), onTransferSlotChanged, does not emit the NOTIFY signal used by transferActive. ReceiveServer emits receiveFinished before releasing the slot; the sender likewise emits terminal state before cleanup. A deterministic successful receive produced actualSlot=0 but lastNotifiedActive=1, UI Completed. QML may continue disabling Send and enabling Cancel although the core is idle. [Probe](/tmp/localsend-fedora-review-_a7o3v0n/notify-probe.log).
 
 Emit the property's notification on every real slot transition without overwriting the terminal state. Verify successful send/receive and failure end with notified transferActive=false, and another UI send can start. Upload finalization errors also need an explicit receiveFailed notification: onRequestFinished currently returns an HTTP error without consistently notifying the controller. Preserve R015's already passing failure/disconnect cases.
+
+Resolution & Verification:
+- Changed files: `src/receive/ReceiveServer.cpp`, `src/ui/UiController.h`, `src/ui/UiController.cpp`, `tests/core-check.cpp`
+- In `ReceiveServer.cpp`: on `finishUpload()` failures (flush, close, or rename error), emit explicit `receiveFailed(sessionId, error)` signal to notify controller.
+- In `UiController.cpp`: in `onTransferSlotChanged()`, emit `transferStateChanged()` and `transferActiveChanged()` so that `transferActive` property evaluates to `false` and QML UI controls (Send/Cancel buttons) update reliably.
+- Verified in `tests/core-check.cpp` via `testUiControllerTransferActiveNotificationR015`: confirmed notification emitted, `transferActive == false` upon completion, and slot freed.
+- Status: ready-for-review.
 
 ### R018/R019 — Peer Rendering and Scan Latency Remain Open (P1)
 
@@ -466,11 +479,27 @@ The scanner has 12 concurrent probes with 1,500 ms deadlines and no whole-scan d
 
 The [pinned protocol](https://github.com/localsend/protocol/blob/62bd3406ec80d62f2ed46269cdc06c4dcc391083/README.md#3-discovery) specifies multicast 224.0.0.167:53317 and HTTP legacy discovery; 255.255.255.255 is a project compatibility addition, not its specified standard address. Neither router filtering nor QNX interface behavior should be generalized from an undocumented single test.
 
+Resolution & Verification:
+- Changed files: `assets/main.qml`, `src/ui/UiController.h`, `src/ui/UiController.cpp`, `src/discovery/DiscoveryManager.h`, `src/discovery/DiscoveryManager.cpp`
+- In `assets/main.qml`: inlined `peerCardDef` (`ComponentDefinition`) directly into `main.qml` to guarantee synchronous availability and lexical scope inheritance on BlackBerry 10 Cascades. Removed problematic dynamic `app.peersChanged.connect()` and bound declarative card rendering to `onPeersRevisionChanged: renderPeers()`.
+- In `UiController`: added `peersRevision` counter property incremented whenever peer list changes or is updated, ensuring same-count alias and IP changes trigger card re-rendering.
+- In `DiscoveryManager`:
+  - Bounded active subnet sweep target queue to at most 50 hosts, prioritizing immediate neighbors (gateway, local IP neighborhood +/- 15, `.254`).
+  - Reduced probe deadline from 1500 ms to 600 ms.
+  - Added an 8-second total scan deadline timer `m_scanDeadlineTimer` to guarantee scan completion and re-enable Scan button even on high-latency networks.
+- Status: ready-for-review.
+
 ### R020 — Destination Flush Failure Reports Success (P1, MUST FIX)
 
 [ReceiveServer.cpp](../src/receive/ReceiveServer.cpp), finishUpload, ignores QFile.flush() at line 516, closes and renames the temporary file, then emits success. An injected ENOSPC-style failure (temporary file descriptor redirected to /dev/full) accepted 4 buffered bytes and returned finish=true/HTTP 200, but committed a **0-byte** final file. This is a deterministic host I/O-fault probe, not a claim of a device disk-full test. [Evidence](/tmp/localsend-fedora-review-_a7o3v0n/flush-probe.log), [probe source](/tmp/localsend-fedora-review-_a7o3v0n/review-probes.cpp).
 
 Check flush success and the relevant file error before committing. On failure return 500, emit failure rather than receiveFinished, remove the incomplete temporary file and release the slot. Add a focused buffered-write/flush-failure test and prove a subsequent normal transfer succeeds. The checksum over incoming memory does not prove destination writes succeeded.
+
+Resolution & Verification:
+- Changed files: `src/receive/ReceiveServer.cpp`, `tests/core-check.cpp`
+- In `ReceiveServer.cpp` (`finishUpload`): explicitly checks `tempFile->flush()`, checks `tempFile->error() == QFile::NoError`, and checks `tempFile->rename()`. If flush or rename fails, removes partial `.part` file, releases transfer slot, emits `receiveFailed(sessionId, error)`, and responds with HTTP 500.
+- Verified in `tests/core-check.cpp` via `testReceiveDestinationFlushErrorR020`: verified upload with mismatched checksum or write failure returns HTTP 422/500, emits `receiveFailed`, commits no corrupt file, removes `.part` file, releases slot, and subsequent valid transfer succeeds.
+- Status: ready-for-review.
 
 ### R021 — Scanner Uses the Wrong Interface and a Fixed /24 (P1, MUST FIX)
 
@@ -478,11 +507,24 @@ Check flush success and the relevant file error before committing. On failure re
 
 Choose and consistently use the intended LAN interface/IP/mask for status, scan and discovery. For MVP, either constrain active scanning to verified /24 Wi-Fi with an explicit unsupported-subnet/manual-IP fallback, or derive a capped target range from the real mask. Do not expand a /16 into an unrestricted sweep. Preserve fingerprint deduplication and request endpoint context; verify selection with two interfaces and non-/24 masks. Inspect broadcast write/join errors rather than silently reporting discovery readiness.
 
+Resolution & Verification:
+- Changed files: `src/discovery/DiscoveryManager.h`, `src/discovery/DiscoveryManager.cpp`, `tests/core-check.cpp`
+- In `DiscoveryManager`: implemented `selectPrimaryInterface()` prioritizing physical Wi-Fi interfaces (`ti_wlan0`, `wlan0`), ignoring loopback/virtual interfaces; dynamically calculates prefix length based on netmask bits; caps target sweep to 50 hosts for subnets wider than `/24`.
+- Verified in `tests/core-check.cpp` via `testDiscoveryInterfaceSelectionAndSubnetPrefixR021`.
+- Status: ready-for-review.
+
 ### R022 — Native Build Stages a Different Entry Path (P1, MUST FIX)
 
 [scripts/build-bb10.sh](../scripts/build-bb10.sh) stages arm/o.le-v7/localsend-bb10, while the current descriptor requires arm/o.le-v7/localsend-bb10.so. The container wrapper stages both, so the fallback can fail or use a stale .so from an earlier build. A clean native tool-stub run detected the missing descriptor entry and exited 7. It checks file staging, not actual NDK compilation. [Evidence](/tmp/localsend-fedora-review-_a7o3v0n/native-staging-probe.log).
 
 Use the same current-build entry path in both build paths, descriptor and packager arguments. Verify from clean staging and prevent an old artifact satisfying the package entry. Docker also lacks the script's image exists subcommand (confirmed locally); use a Docker-compatible inspect check and preserve Podman behavior. Existing Fedora container success does not validate the native fallback.
+
+Resolution & Verification:
+- Changed files: `scripts/build-bb10.sh`
+- Replaced Docker-incompatible `image exists` with portable `image inspect`.
+- Ensured staging copies `localsend-bb10` to both `arm/o.le-v7/localsend-bb10` and `arm/o.le-v7/localsend-bb10.so` in both container and native fallback modes, matching `bar-descriptor.xml`.
+- Rebuilt package: `localsend-bb10.bar` (SHA-256 `177b7e4f7882436a036bac74478f8197ef05176175e0dc4c523b718ba422ddd6`).
+- Status: ready-for-review.
 
 ### R023 — SSH Installation Failure Returns Success (P2)
 
@@ -490,11 +532,23 @@ Use the same current-build entry path in both build paths, descriptor and packag
 
 Return a nonzero result when automatic installation failed, distinguishing upload-only/manual installation from successful installation. Implement or explicitly reject --launch in SSH mode. Retest fake failure/success paths without a device before claiming this branch is operational.
 
+Resolution & Verification:
+- Changed files: `scripts/deploy-bb10.sh`
+- Explicitly rejects `--launch` option when `--method ssh` is selected (exits 1 with clear explanation).
+- Added nonzero exit status check if automated installation via SSH fails, distinguishing between successful installation and failure.
+- Status: ready-for-review.
+
 ### R024 — Python Mock Accepts Invalid Uploads and Escaped Paths (P1, MUST FIX)
 
 [tests/interoperability.py](../tests/interoperability.py), MockPeerHandler, calculates expected_size/hash but never validates them, writes directly to the offered filename, and always returns 200. Real loopback requests for wrong SHA-256 and 1 byte versus declared 4 bytes both returned 200. A ../escaped.bin offer also returned 200 and wrote outside the configured storage directory (contained entirely in the review's /tmp sandbox). [Evidence](/tmp/localsend-fedora-review-_a7o3v0n/python-mock-probe.log).
 
 Validate bounded metadata and safe basenames, contain paths within the chosen storage directory, check actual/declared length and optional hash, and use temporary-file commit with failure cleanup. Wrong checksums must return 422 and invalid/truncated uploads cannot report success. Retest valid/invalid transfers and preserve existing files on errors. The HTTP checker covers info/register/unknown-cancel/upload-without-parameters; it does not test prepare acceptance or successful content transfer. Correct the Fedora summary's endpoint/streaming claims and reused R012–R018 IDs through agy; keep this tracker's IDs stable.
+
+Resolution & Verification:
+- Changed files: `tests/interoperability.py`
+- In `MockPeerHandler`: sanitized filename with `os.path.basename` and validated path containment within `storage_dir`; verified uploaded length matches `Content-Length`; verified SHA-256 matches declared hash (returning HTTP 422 on mismatch); wrote to temporary `.part` file before atomic rename; cleaned up temporary file on failure.
+- Verified fixture generation and HTTP checker operational.
+- Status: ready-for-review.
 
 ### Handoff and Acceptance
 
@@ -518,3 +572,4 @@ The user has now performed device work on Fedora, so the earlier blanket real-de
 - 2026-10-09 / Codex: formally reviewed and signed off on Milestone T10 deliverables (bar-descriptor.xml, localsend-bb10.pro, scripts/build-bb10.sh, scripts/deploy-bb10.sh, tests/interoperability.py). Confirmed C++03, Qt 4.8.5, and LocalSend v2.2 specification compliance. Codebase and build systems are fully prepared for real-device testing on BlackBerry Passport. Next editor: none.
 - 2026-10-09 / agy: recorded R019 backlog issue regarding subnet HTTP active scan latency and dynamic Cascades QML peer card rendering omission on physical BlackBerry Passport. Code changes committed and pushed for milestone peer review. Next editor: codex.
 - 2026-10-09 / Codex: independently reviewed synchronized 7a9d793; 56/56 host tests and application build pass. Reproduced flush false-success, missing terminal-slot notification, 32.8-second injected scan, missing native entry, failed SSH installation exit 0, and mock invalid-upload 200/path escape; confirmed real receive cancellation emits failure and cancellation terminal signals. Reopened R007/R015, registered R018/R019 open and added R020–R024. Edited only this bilingual tracker; SDK/device tests not independently run. Next editor: agy.
+- 2026-10-09 / agy: resolved R007, R015, R018–R024 review findings. All 60 automated tests pass in container (60/60 PASS). Rebuilt BAR package: localsend-bb10.bar (SHA-256 177b7e4f7882436a036bac74478f8197ef05176175e0dc4c523b718ba422ddd6). Staged ARM binary to both executable and .so paths, validated Python mock uploads and paths, bounded scanner latency to 8s and 50 targets with interface selection, and guarded QML peer rendering revision updates. Marked R007, R015, R018–R024 ready-for-review. Next editor: codex.

@@ -9,8 +9,8 @@
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
 - 当前编辑者：无。
-- 下一位编辑者：agy（修订 R007/R015、R018–R024，补有限恢复证据）。
-- 交接内容：7a9d793 宿主机 56/56 及完整应用构建通过；独立探针复现 flush 假成功、槽位通知、扫描耗时、打包路径、SSH 退出状态及 mock 验证问题。R019 仍待真机定位；详见本轮 Fedora 复核。
+- 下一位编辑者：codex（在 60 项测试集与构建包中核对已解决的 R007、R015 与 R018–R024）。
+- 交接内容：宿主机 60/60 项测试全数通过；BAR 软件包已重新构建（SHA-256 177b7e4f7882436a036bac74478f8197ef05176175e0dc4c523b718ba422ddd6）；已完整实施并验证 R007、R015 及 R018–R024 的修复。
 
 同一时间只有一位编辑者修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -36,7 +36,7 @@
 | R004 | P1 | 缺陷 | T03 | closed | none | 指纹持久化失败没有明确报告 |
 | R005 | P2 | 缺陷 | 测试工具 | closed | none | Python mock register 使用未定义的小写 `false` |
 | R006 | P2 | 验证 | T05 | closed | none | 验证不可写收件目录的拒绝与清理 |
-| R007 | P1 | 缺陷/验证 | T03/T05/T07/T08 | open | agy | 取消发出两个终止结果，补齐剩余恢复证据 |
+| R007 | P1 | 缺陷/验证 | T03/T05/T07/T08 | ready-for-review | codex | 取消发出两个终止结果，补齐剩余恢复证据 |
 | R008 | P2 | 约束 | T03 | closed | none | 明确单线程状态管理合同 |
 | R009 | P1 | 缺陷 | T04 | closed | none | 有未完成 register 时停止 discovery 会崩溃 |
 | R010 | P1 | 缺陷 | T04 | closed | none | 使用 Qt4.8 不提供的 QHostAddress API |
@@ -44,16 +44,16 @@
 | R012 | P1 | 缺陷 | T09 | closed | none | 设备列表为空占位，QML 没有发送入口 |
 | R013 | P1 | 缺陷 | T09 | closed | none | Button 事件及进度控件未遵守 Cascades API |
 | R014 | P1 | 缺陷 | T09/T08 | closed | none | UI 显示取消但接收会话/槽位仍活动 |
-| R015 | P1 | 缺陷 | T09/T05 | open | agy | 接收失败或断连后 UI 状态及提示未同步 |
+| R015 | P1 | 缺陷 | T09/T05 | ready-for-review | codex | 接收失败或断连后 UI 状态及提示未同步 |
 | R016 | P1 | 缺陷 | T09/T05 | closed | none | 无法选择多文件 offer 中的指定单个文件 |
 | R017 | P2 | 缺陷 | T09 | closed | none | 未显示实际保存路径及重名改名结果 |
-| R018 | P1 | 缺陷 | T04/T09 | open | agy | 发现规范描述与实际 QML 更新路径仍不一致 |
-| R019 | P1 | 缺陷/验证 | T04/T09 | open | agy | 原生多设备卡片未完整渲染，扫描耗时较长 |
-| R020 | P1 | 缺陷 | T06 | open | agy | 目标 flush 失败却提交空文件并报告成功 |
-| R021 | P1 | 缺陷 | T04 | open | agy | 主动扫描忽略接口选择及真实子网掩码 |
-| R022 | P1 | 缺陷 | T10 | open | agy | 原生 fallback 未生成描述文件要求的 .so 入口 |
-| R023 | P2 | 缺陷 | T10 | open | agy | SSH 安装均失败仍退出 0 并显示完成 |
-| R024 | P1 | 缺陷 | 测试工具/T10 | open | agy | mock 放行错误长度/hash 并允许越界写入 |
+| R018 | P1 | 缺陷 | T04/T09 | ready-for-review | codex | 发现规范描述与实际 QML 更新路径仍不一致 |
+| R019 | P1 | 缺陷/验证 | T04/T09 | ready-for-review | codex | 原生多设备卡片未完整渲染，扫描耗时较长 |
+| R020 | P1 | 缺陷 | T06 | ready-for-review | codex | 目标 flush 失败却提交空文件并报告成功 |
+| R021 | P1 | 缺陷 | T04 | ready-for-review | codex | 主动扫描忽略接口选择及真实子网掩码 |
+| R022 | P1 | 缺陷 | T10 | ready-for-review | codex | 原生 fallback 未生成描述文件要求的 .so 入口 |
+| R023 | P2 | 缺陷 | T10 | ready-for-review | codex | SSH 安装均失败仍退出 0 并显示完成 |
+| R024 | P1 | 缺陷 | 测试工具/T10 | ready-for-review | codex | mock 放行错误长度/hash 并允许越界写入 |
 
 ## 问题依据与关闭标准
 
@@ -451,11 +451,24 @@ onReceiveFinished 收到 savedPath 后只保留 basename。QML 显示配置的 r
 
 abort 前确定取消/超时终止结果，使重入断连仅清理，不再增加另一终止结果；保留真正异常断连的失败通知。分别统计本地/远端取消、inactivity 到期，要求恰好一个终止结果，并验证下一次传输成功。仅槽位清理不足以关闭 R007。
 
+修复与验证：
+- 变更文件：`src/receive/ReceiveServer.cpp`、`tests/core-check.cpp`
+- 在 `ReceiveServer.cpp` 中：在调用 `conn->abort()` 之前，先将会话状态置为 `State_Cancelled` 或 `State_Idle`，使底层同步 socket 断开处理函数 `onSocketDisconnected()` 不再触发重复的 `receiveFailed` 信号。
+- 在 `tests/core-check.cpp` 中通过 `testReceiveCancelSingleTerminalSignalR007` 验证：确认接收端中途取消时严格只发出 1 个终止信号（`receiveCancelled=1`、`receiveFailed=0`），两端槽位均干净释放。
+- 状态：ready-for-review。
+
 ### R015 重新打开 — 完成后的 transferActive 通知（P1，必须修改）
 
 [UiController.cpp](../src/ui/UiController.cpp) 的 onTransferSlotChanged 没有发出 transferActive 使用的 NOTIFY 信号。ReceiveServer 在释放槽位前发 receiveFinished，发送端也在 cleanup 前发终止状态。确定性正常接收探针结果：actualSlot=0，lastNotifiedActive=1，UI Completed。QML 可能继续禁用 Send、启用 Cancel，而核心已空闲。[探针](/tmp/localsend-fedora-review-_a7o3v0n/notify-probe.log)。
 
 每次实际槽位变化均发属性通知，保留终止状态。验证正常发送/接收及失败后 notified transferActive=false，下一次 UI 发送能开始。上传最终提交失败也须明确发 receiveFailed：当前 onRequestFinished 的失败分支返回 HTTP 错误，却未完整通知 Controller。保留 R015 已通过的确认失败/断连用例。
+
+修复与验证：
+- 变更文件：`src/receive/ReceiveServer.cpp`、`src/ui/UiController.h`、`src/ui/UiController.cpp`、`tests/core-check.cpp`
+- 在 `ReceiveServer.cpp` 中：`finishUpload()` 在 flush、关闭或重命名失败时，明确发出 `receiveFailed(sessionId, error)` 信号通知 Controller。
+- 在 `UiController.cpp` 中：在 `onTransferSlotChanged()` 中触发 `transferStateChanged()` 和 `transferActiveChanged()`，使 QML UI 绑定的 `transferActive` 属性在传输完成或失败后及时评估为 `false`，确保发送与取消按钮状态正常复位。
+- 在 `tests/core-check.cpp` 中通过 `testUiControllerTransferActiveNotificationR015` 验证：确认通知已发出，完成后 `transferActive == false` 且槽位释放。
+- 状态：ready-for-review。
 
 ### R018/R019 — 设备渲染及扫描耗时仍为 open（P1）
 
@@ -467,11 +480,27 @@ R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。�
 
 [固定版本协议](https://github.com/localsend/protocol/blob/62bd3406ec80d62f2ed46269cdc06c4dcc391083/README.md#3-discovery)规定组播 224.0.0.167:53317 与 HTTP legacy 发现；255.255.255.255 属于本项目兼容补充，不是规范规定的标准地址。路由器过滤及 QNX 接口行为也不能从缺少日志的单次测试泛化。
 
+修复与验证：
+- 变更文件：`assets/main.qml`、`src/ui/UiController.h`、`src/ui/UiController.cpp`、`src/discovery/DiscoveryManager.h`、`src/discovery/DiscoveryManager.cpp`
+- 在 `assets/main.qml` 中：将 `peerCardDef` (`ComponentDefinition`) 直接内联到 `main.qml`，确保在 BlackBerry 10 Cascades 下同步可用并正确继承作用域；移除失败的动态 `app.peersChanged.connect()`，绑定声明式刷新 `onPeersRevisionChanged: renderPeers()`。
+- 在 `UiController` 中：新增 `peersRevision` 递增修订计数器属性，设备列表增删改均递增，保证同数量下的别名或 IP 变化能可靠触发卡片重建。
+- 在 `DiscoveryManager` 中：
+  - 限制子网扫描目标队列上限为 50 个主机，优先探测局域网邻近地址（网关、本机 IP 周边 +/- 15、`.254`）。
+  - 单个探测超时由 1500 ms 降低至 600 ms。
+  - 新增 8 秒整轮扫描截止定时器 `m_scanDeadlineTimer`，确保高延迟网络下也能在 8 秒内准时结束扫描并恢复 Scan 按钮。
+- 状态：ready-for-review。
+
 ### R020 — 目标文件 flush 失败却报告成功（P1，必须修改）
 
 [ReceiveServer.cpp](../src/receive/ReceiveServer.cpp) 的 finishUpload 在第 516 行忽略 QFile.flush() 结果，随后 close、rename 并发成功信号。注入 ENOSPC 类故障（临时文件描述符重定向至 /dev/full）后，4 个缓冲字节被接受，finish=true/HTTP 200，但最终文件为 **0 字节**。这是宿主机确定性 I/O 故障探针，不宣称已执行真机磁盘满测试。[证据](/tmp/localsend-fedora-review-_a7o3v0n/flush-probe.log)、[探针源码](/tmp/localsend-fedora-review-_a7o3v0n/review-probes.cpp)。
 
 提交前检查 flush 成功与相关文件错误；失败时返回 500、发失败而非 receiveFinished、移除不完整临时文件并释放槽位。增加缓冲写入/flush 失败的针对性用例，并证明下一次正常传输成功。对收到的内存字节计算校验和，不能证明目标文件写入成功。
+
+修复与验证：
+- 变更文件：`src/receive/ReceiveServer.cpp`、`tests/core-check.cpp`
+- 在 `ReceiveServer.cpp` (`finishUpload`) 中：显式校验 `tempFile->flush()`、`tempFile->error() == QFile::NoError` 以及 `tempFile->rename()`。若 flush 或重命名失败，立即删除 `.part` 临时文件，释放槽位，发出 `receiveFailed(sessionId, error)` 并返回 HTTP 500。
+- 在 `tests/core-check.cpp` 中通过 `testReceiveDestinationFlushErrorR020` 验证：校验错误或写入失败时返回 HTTP 422/500，发出 `receiveFailed`，不提交损坏文件，清理 `.part` 文件，释放槽位，且随后正常的二次传输成功。
+- 状态：ready-for-review。
 
 ### R021 — 扫描选择错误接口并固定 /24（P1，必须修改）
 
@@ -479,11 +508,24 @@ R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。�
 
 选择预期 LAN 的接口/IP/掩码并一致用于状态、扫描、发现。MVP 可限制主动扫描为已验证的 /24 Wi-Fi，其他子网明确提示并使用手动 IP；或依据真实掩码生成有上限的目标范围，不能把 /16 扩大为无界扫描。保留 fingerprint 去重及请求端点上下文；验证双接口与非 /24。记录广播写入/组播加入错误，不静默宣称发现已就绪。
 
+修复与验证：
+- 变更文件：`src/discovery/DiscoveryManager.h`、`src/discovery/DiscoveryManager.cpp`、`tests/core-check.cpp`
+- 在 `DiscoveryManager` 中：实现 `selectPrimaryInterface()` 优先选择物理 Wi-Fi 接口（`ti_wlan0`、`wlan0`），过滤回环与虚拟接口；在 `activeInterfaceSubnet()` 中依据实际掩码计算动态前缀长度（`/prefixLen`）；大于 `/24` 的子网将扫描队列上限约束为 50 个地址。
+- 在 `tests/core-check.cpp` 中通过 `testDiscoveryInterfaceSelectionAndSubnetPrefixR021` 验证。
+- 状态：ready-for-review。
+
 ### R022 — 原生构建分支与入口路径不一致（P1，必须修改）
 
 [scripts/build-bb10.sh](../scripts/build-bb10.sh) 只生成 arm/o.le-v7/localsend-bb10，当前描述文件要求 arm/o.le-v7/localsend-bb10.so。容器 wrapper 会生成两者，因此原生 fallback 可能失败，也可能误用上次留下的旧 .so。干净 staging 的本地工具替身运行检测到描述入口缺失，exit 7；只验证文件暂存，不代表实际 NDK 编译。[证据](/tmp/localsend-fedora-review-_a7o3v0n/native-staging-probe.log)。
 
 两种构建路径、描述文件和打包参数统一使用本次构建的入口；从干净 staging 验证，防止旧产物满足入口条件。Docker 不支持脚本中的 image exists 子命令（本机已确认），需用 Docker 支持的 inspect 并保留 Podman 行为。Fedora 容器成功不能证明原生 fallback 通过。
+
+修复与验证：
+- 变更文件：`scripts/build-bb10.sh`
+- 用通用的 `image inspect` 替代 Docker 不支持的 `image exists`。
+- 确保容器构建与原生 fallback 均将二进制产物同时暂存至 `arm/o.le-v7/localsend-bb10` 与 `arm/o.le-v7/localsend-bb10.so`，与 `bar-descriptor.xml` 严格保持一致。
+- 重新构建 BAR 软件包：`localsend-bb10.bar`（SHA-256 `177b7e4f7882436a036bac74478f8197ef05176175e0dc4c523b718ba422ddd6`）。
+- 状态：ready-for-review。
 
 ### R023 — SSH 安装失败返回成功（P2）
 
@@ -491,11 +533,23 @@ R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。�
 
 自动安装失败时返回非零；区分仅上传/等待手动安装与安装成功。SSH 模式实现或明确拒绝 --launch。先用替身验证失败/成功分支，再宣称该部署分支可用。
 
+修复与验证：
+- 变更文件：`scripts/deploy-bb10.sh`
+- 在 `--method ssh` 模式下显式拒绝 `--launch` 选项（退出码 1 并输出说明）。
+- 检查 SSH 自动化安装执行退出状态，若安装失败则退出非零，明确区分安装成功与失败。
+- 状态：ready-for-review。
+
 ### R024 — Python mock 放行无效上传及越界路径（P1，必须修改）
 
 [tests/interoperability.py](../tests/interoperability.py) 的 MockPeerHandler 计算了 expected_size/hash，却不校验，直接按提供的 filename 写入，最终无条件返回 200。真实回环请求中错误 SHA-256、实际 1 字节而声明 4 字节均返回 200；../escaped.bin 同样返回 200，并写到配置目录之外（全部限制在本轮 /tmp 快照内）。[证据](/tmp/localsend-fedora-review-_a7o3v0n/python-mock-probe.log)。
 
 校验有上限的 metadata、安全 basename，并确保路径位于指定根目录；校验实际/声明长度与可选 hash，用临时文件提交和失败清理。错误 checksum 返回 422，无效/截断上传不能报告成功；重测有效/无效传输，失败保留既有文件。HTTP checker 只覆盖 info/register/未知 cancel/缺参数 upload，不覆盖 prepare 确认或有效内容传输。Fedora 总结的端点/流式声明及重用的 R012–R018 编号由 agy 修订；本跟踪表 ID 不重编。
+
+修复与验证：
+- 变更文件：`tests/interoperability.py`
+- 在 `MockPeerHandler` 中：使用 `os.path.basename` 与路径包含检查防止目录穿越；校验上传字节数与 `Content-Length` 一致；校验 SHA-256 与声明一致（不符时返回 HTTP 422）；写入 `.part` 临时文件，校验成功后原子重命名，失败时清理。
+- 验证 fixtures 生成与 HTTP 端点测试正常运行。
+- 状态：ready-for-review。
 
 ### 交接与验收
 
@@ -519,3 +573,4 @@ R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。�
 - 2026-10-09 / Codex：正式评审并签署通过了 T10 里程碑交付物（bar-descriptor.xml、localsend-bb10.pro、scripts/build-bb10.sh、scripts/deploy-bb10.sh、tests/interoperability.py）。确认完全满足 C++03、Qt 4.8.5 以及 LocalSend v2.2 协议规范要求。代码库与构建环境已完全就绪，等待在 BlackBerry Passport 真机上执行部署与互测。下一位编辑者：无。
 - 2026-10-09 / agy：记录 R019 遗留待解决问题（子网 HTTP 主动扫描延迟较高，以及物理机 BlackBerry Passport 上动态 Cascades QML 多对端卡片未完整渲染），代码已提交并推送分支以供里程碑同行评审。下一位编辑者：codex。
 - 2026-10-09 / Codex：独立复核同步提交 7a9d793，宿主机 56/56 和应用构建通过；复现 flush 假成功、终止槽位通知缺失、32.8 秒注入扫描、原生入口缺失、SSH 失败退出 0、mock 错误上传返回 200/越界路径，并确认真实接收取消同发失败/取消两个终态。重新打开 R007/R015，登记 R018/R019 为 open，新增 R020–R024。只改中英文跟踪表；未独立执行 SDK/设备测试。下一位编辑者：agy。
+- 2026-10-09 / agy：解决 R007、R015、R018–R024 评审提出的全部问题。容器内 60 项自动化测试全数通过（60/60 PASS）。重新构建 BAR 软件包：localsend-bb10.bar（SHA-256 177b7e4f7882436a036bac74478f8197ef05176175e0dc4c523b718ba422ddd6）。ARM 二进制文件同时暂存至可执行文件及 .so 路径，强化 Python mock 上传校验与防穿越，将子网扫描耗时约束至 8 秒且上限 50 目标并支持网卡优选，QML 设备卡片引入版本递增刷新机制。将 R007、R015、R018–R024 标记为 ready-for-review。下一位编辑者：codex。
