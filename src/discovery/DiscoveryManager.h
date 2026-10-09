@@ -48,6 +48,7 @@ private slots:
     void onRegisterReplyFinished();
     void onAnnounceTimeout();
     void onProbeReplyFinished();
+    void onHttpsProbeReplyFinished();
     void pumpScanQueue();
     void cancelSubnetScan();
 
@@ -56,6 +57,7 @@ private:
     void sendUdpAnnouncement(bool announce);
     void sendHttpRegister(const QHostAddress &address, quint16 port);
     void startSubnetScan();
+    void probeHttpsHost(const QHostAddress &addr);
 
     QNetworkAccessManager *m_nam;
     QUdpSocket *m_udpSocket;
@@ -73,6 +75,7 @@ private:
     bool m_isScanning;
     QList<QHostAddress> m_scanQueue;
     QMap<QNetworkReply*, QHostAddress> m_activeProbes;
+    QMap<QNetworkReply*, QHostAddress> m_activeHttpsProbes;
 };
 
 #endif // DISCOVERY_MANAGER_H
