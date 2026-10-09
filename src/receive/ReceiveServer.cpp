@@ -497,7 +497,9 @@ bool ReceiveServer::finishUpload(QString *savedPath, int *httpStatus, QString *e
         if (httpStatus) *httpStatus = 400;
         if (error) *error = QString("Incomplete upload: expected %1 bytes, got %2")
                             .arg(m_activeSession.meta.size).arg(m_activeSession.bytesReceived);
+        QString failedSessionId = m_activeSession.sessionId;
         cleanupActiveSession(false);
+        emit receiveFailed(failedSessionId, *error);
         return false;
     }
 
@@ -508,13 +510,32 @@ bool ReceiveServer::finishUpload(QString *savedPath, int *httpStatus, QString *e
             if (httpStatus) *httpStatus = 422;
             if (error) *error = QString("SHA-256 mismatch: declared %1, computed %2")
                                 .arg(m_activeSession.meta.sha256).arg(computed);
+            QString failedSessionId = m_activeSession.sessionId;
             cleanupActiveSession(false);
+            emit receiveFailed(failedSessionId, *error);
             return false;
         }
     }
 
-    m_activeSession.partFile->flush();
+    bool flushOk = m_activeSession.partFile->flush();
+    if (!flushOk || m_activeSession.partFile->error() != QFile::NoError) {
+        if (httpStatus) *httpStatus = 500;
+        if (error) *error = "Failed to flush destination file (I/O error or disk full)";
+        QString failedSessionId = m_activeSession.sessionId;
+        cleanupActiveSession(false);
+        emit receiveFailed(failedSessionId, *error);
+        return false;
+    }
+
     m_activeSession.partFile->close();
+    if (m_activeSession.partFile->error() != QFile::NoError) {
+        if (httpStatus) *httpStatus = 500;
+        if (error) *error = "Failed to close destination file (I/O error)";
+        QString failedSessionId = m_activeSession.sessionId;
+        cleanupActiveSession(false);
+        emit receiveFailed(failedSessionId, *error);
+        return false;
+    }
 
     QString dirPath = m_app ? m_app->receiveDirectory() : "data/received";
     QString finalDest = resolveUniqueDestination(dirPath, m_activeSession.meta.fileName);
@@ -522,7 +543,9 @@ bool ReceiveServer::finishUpload(QString *savedPath, int *httpStatus, QString *e
     if (!QFile::rename(m_activeSession.partFilePath, finalDest)) {
         if (httpStatus) *httpStatus = 500;
         if (error) *error = "Failed to commit destination file";
+        QString failedSessionId = m_activeSession.sessionId;
         cleanupActiveSession(false);
+        emit receiveFailed(failedSessionId, *error);
         return false;
     }
 
@@ -555,11 +578,12 @@ void ReceiveServer::cancelLocal(const QString &requestId)
 
     if (!m_activeSession.requestId.isEmpty() && (requestId.isEmpty() || m_activeSession.requestId == requestId || m_activeSession.sessionId == requestId)) {
         QString sessId = m_activeSession.sessionId;
-        if (m_activeSession.connection) {
-            m_activeSession.connection->abort();
-        }
+        HttpConnection *conn = m_activeSession.connection;
         cleanupActiveSession(false);
         emit receiveCancelled(sessId, "Cancelled locally");
+        if (conn) {
+            conn->abort();
+        }
     }
 }
 
@@ -567,11 +591,12 @@ void ReceiveServer::handleCancel(const QString &sessionId, const QHostAddress &p
 {
     if (m_activeSession.sessionId == sessionId && m_activeSession.peerAddress == peer) {
         QString sessId = m_activeSession.sessionId;
-        if (m_activeSession.connection) {
-            m_activeSession.connection->abort();
-        }
+        HttpConnection *conn = m_activeSession.connection;
         cleanupActiveSession(false);
         emit receiveCancelled(sessId, "Cancelled by remote peer");
+        if (conn) {
+            conn->abort();
+        }
     }
 }
 
@@ -607,11 +632,12 @@ void ReceiveServer::onInactivityTimeout()
 {
     if (hasActiveSession() && m_activeSession.isUploading) {
         QString sessId = m_activeSession.sessionId;
-        if (m_activeSession.connection) {
-            m_activeSession.connection->abort();
-        }
+        HttpConnection *conn = m_activeSession.connection;
         cleanupActiveSession(false);
         emit receiveFailed(sessId, "Upload stalled inactivity timeout");
+        if (conn) {
+            conn->abort();
+        }
     }
 }
 

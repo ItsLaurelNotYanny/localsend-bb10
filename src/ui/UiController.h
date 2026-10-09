@@ -26,6 +26,7 @@ class UiController : public QObject {
     // Peer list property
     Q_PROPERTY(QVariantList peers READ peers NOTIFY peersChanged)
     Q_PROPERTY(int peerCount READ peerCount NOTIFY peersChanged)
+    Q_PROPERTY(int peersRevision READ peersRevision NOTIFY peersChanged)
     Q_PROPERTY(bool isScanning READ isScanning NOTIFY isScanningChanged)
     Q_PROPERTY(QString networkStatus READ networkStatus NOTIFY networkStatusChanged)
 
@@ -67,6 +68,7 @@ public:
     QString receiveDirectory() const;
     QVariantList peers() const { return m_peers; }
     int peerCount() const { return m_peers.size(); }
+    int peersRevision() const { return m_peersRevision; }
     bool isScanning() const;
     QString networkStatus() const;
 
@@ -162,6 +164,7 @@ private:
     QPointer<QObject> m_activeFilePicker;
 
     QVariantList m_peers;
+    int m_peersRevision;
 
     QString m_selectedFilePath;
     QString m_selectedFileName;

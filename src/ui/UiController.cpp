@@ -21,6 +21,7 @@ namespace localsend {
 UiController::UiController(Application *app, QObject *parent)
     : QObject(parent)
     , m_app(app)
+    , m_peersRevision(0)
     , m_transferState("Idle")
     , m_transferProgress(0)
     , m_transferStatusText("Ready")
@@ -490,6 +491,7 @@ void UiController::updatePeersModel()
     }
 
     m_peers = list;
+    m_peersRevision++;
     emit peersChanged();
     emit networkStatusChanged();
 }
@@ -675,6 +677,7 @@ void UiController::onTransferSlotChanged(bool busy, const QString &activeRequest
             emit incomingOfferChanged();
         }
     }
+    emit transferStateChanged();
 }
 
 QString UiController::formatBytes(qint64 bytes)

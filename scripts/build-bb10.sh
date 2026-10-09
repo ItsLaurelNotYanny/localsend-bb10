@@ -27,7 +27,7 @@ fi
 # Prefer containerized toolchain if available
 if [ -n "${CONTAINER_CLI}" ] && [ -d "${BBNDK_PATH}" ]; then
     echo "Using containerized toolchain via ${CONTAINER_CLI} (bb10-toolchain:latest)..."
-    if ! ${CONTAINER_CLI} image exists bb10-toolchain:latest 2>/dev/null; then
+    if ! ${CONTAINER_CLI} image inspect bb10-toolchain:latest >/dev/null 2>&1; then
         echo "Building bb10-toolchain container image..."
         ${CONTAINER_CLI} build -t bb10-toolchain:latest -f "${ROOT_DIR}/docker/bb10-toolchain/Dockerfile" "${ROOT_DIR}/docker/bb10-toolchain"
     fi
@@ -77,14 +77,16 @@ fi
 make clean >/dev/null 2>&1 || true
 make -j"$(nproc)"
 
+rm -rf "${ROOT_DIR}/arm/o.le-v7"
 mkdir -p "${ROOT_DIR}/arm/o.le-v7"
 cp -f "${ROOT_DIR}/liblocalsend-bb10.so.1.0.0" "${ROOT_DIR}/arm/o.le-v7/localsend-bb10"
+cp -f "${ROOT_DIR}/liblocalsend-bb10.so.1.0.0" "${ROOT_DIR}/arm/o.le-v7/localsend-bb10.so"
 
 blackberry-nativepackager \
     -package "${ROOT_DIR}/localsend-bb10.bar" \
     -devMode \
     "${ROOT_DIR}/bar-descriptor.xml" \
-    -e "${ROOT_DIR}/arm/o.le-v7/localsend-bb10" localsend-bb10 \
+    -e "${ROOT_DIR}/arm/o.le-v7/localsend-bb10.so" localsend-bb10.so \
     -C "${ROOT_DIR}" assets
 
 echo "=== Packaging Complete ==="

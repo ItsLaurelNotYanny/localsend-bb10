@@ -11,12 +11,15 @@ DiscoveryManager::DiscoveryManager(QNetworkAccessManager *nam, QObject *parent)
     , m_udpSocket(new QUdpSocket(this))
     , m_announceTimer(new QTimer(this))
     , m_scanPumpTimer(new QTimer(this))
+    , m_scanDeadlineTimer(new QTimer(this))
     , m_multicastAddress(QHostAddress("224.0.0.167"))
     , m_isScanning(false)
 {
     connect(m_udpSocket, SIGNAL(readyRead()), this, SLOT(onUdpReadyRead()));
     connect(m_announceTimer, SIGNAL(timeout()), this, SLOT(onAnnounceTimeout()));
     connect(m_scanPumpTimer, SIGNAL(timeout()), this, SLOT(pumpScanQueue()));
+    m_scanDeadlineTimer->setSingleShot(true);
+    connect(m_scanDeadlineTimer, SIGNAL(timeout()), this, SLOT(cancelSubnetScan()));
 }
 
 DiscoveryManager::~DiscoveryManager()
@@ -397,9 +400,25 @@ PeerDevice DiscoveryManager::findPeer(const QString &fingerprint) const
     return m_peers.value(fingerprint);
 }
 
-QString DiscoveryManager::activeInterfaceAddress() const
+bool DiscoveryManager::selectPrimaryInterface(QNetworkInterface *outIface, QNetworkAddressEntry *outEntry) const
 {
+    if (m_interface.isValid() && (m_interface.flags() & QNetworkInterface::IsUp)) {
+        QList<QNetworkAddressEntry> entries = m_interface.addressEntries();
+        for (int i = 0; i < entries.size(); ++i) {
+            const QNetworkAddressEntry &e = entries.at(i);
+            if (e.ip().protocol() == QAbstractSocket::IPv4Protocol && e.ip() != QHostAddress::LocalHost) {
+                if (outIface) *outIface = m_interface;
+                if (outEntry) *outEntry = e;
+                return true;
+            }
+        }
+    }
+
     QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
+    int bestScore = -100;
+    QNetworkInterface bestIface;
+    QNetworkAddressEntry bestEntry;
+
     for (int i = 0; i < ifaces.size(); ++i) {
         const QNetworkInterface &iface = ifaces.at(i);
         if (!(iface.flags() & QNetworkInterface::IsUp) ||
@@ -407,38 +426,66 @@ QString DiscoveryManager::activeInterfaceAddress() const
             (iface.flags() & QNetworkInterface::IsPointToPoint)) {
             continue;
         }
+
+        QString name = iface.name().toLower();
+        int score = 10;
+        if (name.contains("ti_wlan") || name.contains("wlan") || name.contains("wifi") || name.contains("wl")) {
+            score = 100;
+        } else if (name.contains("en") || name.contains("eth")) {
+            score = 80;
+        } else if (name.contains("docker") || name.contains("veth") || name.contains("virbr") ||
+                   name.contains("tun") || name.contains("tap") || name.contains("usb") || name.contains("rndis")) {
+            score = -10;
+        }
+
         QList<QNetworkAddressEntry> entries = iface.addressEntries();
         for (int j = 0; j < entries.size(); ++j) {
             const QNetworkAddressEntry &e = entries.at(j);
             if (e.ip().protocol() == QAbstractSocket::IPv4Protocol && e.ip() != QHostAddress::LocalHost) {
-                return e.ip().toString();
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestIface = iface;
+                    bestEntry = e;
+                }
             }
         }
+    }
+
+    if (bestScore > -100) {
+        if (outIface) *outIface = bestIface;
+        if (outEntry) *outEntry = bestEntry;
+        return true;
+    }
+
+    return false;
+}
+
+QString DiscoveryManager::activeInterfaceAddress() const
+{
+    QNetworkInterface iface;
+    QNetworkAddressEntry entry;
+    if (selectPrimaryInterface(&iface, &entry)) {
+        return entry.ip().toString();
     }
     return QString();
 }
 
 QString DiscoveryManager::activeInterfaceSubnet() const
 {
-    QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
-    for (int i = 0; i < ifaces.size(); ++i) {
-        const QNetworkInterface &iface = ifaces.at(i);
-        if (!(iface.flags() & QNetworkInterface::IsUp) ||
-            (iface.flags() & QNetworkInterface::IsLoopBack) ||
-            (iface.flags() & QNetworkInterface::IsPointToPoint)) {
-            continue;
+    QNetworkInterface iface;
+    QNetworkAddressEntry entry;
+    if (selectPrimaryInterface(&iface, &entry)) {
+        quint32 ipVal = entry.ip().toIPv4Address();
+        quint32 maskVal = entry.netmask().toIPv4Address();
+        if (maskVal == 0) maskVal = 0xFFFFFF00;
+        int prefixLen = 0;
+        quint32 m = maskVal;
+        while (m) {
+            prefixLen += (m & 1);
+            m >>= 1;
         }
-        QList<QNetworkAddressEntry> entries = iface.addressEntries();
-        for (int j = 0; j < entries.size(); ++j) {
-            const QNetworkAddressEntry &e = entries.at(j);
-            if (e.ip().protocol() == QAbstractSocket::IPv4Protocol && e.ip() != QHostAddress::LocalHost) {
-                quint32 ipVal = e.ip().toIPv4Address();
-                quint32 maskVal = e.netmask().toIPv4Address();
-                if (maskVal == 0) maskVal = 0xFFFFFF00;
-                QHostAddress netAddr(ipVal & maskVal);
-                return QString("%1/24").arg(netAddr.toString());
-            }
-        }
+        QHostAddress netAddr(ipVal & maskVal);
+        return QString("%1/%2").arg(netAddr.toString()).arg(prefixLen);
     }
     return QString();
 }
@@ -451,80 +498,102 @@ void DiscoveryManager::startSubnetScan()
 
     cancelSubnetScan();
 
-    QHostAddress localIp;
-    QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
-    for (int i = 0; i < ifaces.size(); ++i) {
-        const QNetworkInterface &iface = ifaces.at(i);
-        if (!(iface.flags() & QNetworkInterface::IsUp) ||
-            (iface.flags() & QNetworkInterface::IsLoopBack) ||
-            (iface.flags() & QNetworkInterface::IsPointToPoint)) {
-            continue;
-        }
-        QList<QNetworkAddressEntry> entries = iface.addressEntries();
-        for (int j = 0; j < entries.size(); ++j) {
-            const QNetworkAddressEntry &e = entries.at(j);
-            if (e.ip().protocol() == QAbstractSocket::IPv4Protocol && e.ip() != QHostAddress::LocalHost) {
-                localIp = e.ip();
-                break;
-            }
-        }
-        if (!localIp.isNull()) {
-            break;
-        }
-    }
-
-    if (localIp.isNull()) {
+    QNetworkInterface iface;
+    QNetworkAddressEntry entry;
+    if (!selectPrimaryInterface(&iface, &entry)) {
         return;
     }
 
-    quint32 localIpVal = localIp.toIPv4Address();
-    quint32 baseIpVal = localIpVal & 0xFFFFFF00;
-    int localHostNum = static_cast<int>(localIpVal & 0xFF);
+    quint32 localIpVal = entry.ip().toIPv4Address();
+    quint32 maskVal = entry.netmask().toIPv4Address();
+    if (maskVal == 0) maskVal = 0xFFFFFF00;
+
+    int prefixLen = 0;
+    quint32 m = maskVal;
+    while (m) {
+        prefixLen += (m & 1);
+        m >>= 1;
+    }
+
+    quint32 netVal = localIpVal & maskVal;
+    int localHostNum = static_cast<int>(localIpVal & (~maskVal));
 
     QList<int> hostOrder;
     QSet<int> seen;
 
-    // 1. Prioritize immediate neighbors (localHostNum ± 1 to 20)
-    for (int delta = 1; delta <= 20; ++delta) {
-        int left = localHostNum - delta;
-        int right = localHostNum + delta;
-        if (left >= 1 && left <= 254 && !seen.contains(left)) {
-            hostOrder.append(left);
-            seen.insert(left);
-        }
-        if (right >= 1 && right <= 254 && !seen.contains(right)) {
-            hostOrder.append(right);
-            seen.insert(right);
-        }
-    }
+    if (prefixLen >= 24) {
+        int maxHost = static_cast<int>((~maskVal) & 0xFF);
+        if (maxHost < 2) maxHost = 254;
 
-    // 2. Common device host numbers
-    static const int commonHosts[] = {1, 2, 3, 4, 10, 100, 101, 102, 103, 104, 105, 200, 254};
-    for (size_t k = 0; k < sizeof(commonHosts)/sizeof(commonHosts[0]); ++k) {
-        int h = commonHosts[k];
-        if (h != localHostNum && !seen.contains(h) && h >= 1 && h <= 254) {
-            hostOrder.append(h);
-            seen.insert(h);
+        // 1. Immediate neighbors (delta ±1 to ±15)
+        for (int delta = 1; delta <= 15; ++delta) {
+            int left = localHostNum - delta;
+            int right = localHostNum + delta;
+            if (left >= 1 && left <= maxHost && !seen.contains(left)) {
+                hostOrder.append(left);
+                seen.insert(left);
+            }
+            if (right >= 1 && right <= maxHost && !seen.contains(right)) {
+                hostOrder.append(right);
+                seen.insert(right);
+            }
         }
-    }
 
-    // 3. Fill in remaining /24 subnet addresses (1..254)
-    for (int h = 1; h <= 254; ++h) {
-        if (h != localHostNum && !seen.contains(h)) {
-            hostOrder.append(h);
-            seen.insert(h);
+        // 2. Common gateway & device hosts
+        static const int commonHosts[] = {1, 2, 3, 4, 10, 100, 101, 102, 200, 254};
+        for (size_t k = 0; k < sizeof(commonHosts)/sizeof(commonHosts[0]); ++k) {
+            int h = commonHosts[k];
+            if (h != localHostNum && h >= 1 && h <= maxHost && !seen.contains(h)) {
+                hostOrder.append(h);
+                seen.insert(h);
+            }
+        }
+
+        // 3. Additional nearby hosts up to cap (max 50 hosts for responsive scan)
+        for (int h = 1; h <= maxHost && hostOrder.size() < 50; ++h) {
+            if (h != localHostNum && !seen.contains(h)) {
+                hostOrder.append(h);
+                seen.insert(h);
+            }
+        }
+    } else {
+        // Subnet prefix < 24 (e.g. /16 or /8):
+        // Constrain to the local /24 neighborhood slice around host (±20) to avoid sweeping thousands of hosts
+        int hostByte = static_cast<int>(localIpVal & 0xFF);
+        for (int delta = 1; delta <= 20; ++delta) {
+            int left = hostByte - delta;
+            int right = hostByte + delta;
+            if (left >= 1 && left <= 254 && !seen.contains(left)) {
+                hostOrder.append(left);
+                seen.insert(left);
+            }
+            if (right >= 1 && right <= 254 && !seen.contains(right)) {
+                hostOrder.append(right);
+                seen.insert(right);
+            }
+        }
+        static const int commonHosts[] = {1, 2, 254};
+        for (size_t k = 0; k < sizeof(commonHosts)/sizeof(commonHosts[0]); ++k) {
+            int h = commonHosts[k];
+            if (h != hostByte && !seen.contains(h)) {
+                hostOrder.append(h);
+                seen.insert(h);
+            }
         }
     }
 
     QSet<quint32> allLocalIps;
-    for (int i = 0; i < ifaces.size(); ++i) {
-        QList<QNetworkAddressEntry> entries = ifaces.at(i).addressEntries();
+    QList<QNetworkInterface> allIfaces = QNetworkInterface::allInterfaces();
+    for (int i = 0; i < allIfaces.size(); ++i) {
+        QList<QNetworkAddressEntry> entries = allIfaces.at(i).addressEntries();
         for (int j = 0; j < entries.size(); ++j) {
             if (entries.at(j).ip().protocol() == QAbstractSocket::IPv4Protocol) {
                 allLocalIps.insert(entries.at(j).ip().toIPv4Address());
             }
         }
     }
+
+    quint32 baseIpVal = (prefixLen >= 24) ? netVal : (localIpVal & 0xFFFFFF00);
 
     m_scanQueue.clear();
     for (int i = 0; i < hostOrder.size(); ++i) {
@@ -538,11 +607,19 @@ void DiscoveryManager::startSubnetScan()
     m_isScanning = true;
     emit scanningChanged(true);
 
+    if (m_scanDeadlineTimer) {
+        m_scanDeadlineTimer->start(8000); // 8-second bounded whole-scan deadline
+    }
+
     pumpScanQueue();
 }
 
 void DiscoveryManager::cancelSubnetScan()
 {
+    if (m_scanDeadlineTimer) {
+        m_scanDeadlineTimer->stop();
+    }
+
     m_scanQueue.clear();
 
     QList<QNetworkReply*> replies = m_activeProbes.keys();
@@ -605,15 +682,18 @@ void DiscoveryManager::pumpScanQueue()
             m_activeProbes.insert(reply, targetAddr);
             connect(reply, SIGNAL(finished()), this, SLOT(onProbeReplyFinished()));
 
-            // 1500 ms deadline for subnet scan probe
+            // 600 ms deadline for subnet scan probe (fast responsive LAN sweep)
             QTimer *timer = new QTimer(reply);
             timer->setSingleShot(true);
             connect(timer, SIGNAL(timeout()), reply, SLOT(abort()));
-            timer->start(1500);
+            timer->start(600);
         }
     }
 
     if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty()) {
+        if (m_scanDeadlineTimer) {
+            m_scanDeadlineTimer->stop();
+        }
         if (m_isScanning) {
             m_isScanning = false;
             emit scanningChanged(false);

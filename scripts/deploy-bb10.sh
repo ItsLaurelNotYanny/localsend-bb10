@@ -104,16 +104,28 @@ if [ "${METHOD}" == "deploy" ]; then
     echo "Successfully installed ${BAR_FILE} on ${DEVICE_IP}!"
 
 elif [ "${METHOD}" == "ssh" ]; then
+    if [ "${LAUNCH_APP}" = true ]; then
+        echo "ERROR: --launch is not supported in SSH deployment mode (use blackberry-deploy for launching)." >&2
+        exit 1
+    fi
+
     echo "Deploying via SSH/SCP (Rooted device mode)..."
     REMOTE_TMP="/tmp/localsend-bb10.bar"
 
     echo "1. Uploading BAR package to device..."
-    scp -o StrictHostKeyChecking=no "${BAR_FILE}" "root@${DEVICE_IP}:${REMOTE_TMP}"
+    if ! scp -o StrictHostKeyChecking=no "${BAR_FILE}" "root@${DEVICE_IP}:${REMOTE_TMP}"; then
+        echo "ERROR: Failed to upload BAR package to device via SCP." >&2
+        exit 1
+    fi
 
     echo "2. Installing BAR on device via bar-installer / sideload..."
-    ssh -o StrictHostKeyChecking=no "root@${DEVICE_IP}" "bar-installer ${REMOTE_TMP} || /apps/bin/sideload ${REMOTE_TMP} || echo 'Please install ${REMOTE_TMP} via device file manager or BB10MT.'"
+    if ! ssh -o StrictHostKeyChecking=no "root@${DEVICE_IP}" "bar-installer ${REMOTE_TMP} 2>/dev/null || /apps/bin/sideload ${REMOTE_TMP} 2>/dev/null"; then
+        echo "ERROR: Automatic installation failed on device (neither bar-installer nor sideload succeeded)." >&2
+        echo "The package remains uploaded at ${REMOTE_TMP} for manual installation via device file manager or BB10MT." >&2
+        exit 1
+    fi
 
-    echo "=== SSH Deployment Finished ==="
+    echo "=== SSH Deployment Finished (Installation Succeeded) ==="
 else
     echo "ERROR: Unknown method '${METHOD}'. Use 'deploy' or 'ssh'."
     exit 1

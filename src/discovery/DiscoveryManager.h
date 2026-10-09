@@ -49,17 +49,19 @@ private slots:
     void onAnnounceTimeout();
     void onProbeReplyFinished();
     void pumpScanQueue();
+    void cancelSubnetScan();
 
 private:
+    bool selectPrimaryInterface(QNetworkInterface *outIface, QNetworkAddressEntry *outEntry) const;
     void sendUdpAnnouncement(bool announce);
     void sendHttpRegister(const QHostAddress &address, quint16 port);
     void startSubnetScan();
-    void cancelSubnetScan();
 
     QNetworkAccessManager *m_nam;
     QUdpSocket *m_udpSocket;
     QTimer *m_announceTimer;
     QTimer *m_scanPumpTimer;
+    QTimer *m_scanDeadlineTimer;
     DeviceInfo m_localInfo;
     QNetworkInterface m_interface;
     QHostAddress m_multicastAddress;
