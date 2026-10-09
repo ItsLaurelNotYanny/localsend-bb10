@@ -122,21 +122,22 @@ TabbedPane {
                         topPadding: 8.0
                         bottomPadding: 8.0
 
-                        onCreationCompleted: {
+                        property int peersRevision: app.peersRevision
+                        property bool hasFile: app.hasSelectedFile
+                        property bool transferActive: app.transferActive
+
+                        onPeersRevisionChanged: {
+                            app.populatePeers(peersContainer);
+                        }
+                        onHasFileChanged: {
+                            app.populatePeers(peersContainer);
+                        }
+                        onTransferActiveChanged: {
                             app.populatePeers(peersContainer);
                         }
 
-                        Connections {
-                            target: app
-                            onPeersRevisionChanged: {
-                                app.populatePeers(peersContainer);
-                            }
-                            onSelectedFileChanged: {
-                                app.populatePeers(peersContainer);
-                            }
-                            onTransferStateChanged: {
-                                app.populatePeers(peersContainer);
-                            }
+                        onCreationCompleted: {
+                            app.populatePeers(peersContainer);
                         }
                     }
 
