@@ -33,29 +33,44 @@ public:
 
     void updateLocalInfo(const DeviceInfo &info);
 
+    bool isScanning() const { return m_isScanning; }
+    QString activeInterfaceAddress() const;
+    QString activeInterfaceSubnet() const;
+
 signals:
     void peerUpdated(const PeerDevice &peer);
     void peerRemoved(const QString &fingerprint);
     void discoveryError(const QString &error);
+    void scanningChanged(bool isScanning);
 
 private slots:
     void onUdpReadyRead();
     void onRegisterReplyFinished();
     void onAnnounceTimeout();
+    void onProbeReplyFinished();
+    void pumpScanQueue();
 
 private:
     void sendUdpAnnouncement(bool announce);
     void sendHttpRegister(const QHostAddress &address, quint16 port);
+    void startSubnetScan();
+    void cancelSubnetScan();
 
     QNetworkAccessManager *m_nam;
     QUdpSocket *m_udpSocket;
     QTimer *m_announceTimer;
+    QTimer *m_scanPumpTimer;
     DeviceInfo m_localInfo;
     QNetworkInterface m_interface;
     QHostAddress m_multicastAddress;
 
     QMap<QString, PeerDevice> m_peers; // Keyed by fingerprint
-    QMap<QNetworkReply*, PeerDevice> m_pendingRegisters;
+    QMap<QNetworkReply*, PeerDevice> m_pendingRegisters; // Explicit manual register replies
+
+    // Subnet HTTP sweep (Section 3.2 Legacy / Subnet Scan)
+    bool m_isScanning;
+    QList<QHostAddress> m_scanQueue;
+    QMap<QNetworkReply*, QHostAddress> m_activeProbes;
 };
 
 #endif // DISCOVERY_MANAGER_H
