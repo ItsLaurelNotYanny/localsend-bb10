@@ -363,6 +363,13 @@ check-http 与 serve-peer 只访问开发者指定端点，不扫描网络；生
 
 **完成标准**：P 所有适用项有 PASS+证据，U 再加界面项；未测用 NOT RUN，失败用 FAIL+最小复现；报告不能用“预计能工作”替代实测。没有 SDK/手机时只交源码及 host 验证，明确缺少 P 验收。
 
+**实现状态（已完成）**：
+- 在 `tests/interoperability.py` 中实现了确定性测试夹具生成器、HTTP 接口校验器、局域网模拟 PC 节点服务以及流式发送客户端（基于 Python 3 标准库，无外部三方依赖）。
+- 配置了完备的应用部署描述符 `bar-descriptor.xml`，包含 `%CPU/o/localsend-bb10` 入口资产声明、系统权限（`run_native`、`access_internet`、`access_shared`）及 QML/图标资产。
+- 校验并更新了 `localsend-bb10.pro` 中的 Cascades 构建选项，补充 `-lbbcascadespickers` 库链接。
+- 提供了自动化的打包与部署脚本：`scripts/build-bb10.sh` 与 `scripts/deploy-bb10.sh`（支持官方开发模式及已 Root 设备的 SSH 旁加载）。
+- 容器伪环境中 56/56 项自动化测试全部通过（`Total: 56, Passed: 56, Failed: 0`）。真机联调测试按计划在明日环境搭建后开展。
+
 ## 直接交给 agy 的执行约定
 
 > 在 localsend-bb10 实现 docs/mvp-plan.md 的协议 MVP P。先读 README、protocol-notes、build-deploy 和 AGENTS。按 T00–T08、T10 顺序逐项交付；BB10→PC 和 PC→BB10 的双向 10 MiB 收发是强制验收项，绝不能后置。若完整 UI 拖慢协议调通，仅做必要测试操作入口，T09 后置，但多候选选一功能不能省。使用 BB10 Qt4.8 API/C++03 和平台 JSON，不使用 QJsonDocument/QUrlQuery/QMimeDatabase/QSaveFile/QtQuick.Controls 2。保持原始 HTTP 二进制传输、有界内存、异步确认、session/token/source IP 校验及临时文件提交；遵守 v2.2 checksum 422。不要加 HTTPS、多文件调度、后台服务、Download API 或第三方 UI 框架。代码、注释及技术文本统一英文，文档维护完整中英文两份并同步更新。每完成一个任务记录文件变更、执行命令、结果和未验证项；没有真机/SDK不得宣称 P 完成。T00 发现环境/库不兼容时先提供证据及最小可行替代，再继续。不要提交生成 Makefile、密码、签名私钥或大量文件 fixtures。

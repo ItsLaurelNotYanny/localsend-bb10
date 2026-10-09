@@ -21,6 +21,8 @@ The specification defines wire fields and endpoints. The timeouts, capacities, f
 
 Default UDP multicast: `224.0.0.167:53317`. Default TCP port: `53317`. A peer's TCP port may differ; use its announcement/register request `port`. The UDP source port is not the peer's TCP port.
 
+Multicast packets are sent across all multicast-capable interfaces. Directed broadcasts are strictly limited to valid subnet broadcast addresses on active physical LAN interfaces (e.g. `192.168.x.255`). Point-to-Point / VPN interfaces (such as Tailscale TUN interfaces) and loopback interfaces are explicitly excluded from broadcast to avoid routing errors, kernel socket failures, and broadcast leakage. Tailscale and cross-subnet peers communicate via direct unicast HTTP registration using manual IP entry.
+
 An HTTP fingerprint is a random string. Generate it on first launch, persist it in QSettings, and reuse it across restarts. It supports deduplication and self-discovery prevention, not HTTP authentication.
 
 Project announcement example; serialize strict JSON without comments or trailing commas:
