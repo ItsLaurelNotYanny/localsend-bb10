@@ -3,16 +3,20 @@
 
 #include <QNetworkRequest>
 #include <QTimer>
+#include <QSet>
 
 DiscoveryManager::DiscoveryManager(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
     , m_nam(nam)
     , m_udpSocket(new QUdpSocket(this))
     , m_announceTimer(new QTimer(this))
+    , m_scanPumpTimer(new QTimer(this))
     , m_multicastAddress(QHostAddress("224.0.0.167"))
+    , m_isScanning(false)
 {
     connect(m_udpSocket, SIGNAL(readyRead()), this, SLOT(onUdpReadyRead()));
     connect(m_announceTimer, SIGNAL(timeout()), this, SLOT(onAnnounceTimeout()));
+    connect(m_scanPumpTimer, SIGNAL(timeout()), this, SLOT(pumpScanQueue()));
 }
 
 DiscoveryManager::~DiscoveryManager()
@@ -64,11 +68,16 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
 
     // Broadcast initial presence announcement
     sendUdpAnnouncement(true);
+
+    // Trigger initial subnet HTTP scan (Section 3.2 Legacy/Subnet Scan)
+    startSubnetScan();
     return true;
 }
 
 void DiscoveryManager::stop()
 {
+    cancelSubnetScan();
+
     if (m_announceTimer) {
         m_announceTimer->stop();
     }
@@ -131,6 +140,9 @@ void DiscoveryManager::refresh()
             sendHttpRegister(peer.address, peer.info.port);
         }
     }
+
+    // 6. Subnet HTTP active sweep across local /24 network (Section 3.2 Subnet Scan)
+    startSubnetScan();
 }
 
 void DiscoveryManager::onAnnounceTimeout()
@@ -335,6 +347,10 @@ void DiscoveryManager::onRegisterReplyFinished()
         PeerDevice peer;
         QString err;
         if (ProtocolJson::decodeRegisterResponse(respData, target, &peer, &err)) {
+            if (peer.info.fingerprint == m_localInfo.fingerprint) {
+                reply->deleteLater();
+                return;
+            }
             m_peers.insert(peer.info.fingerprint, peer);
             emit peerUpdated(peer);
         } else {
@@ -379,4 +395,270 @@ QList<PeerDevice> DiscoveryManager::peers() const
 PeerDevice DiscoveryManager::findPeer(const QString &fingerprint) const
 {
     return m_peers.value(fingerprint);
+}
+
+QString DiscoveryManager::activeInterfaceAddress() const
+{
+    QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
+    for (int i = 0; i < ifaces.size(); ++i) {
+        const QNetworkInterface &iface = ifaces.at(i);
+        if (!(iface.flags() & QNetworkInterface::IsUp) ||
+            (iface.flags() & QNetworkInterface::IsLoopBack) ||
+            (iface.flags() & QNetworkInterface::IsPointToPoint)) {
+            continue;
+        }
+        QList<QNetworkAddressEntry> entries = iface.addressEntries();
+        for (int j = 0; j < entries.size(); ++j) {
+            const QNetworkAddressEntry &e = entries.at(j);
+            if (e.ip().protocol() == QAbstractSocket::IPv4Protocol && e.ip() != QHostAddress::LocalHost) {
+                return e.ip().toString();
+            }
+        }
+    }
+    return QString();
+}
+
+QString DiscoveryManager::activeInterfaceSubnet() const
+{
+    QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
+    for (int i = 0; i < ifaces.size(); ++i) {
+        const QNetworkInterface &iface = ifaces.at(i);
+        if (!(iface.flags() & QNetworkInterface::IsUp) ||
+            (iface.flags() & QNetworkInterface::IsLoopBack) ||
+            (iface.flags() & QNetworkInterface::IsPointToPoint)) {
+            continue;
+        }
+        QList<QNetworkAddressEntry> entries = iface.addressEntries();
+        for (int j = 0; j < entries.size(); ++j) {
+            const QNetworkAddressEntry &e = entries.at(j);
+            if (e.ip().protocol() == QAbstractSocket::IPv4Protocol && e.ip() != QHostAddress::LocalHost) {
+                quint32 ipVal = e.ip().toIPv4Address();
+                quint32 maskVal = e.netmask().toIPv4Address();
+                if (maskVal == 0) maskVal = 0xFFFFFF00;
+                QHostAddress netAddr(ipVal & maskVal);
+                return QString("%1/24").arg(netAddr.toString());
+            }
+        }
+    }
+    return QString();
+}
+
+void DiscoveryManager::startSubnetScan()
+{
+    if (m_isScanning) {
+        return;
+    }
+
+    cancelSubnetScan();
+
+    QHostAddress localIp;
+    QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
+    for (int i = 0; i < ifaces.size(); ++i) {
+        const QNetworkInterface &iface = ifaces.at(i);
+        if (!(iface.flags() & QNetworkInterface::IsUp) ||
+            (iface.flags() & QNetworkInterface::IsLoopBack) ||
+            (iface.flags() & QNetworkInterface::IsPointToPoint)) {
+            continue;
+        }
+        QList<QNetworkAddressEntry> entries = iface.addressEntries();
+        for (int j = 0; j < entries.size(); ++j) {
+            const QNetworkAddressEntry &e = entries.at(j);
+            if (e.ip().protocol() == QAbstractSocket::IPv4Protocol && e.ip() != QHostAddress::LocalHost) {
+                localIp = e.ip();
+                break;
+            }
+        }
+        if (!localIp.isNull()) {
+            break;
+        }
+    }
+
+    if (localIp.isNull()) {
+        return;
+    }
+
+    quint32 localIpVal = localIp.toIPv4Address();
+    quint32 baseIpVal = localIpVal & 0xFFFFFF00;
+    int localHostNum = static_cast<int>(localIpVal & 0xFF);
+
+    QList<int> hostOrder;
+    QSet<int> seen;
+
+    // 1. Prioritize immediate neighbors (localHostNum ± 1 to 20)
+    for (int delta = 1; delta <= 20; ++delta) {
+        int left = localHostNum - delta;
+        int right = localHostNum + delta;
+        if (left >= 1 && left <= 254 && !seen.contains(left)) {
+            hostOrder.append(left);
+            seen.insert(left);
+        }
+        if (right >= 1 && right <= 254 && !seen.contains(right)) {
+            hostOrder.append(right);
+            seen.insert(right);
+        }
+    }
+
+    // 2. Common device host numbers
+    static const int commonHosts[] = {1, 2, 3, 4, 10, 100, 101, 102, 103, 104, 105, 200, 254};
+    for (size_t k = 0; k < sizeof(commonHosts)/sizeof(commonHosts[0]); ++k) {
+        int h = commonHosts[k];
+        if (h != localHostNum && !seen.contains(h) && h >= 1 && h <= 254) {
+            hostOrder.append(h);
+            seen.insert(h);
+        }
+    }
+
+    // 3. Fill in remaining /24 subnet addresses (1..254)
+    for (int h = 1; h <= 254; ++h) {
+        if (h != localHostNum && !seen.contains(h)) {
+            hostOrder.append(h);
+            seen.insert(h);
+        }
+    }
+
+    QSet<quint32> allLocalIps;
+    for (int i = 0; i < ifaces.size(); ++i) {
+        QList<QNetworkAddressEntry> entries = ifaces.at(i).addressEntries();
+        for (int j = 0; j < entries.size(); ++j) {
+            if (entries.at(j).ip().protocol() == QAbstractSocket::IPv4Protocol) {
+                allLocalIps.insert(entries.at(j).ip().toIPv4Address());
+            }
+        }
+    }
+
+    m_scanQueue.clear();
+    for (int i = 0; i < hostOrder.size(); ++i) {
+        quint32 targetIpVal = baseIpVal | static_cast<quint32>(hostOrder.at(i));
+        if (allLocalIps.contains(targetIpVal)) {
+            continue;
+        }
+        m_scanQueue.append(QHostAddress(targetIpVal));
+    }
+
+    m_isScanning = true;
+    emit scanningChanged(true);
+
+    pumpScanQueue();
+}
+
+void DiscoveryManager::cancelSubnetScan()
+{
+    m_scanQueue.clear();
+
+    QList<QNetworkReply*> replies = m_activeProbes.keys();
+    m_activeProbes.clear();
+    for (int i = 0; i < replies.size(); ++i) {
+        QNetworkReply *reply = replies.at(i);
+        if (reply) {
+            reply->disconnect(this);
+            reply->abort();
+            reply->deleteLater();
+        }
+    }
+
+    if (m_isScanning) {
+        m_isScanning = false;
+        emit scanningChanged(false);
+    }
+}
+
+void DiscoveryManager::pumpScanQueue()
+{
+    if (!m_nam) {
+        return;
+    }
+
+    const int MAX_CONCURRENT_PROBES = 12;
+
+    while (m_activeProbes.size() < MAX_CONCURRENT_PROBES && !m_scanQueue.isEmpty()) {
+        QHostAddress targetAddr = m_scanQueue.takeFirst();
+
+        // Check if we already have an active peer with this address (skip if known)
+        bool alreadyKnown = false;
+        for (QMap<QString, PeerDevice>::const_iterator it = m_peers.begin(); it != m_peers.end(); ++it) {
+            if (it.value().address == targetAddr) {
+                alreadyKnown = true;
+                break;
+            }
+        }
+        if (alreadyKnown) {
+            continue;
+        }
+
+        QUrl url;
+        url.setScheme("http");
+        url.setHost(targetAddr.toString());
+        url.setPort(DEFAULT_PORT);
+        url.setPath("/api/localsend/v2/register");
+
+        QNetworkRequest req(url);
+        req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+        QString err;
+        QByteArray body = ProtocolJson::encodeRegisterRequest(m_localInfo, &err);
+        if (body.isEmpty()) {
+            continue;
+        }
+
+        QNetworkReply *reply = m_nam->post(req, body);
+        if (reply) {
+            m_activeProbes.insert(reply, targetAddr);
+            connect(reply, SIGNAL(finished()), this, SLOT(onProbeReplyFinished()));
+
+            // 1500 ms deadline for subnet scan probe
+            QTimer *timer = new QTimer(reply);
+            timer->setSingleShot(true);
+            connect(timer, SIGNAL(timeout()), reply, SLOT(abort()));
+            timer->start(1500);
+        }
+    }
+
+    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty()) {
+        if (m_isScanning) {
+            m_isScanning = false;
+            emit scanningChanged(false);
+        }
+    }
+}
+
+void DiscoveryManager::onProbeReplyFinished()
+{
+    QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
+    if (!reply) {
+        return;
+    }
+
+    if (!m_activeProbes.contains(reply)) {
+        reply->deleteLater();
+        return;
+    }
+
+    QHostAddress targetAddr = m_activeProbes.take(reply);
+
+    if (reply->error() == QNetworkReply::NoError) {
+        int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (statusCode == 200) {
+            QByteArray respData = reply->readAll();
+            PeerDevice target;
+            target.address = targetAddr;
+            target.info.port = DEFAULT_PORT;
+            target.info.protocol = "http";
+
+            PeerDevice peer;
+            QString err;
+            if (ProtocolJson::decodeRegisterResponse(respData, target, &peer, &err)) {
+                if (peer.info.fingerprint == m_localInfo.fingerprint) {
+                    reply->deleteLater();
+                    pumpScanQueue();
+                    return;
+                }
+                m_peers.insert(peer.info.fingerprint, peer);
+                emit peerUpdated(peer);
+            }
+        }
+    }
+
+    reply->deleteLater();
+
+    pumpScanQueue();
 }

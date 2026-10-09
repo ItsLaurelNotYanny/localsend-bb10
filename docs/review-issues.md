@@ -405,6 +405,17 @@ Resolution & Verification:
 - Verification: package rebuilt (`localsend-bb10.bar`), HTTP endpoints verified with `tests/interoperability.py check-http`.
 - Status: ready-for-review.
 
+### R019 — Subnet Active Scan Latency and Cascades QML Dynamic Card Instantiation Gap (P1, Backlog)
+
+During physical testing on BlackBerry Passport, subnet HTTP sweep (/24) exhibits high latency before the peer count updates to `Nearby Devices (2)`. More critically, the Cascades QML UI container fails to dynamically render the 2nd (and subsequent) peer cards. Only the first discovered peer card is rendered and selectable on screen, even though the internal peer count reflects multiple peers.
+
+Scope & Backlog Details:
+- Affected components: `src/discovery/DiscoveryManager.cpp`, `src/ui/UiController.cpp`, `assets/main.qml`.
+- Findings:
+  1. High scan latency across the 254-host subnet: while concurrent probe queue (12 workers) scans nearby hosts first, network timeout and sequential probe scheduling cause noticeable delays on mobile Wi-Fi.
+  2. Dynamic card rendering in Cascades: `ComponentDefinition.createObject()` inside a dynamic `Container` does not reliably instantiate multiple cards or properly update when peers are added asynchronously on Qt 4.8.5. Investigation should determine whether a standard `bb::cascades::ListView` backed by a `bb::cascades::ArrayDataModel` or a deterministic model-view architecture is required to reliably render arbitrary N peers.
+- Status: backlog (unresolved legacy issue recorded for subsequent milestone refactoring and peer review).
+
 ### Existing Issues and Acceptance Boundary
 
 The current 56-test run and source inspection support closing R001/R009/R011 for their recorded host scenarios, and R010 for the identified discovery API fixes only. This does not establish event-loop performance or whole-project target compatibility.
@@ -429,5 +440,7 @@ The current 56-test run and source inspection support closing R001/R009/R011 for
 - 2026-10-09 / Codex: reviewed and verified submitted fixes for R007 and R012–R017 in host container. Confirmed C++03 and Qt 4.8.5 specifications are met, receiver cancellation cleans .part files, dynamic QML peer/candidate cards function properly, and FilePicker leak is eliminated. R007 and R012–R017 CLOSED. T09 milestone accepted. Proceeding to T10. Next editor: agy.
 - 2026-10-09 / agy: completed T10 implementation (bar-descriptor.xml entry and permissions, localsend-bb10.pro -lbbcascadespickers linkage, scripts/build-bb10.sh packaging, scripts/deploy-bb10.sh deployment, tests/interoperability.py fixtures/check-http/serve-peer/send, build-deploy.md acceptance matrix and instructions). Automated test suite passes 56/56 in Docker container. Real-device execution deferred to tomorrow per user instruction. Handing off T10 deliverables to Codex for peer review. Next editor: codex.
 - 2026-10-09 / Codex: formally reviewed and signed off on Milestone T10 deliverables (bar-descriptor.xml, localsend-bb10.pro, scripts/build-bb10.sh, scripts/deploy-bb10.sh, tests/interoperability.py). Confirmed C++03, Qt 4.8.5, and LocalSend v2.2 specification compliance. Codebase and build systems are fully prepared for real-device testing on BlackBerry Passport. Next editor: none.
+- 2026-10-09 / agy: recorded R019 backlog issue regarding subnet HTTP active scan latency and dynamic Cascades QML peer card rendering omission on physical BlackBerry Passport. Code changes committed and pushed for milestone peer review. Next editor: codex.
+
 
 

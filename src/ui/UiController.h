@@ -25,6 +25,9 @@ class UiController : public QObject {
 
     // Peer list property
     Q_PROPERTY(QVariantList peers READ peers NOTIFY peersChanged)
+    Q_PROPERTY(int peerCount READ peerCount NOTIFY peersChanged)
+    Q_PROPERTY(bool isScanning READ isScanning NOTIFY isScanningChanged)
+    Q_PROPERTY(QString networkStatus READ networkStatus NOTIFY networkStatusChanged)
 
     // Selected file for sending
     Q_PROPERTY(QString selectedFilePath READ selectedFilePath NOTIFY selectedFileChanged)
@@ -63,6 +66,9 @@ public:
     int devicePort() const;
     QString receiveDirectory() const;
     QVariantList peers() const { return m_peers; }
+    int peerCount() const { return m_peers.size(); }
+    bool isScanning() const;
+    QString networkStatus() const;
 
     QString selectedFilePath() const { return m_selectedFilePath; }
     QString selectedFileName() const { return m_selectedFileName; }
@@ -108,6 +114,8 @@ signals:
     void devicePortChanged();
     void receiveDirectoryChanged();
     void peersChanged();
+    void isScanningChanged();
+    void networkStatusChanged();
     void selectedFileChanged();
     void transferStateChanged();
     void transferProgressChanged();
@@ -126,6 +134,7 @@ private slots:
     void onPeerUpdated(const PeerDevice &peer);
     void onPeerRemoved(const QString &fingerprint);
     void onDiscoveryError(const QString &error);
+    void onScanningChanged(bool isScanning);
 
     // SendManager slots
     void onSendStateChanged(const QString &requestId, const QString &state);

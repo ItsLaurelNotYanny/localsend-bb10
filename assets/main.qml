@@ -10,7 +10,8 @@ TabbedPane {
             titleBar: TitleBar {
                 title: "LocalSend BB10"
                 acceptAction: ActionItem {
-                    title: "Scan"
+                    title: app.isScanning ? "Scanning..." : "Scan"
+                    enabled: !app.isScanning
                     onTriggered: {
                         app.refreshDevices();
                     }
@@ -18,7 +19,8 @@ TabbedPane {
             }
             actions: [
                 ActionItem {
-                    title: "Scan"
+                    title: app.isScanning ? "Scanning..." : "Scan"
+                    enabled: !app.isScanning
                     ActionBar.placement: ActionBarPlacement.OnBar
                     onTriggered: {
                         app.refreshDevices();
@@ -54,9 +56,9 @@ TabbedPane {
                             textStyle.color: Color.White
                         }
                         Label {
-                            text: "Port " + app.devicePort + " • LocalSend Protocol v2.2"
+                            text: app.networkStatus + " • Port " + app.devicePort
                             textStyle.base: SystemDefaults.TextStyles.SmallText
-                            textStyle.color: Color.create("#A0AEC0")
+                            textStyle.color: Color.create("#68D391")
                         }
                     }
 
@@ -104,12 +106,12 @@ TabbedPane {
 
                     // Nearby devices section
                     Header {
-                        title: "Nearby Devices (" + app.peers.length + ")"
+                        title: "Nearby Devices (" + app.peerCount + ")"
                     }
 
                     Label {
-                        visible: app.peers.length === 0
-                        text: "Scanning for LocalSend peers on Wi-Fi... Tap Scan above or add IP below."
+                        visible: app.peerCount === 0
+                        text: app.isScanning ? "Scanning local subnet (192.168.x.x) for LocalSend peers..." : "No devices found. Tap Scan above or enter manual IP below."
                         textStyle.base: SystemDefaults.TextStyles.SubtitleText
                         textStyle.color: Color.create("#718096")
                     }
@@ -120,10 +122,10 @@ TabbedPane {
                         topPadding: 8.0
                         bottomPadding: 8.0
 
+                        property int peerCount: app.peerCount
                         property variant activeCards: []
-                        property variant peerList: app.peers
 
-                        onPeerListChanged: {
+                        onPeerCountChanged: {
                             renderPeers();
                         }
 
@@ -159,6 +161,12 @@ TabbedPane {
                         }
 
                         onCreationCompleted: {
+                            try {
+                                if (app && app.peersChanged) {
+                                    app.peersChanged.connect(renderPeers);
+                                }
+                            } catch (e) {
+                            }
                             renderPeers();
                         }
 

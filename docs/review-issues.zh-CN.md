@@ -406,6 +406,17 @@ onReceiveFinished 收到 savedPath 后只保留 basename。QML 显示配置的 r
 - 验证：成功重新打包 `localsend-bb10.bar`，并通过 `tests/interoperability.py check-http` 验证端点连通。
 - 状态：ready-for-review。
 
+### R019 — 子网主动扫描延迟与 Cascades QML 动态卡片未渲染（P1，待解决遗留问题）
+
+在 BlackBerry Passport 真机测试中，局域网 HTTP 子网扫描（/24）耗时较长后标题才更新显示为 `Nearby Devices (2)`。更关键的是，Cascades QML UI 容器未能动态渲染出第 2 个（及后续）对端设备卡片。屏幕上仅渲染出首个发现的设备卡片且仅该卡片可选，无法显示多个外部终端。
+
+范围与遗留问题详情：
+- 涉及组件：`src/discovery/DiscoveryManager.cpp`、`src/ui/UiController.cpp`、`assets/main.qml`。
+- 问题排查要点：
+  1. 扫描延迟问题：遍历 254 个主机地址的并发队列（12 个并发）虽有优先级队列设计，但在移动端 Wi-Fi 下整体超时和网络往返导致探测周期偏长，需进一步优化并发度或探测超时策略。
+  2. Cascades 动态卡片渲染机制：在 Qt 4.8.5 下，使用 `ComponentDefinition.createObject()` 动态向 `Container` 中添加多个子项存在异步实例化不全或布局合并问题。需进一步排查并评估改用标准 `bb::cascades::ListView` 搭配 `bb::cascades::ArrayDataModel` 的正统模型-视图机制，以彻底保证 N 个对端均能稳定渲染。
+- 状态：backlog（作为待解决遗留问题记录，供后续专项重构与评审处理）。
+
 ### 既有问题与验收边界
 
 本轮 56 项测试及源码检查支持在已记录的宿主机场景关闭 R001/R009/R011；R010 仅关闭已识别的 discovery API 修复范围，不代表事件循环性能或全项目目标平台兼容性通过。
@@ -430,5 +441,7 @@ onReceiveFinished 收到 savedPath 后只保留 basename。QML 显示配置的 r
 - 2026-10-09 / Codex：在宿主机容器中全面复核了 R007 与 R012–R017 的修复。确认代码严格符合 C++03 与 Qt 4.8.5 规范，接收端取消可靠清理隐藏 .part 临时文件，动态 QML 设备与候选文件卡片工作正常，FilePicker 内存泄露已彻底消除。R007 与 R012–R017 全部确认关闭（CLOSED）。T09 里程碑通过验收。推进 T10 里程碑。下一位编辑者：agy。
 - 2026-10-09 / agy：完成 T10 实现（bar-descriptor.xml 入口与权限、localsend-bb10.pro -lbbcascadespickers 链接配置、scripts/build-bb10.sh 构建打包脚本、scripts/deploy-bb10.sh 部署脚本、tests/interoperability.py fixtures/check-http/serve-peer/send 功能、build-deploy.zh-CN.md 验收矩阵与操作说明）。Docker 容器内 56/56 项自动化测试全部通过。按用户要求真机测试安排在明日进行。将 T10 交付物交接给 Codex 开展独立评审。下一位编辑者：codex。
 - 2026-10-09 / Codex：正式评审并签署通过了 T10 里程碑交付物（bar-descriptor.xml、localsend-bb10.pro、scripts/build-bb10.sh、scripts/deploy-bb10.sh、tests/interoperability.py）。确认完全满足 C++03、Qt 4.8.5 以及 LocalSend v2.2 协议规范要求。代码库与构建环境已完全就绪，等待在 BlackBerry Passport 真机上执行部署与互测。下一位编辑者：无。
+- 2026-10-09 / agy：记录 R019 遗留待解决问题（子网 HTTP 主动扫描延迟较高，以及物理机 BlackBerry Passport 上动态 Cascades QML 多对端卡片未完整渲染），代码已提交并推送分支以供里程碑同行评审。下一位编辑者：codex。
+
 
 

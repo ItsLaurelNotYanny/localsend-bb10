@@ -44,6 +44,8 @@ UiController::UiController(Application *app, QObject *parent)
                 this, SLOT(onPeerRemoved(QString)));
         connect(m_app->discoveryManager(), SIGNAL(discoveryError(QString)),
                 this, SLOT(onDiscoveryError(QString)));
+        connect(m_app->discoveryManager(), SIGNAL(scanningChanged(bool)),
+                this, SLOT(onScanningChanged(bool)));
     }
 
     // Connect SendManager signals
@@ -114,6 +116,24 @@ QString UiController::receiveDirectory() const
 bool UiController::transferActive() const
 {
     return m_app->isTransferActive();
+}
+
+bool UiController::isScanning() const
+{
+    return m_app->discoveryManager() ? m_app->discoveryManager()->isScanning() : false;
+}
+
+QString UiController::networkStatus() const
+{
+    if (!m_app->discoveryManager()) {
+        return "Network: Offline";
+    }
+    QString ip = m_app->discoveryManager()->activeInterfaceAddress();
+    if (ip.isEmpty()) {
+        return "Wi-Fi: Disconnected";
+    }
+    QString subnet = m_app->discoveryManager()->activeInterfaceSubnet();
+    return QString("Wi-Fi: %1 (%2)").arg(ip).arg(subnet);
 }
 
 void UiController::refreshDevices()
@@ -435,6 +455,13 @@ void UiController::onDiscoveryError(const QString &error)
     emit lastErrorChanged();
 }
 
+void UiController::onScanningChanged(bool isScanning)
+{
+    Q_UNUSED(isScanning);
+    emit isScanningChanged();
+    emit networkStatusChanged();
+}
+
 void UiController::updatePeersModel()
 {
     if (!m_app->discoveryManager()) {
@@ -446,6 +473,9 @@ void UiController::updatePeersModel()
 
     for (int i = 0; i < peerList.size(); ++i) {
         const PeerDevice &p = peerList.at(i);
+        if (p.info.fingerprint == m_app->localInfo().fingerprint) {
+            continue;
+        }
         QVariantMap map;
         map["alias"] = p.info.alias.isEmpty() ? "Unknown Device" : p.info.alias;
         map["deviceModel"] = p.info.deviceModel.isEmpty() ? "LocalSend Peer" : p.info.deviceModel;
@@ -461,6 +491,7 @@ void UiController::updatePeersModel()
 
     m_peers = list;
     emit peersChanged();
+    emit networkStatusChanged();
 }
 
 void UiController::onSendStateChanged(const QString &requestId, const QString &state)
