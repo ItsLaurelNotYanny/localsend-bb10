@@ -110,6 +110,7 @@ public:
     Q_INVOKABLE void clearError();
     Q_INVOKABLE void openFile(const QString &filePath = QString());
     Q_INVOKABLE void openReceiveDirectory();
+    Q_INVOKABLE void populatePeers(QObject *containerObj);
 
 signals:
     void deviceAliasChanged();
@@ -129,6 +130,8 @@ signals:
     void transferFinished(const QString &message);
 
 private slots:
+    void onSendCardButtonClicked();
+
     // Application slots
     void onTransferSlotChanged(bool busy, const QString &activeRequestId);
 

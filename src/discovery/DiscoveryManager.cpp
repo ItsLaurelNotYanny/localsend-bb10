@@ -525,8 +525,8 @@ void DiscoveryManager::startSubnetScan()
         int maxHost = static_cast<int>((~maskVal) & 0xFF);
         if (maxHost < 2) maxHost = 254;
 
-        // 1. Immediate neighbors (delta ±1 to ±15)
-        for (int delta = 1; delta <= 15; ++delta) {
+        // 1. Immediate neighbors (delta ±1 to ±40)
+        for (int delta = 1; delta <= 40; ++delta) {
             int left = localHostNum - delta;
             int right = localHostNum + delta;
             if (left >= 1 && left <= maxHost && !seen.contains(left)) {
@@ -540,7 +540,7 @@ void DiscoveryManager::startSubnetScan()
         }
 
         // 2. Common gateway & device hosts
-        static const int commonHosts[] = {1, 2, 3, 4, 10, 100, 101, 102, 200, 254};
+        static const int commonHosts[] = {1, 2, 3, 4, 10, 50, 100, 101, 102, 150, 200, 254};
         for (size_t k = 0; k < sizeof(commonHosts)/sizeof(commonHosts[0]); ++k) {
             int h = commonHosts[k];
             if (h != localHostNum && h >= 1 && h <= maxHost && !seen.contains(h)) {
@@ -549,8 +549,8 @@ void DiscoveryManager::startSubnetScan()
             }
         }
 
-        // 3. Additional nearby hosts up to cap (max 50 hosts for responsive scan)
-        for (int h = 1; h <= maxHost && hostOrder.size() < 50; ++h) {
+        // 3. Additional nearby hosts up to cap (max 80 hosts for responsive scan)
+        for (int h = 1; h <= maxHost && hostOrder.size() < 80; ++h) {
             if (h != localHostNum && !seen.contains(h)) {
                 hostOrder.append(h);
                 seen.insert(h);
@@ -633,6 +633,17 @@ void DiscoveryManager::cancelSubnetScan()
         }
     }
 
+    QList<QNetworkReply*> httpsReplies = m_activeHttpsProbes.keys();
+    m_activeHttpsProbes.clear();
+    for (int i = 0; i < httpsReplies.size(); ++i) {
+        QNetworkReply *reply = httpsReplies.at(i);
+        if (reply) {
+            reply->disconnect(this);
+            reply->abort();
+            reply->deleteLater();
+        }
+    }
+
     if (m_isScanning) {
         m_isScanning = false;
         emit scanningChanged(false);
@@ -690,7 +701,7 @@ void DiscoveryManager::pumpScanQueue()
         }
     }
 
-    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty()) {
+    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
         if (m_scanDeadlineTimer) {
             m_scanDeadlineTimer->stop();
         }
@@ -736,9 +747,105 @@ void DiscoveryManager::onProbeReplyFinished()
                 emit peerUpdated(peer);
             }
         }
+    } else {
+        // If HTTP failed (e.g. RemoteHostClosedError or TLS reset on port 53317), probe HTTPS as fallback
+        if (reply->error() == QNetworkReply::RemoteHostClosedError ||
+            reply->error() == QNetworkReply::ProtocolUnknownError ||
+            reply->error() == QNetworkReply::SslHandshakeFailedError) {
+            probeHttpsHost(targetAddr);
+        }
     }
 
     reply->deleteLater();
 
     pumpScanQueue();
+}
+
+void DiscoveryManager::probeHttpsHost(const QHostAddress &addr)
+{
+    if (!m_nam) {
+        return;
+    }
+
+    for (QMap<QString, PeerDevice>::const_iterator it = m_peers.begin(); it != m_peers.end(); ++it) {
+        if (it.value().address == addr) {
+            return;
+        }
+    }
+
+    QUrl url;
+    url.setScheme("https");
+    url.setHost(addr.toString());
+    url.setPort(DEFAULT_PORT);
+    url.setPath("/api/localsend/v2/register");
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+
+    QString err;
+    QByteArray body = ProtocolJson::encodeRegisterRequest(m_localInfo, &err);
+    if (body.isEmpty()) {
+        return;
+    }
+
+    QNetworkReply *reply = m_nam->post(req, body);
+    if (reply) {
+        reply->ignoreSslErrors();
+        m_activeHttpsProbes.insert(reply, addr);
+        connect(reply, SIGNAL(finished()), this, SLOT(onHttpsProbeReplyFinished()));
+        connect(reply, SIGNAL(sslErrors(QList<QSslError>)), reply, SLOT(ignoreSslErrors()));
+
+        QTimer *timer = new QTimer(reply);
+        timer->setSingleShot(true);
+        connect(timer, SIGNAL(timeout()), reply, SLOT(abort()));
+        timer->start(600);
+    }
+}
+
+void DiscoveryManager::onHttpsProbeReplyFinished()
+{
+    QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
+    if (!reply) {
+        return;
+    }
+
+    if (!m_activeHttpsProbes.contains(reply)) {
+        reply->deleteLater();
+        return;
+    }
+
+    QHostAddress targetAddr = m_activeHttpsProbes.take(reply);
+
+    if (reply->error() == QNetworkReply::NoError) {
+        int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (statusCode == 200) {
+            QByteArray respData = reply->readAll();
+            PeerDevice target;
+            target.address = targetAddr;
+            target.info.port = DEFAULT_PORT;
+            target.info.protocol = "https";
+
+            PeerDevice peer;
+            QString err;
+            if (ProtocolJson::decodeRegisterResponse(respData, target, &peer, &err)) {
+                if (peer.info.fingerprint != m_localInfo.fingerprint) {
+                    peer.info.protocol = "https";
+                    m_peers.insert(peer.info.fingerprint, peer);
+                    emit peerUpdated(peer);
+                }
+            }
+        }
+    }
+
+    reply->deleteLater();
+
+    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
+        if (m_scanDeadlineTimer) {
+            m_scanDeadlineTimer->stop();
+        }
+        if (m_isScanning) {
+            m_isScanning = false;
+            emit scanningChanged(false);
+        }
+    }
 }

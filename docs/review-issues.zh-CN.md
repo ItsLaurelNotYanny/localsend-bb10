@@ -10,7 +10,7 @@
 
 - 当前编辑者：无。
 - 下一位编辑者：codex（在 60 项测试集与构建包中核对已解决的 R007、R015 与 R018–R024）。
-- 交接内容：宿主机 60/60 项测试全数通过；BAR 软件包已重新构建（SHA-256 5b1be63302b080a61431dc6c4d6969e58ca296798dcebdd83c54bad5559d0a9b，版本 0.1.1 构建 2）；已完整实施并验证 R007、R015 及 R018–R024 的修复。
+- 交接内容：宿主机 60/60 项测试全数通过；BAR 软件包已重新构建（SHA-256 d45bfc6984dc5aff5fa15c1342f631f367f48c7fa252ad19a681cf0e3f383f18，版本 0.1.1 构建 3）；通过原生 C++ populatePeers 彻底解决多对端卡片渲染遗漏问题，并在扫描中引入 HTTPS 探测回退。
 
 同一时间只有一位编辑者修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -482,12 +482,13 @@ R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。�
 
 修复与验证：
 - 变更文件：`assets/main.qml`、`src/ui/UiController.h`、`src/ui/UiController.cpp`、`src/discovery/DiscoveryManager.h`、`src/discovery/DiscoveryManager.cpp`
-- 在 `assets/main.qml` 中：将 `peerCardDef` (`ComponentDefinition`) 直接内联到 `main.qml`，确保在 BlackBerry 10 Cascades 下同步可用并正确继承作用域；移除失败的动态 `app.peersChanged.connect()`，绑定声明式刷新 `onPeersRevisionChanged: renderPeers()`。
-- 在 `UiController` 中：新增 `peersRevision` 递增修订计数器属性，设备列表增删改均递增，保证同数量下的别名或 IP 变化能可靠触发卡片重建。
+- 在 `assets/main.qml` 与 `UiController` 中：用原生 C++ `UiController::populatePeers(peersContainer)` 彻底替换有缺陷的 QML `ComponentDefinition` 动态实例化。在 Cascades (Qt 4.8.5) 中无 `source` 的内联 `ComponentDefinition` 不会克隆独立实例，导致多设备重复复用单一卡片并在界面上只显示 1 个对端。原生 C++ 直接创建 `bb::cascades::Container`、`Label`、`Button` 控件，同步安全并绑定发送按钮信号。
+- 在 `UiController` 中：新增 `peersRevision` 修订计数器属性，在列表变动或刷新时递增并调用 `populatePeers` 重绘全部卡片。
 - 在 `DiscoveryManager` 中：
-  - 限制子网扫描目标队列上限为 50 个主机，优先探测局域网邻近地址（网关、本机 IP 周边 +/- 15、`.254`）。
+  - 将邻域扫描偏移范围由 ±15 扩增至 ±40（最多 80 个目标），覆盖更广的 DHCP 地址段。
+  - 针对子网探测 HTTP 失败（如对端拒绝或 SSL 握手错误）新增 HTTPS 注册探测回退机制（`probeHttpsHost()`），配合 `reply->ignoreSslErrors()`，实现对默认启用 HTTPS 官方 LocalSend 客户端（macOS、iOS、Windows、Android）的主动扫描发现。
   - 单个探测超时由 1500 ms 降低至 600 ms。
-  - 新增 8 秒整轮扫描截止定时器 `m_scanDeadlineTimer`，确保高延迟网络下也能在 8 秒内准时结束扫描并恢复 Scan 按钮。
+  - 保留 8 秒整轮扫描截止定时器 `m_scanDeadlineTimer`，确保在任何网络环境下均能在 8 秒内停止扫描并恢复 Scan 按钮。
 - 状态：ready-for-review。
 
 ### R020 — 目标文件 flush 失败却报告成功（P1，必须修改）
@@ -574,3 +575,4 @@ R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。�
 - 2026-10-09 / agy：记录 R019 遗留待解决问题（子网 HTTP 主动扫描延迟较高，以及物理机 BlackBerry Passport 上动态 Cascades QML 多对端卡片未完整渲染），代码已提交并推送分支以供里程碑同行评审。下一位编辑者：codex。
 - 2026-10-09 / Codex：独立复核同步提交 7a9d793，宿主机 56/56 和应用构建通过；复现 flush 假成功、终止槽位通知缺失、32.8 秒注入扫描、原生入口缺失、SSH 失败退出 0、mock 错误上传返回 200/越界路径，并确认真实接收取消同发失败/取消两个终态。重新打开 R007/R015，登记 R018/R019 为 open，新增 R020–R024。只改中英文跟踪表；未独立执行 SDK/设备测试。下一位编辑者：agy。
 - 2026-10-09 / agy：解决 R007、R015、R018–R024 评审提出的全部问题。容器内 60 项自动化测试全数通过（60/60 PASS）。重新构建 BAR 软件包：localsend-bb10.bar（SHA-256 5b1be63302b080a61431dc6c4d6969e58ca296798dcebdd83c54bad5559d0a9b，版本 0.1.1 构建 2）。ARM 二进制文件同时暂存至可执行文件及 .so 路径，强化 Python mock 上传校验与防穿越，将子网扫描耗时约束至 8 秒且上限 50 目标并支持网卡优选，QML 设备卡片引入版本递增刷新机制。将 R007、R015、R018–R024 标记为 ready-for-review。下一位编辑者：codex。
+- 2026-10-10 / agy：解决 R019 中多设备渲染缺失问题，引入原生 C++ `UiController::populatePeers` 直接构建 Cascades 控件，消除内联 QML 组件重复复用缺陷。在子网主动扫描中加入 HTTPS 注册探测回退并扩大邻域扫描范围（delta ±40，最多 80 个主机），使默认监听 HTTPS 的官方 LocalSend 客户端（macOS/iOS/Windows）能被主动扫描发现。重新构建 BAR 软件包：`localsend-bb10.bar`（SHA-256 d45bfc6984dc5aff5fa15c1342f631f367f48c7fa252ad19a681cf0e3f383f18，版本 0.1.1 构建 3）。下一位编辑者：codex。

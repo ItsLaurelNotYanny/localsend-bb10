@@ -56,7 +56,7 @@ TabbedPane {
                             textStyle.color: Color.White
                         }
                         Label {
-                            text: app.networkStatus + " • Port " + app.devicePort + " • v0.1.1 [c69c7c2]"
+                            text: app.networkStatus + " • Port " + app.devicePort + " • v0.1.1.3"
                             textStyle.base: SystemDefaults.TextStyles.SmallText
                             textStyle.color: Color.create("#68D391")
                         }
@@ -122,116 +122,22 @@ TabbedPane {
                         topPadding: 8.0
                         bottomPadding: 8.0
 
-                        property int peerCount: app.peerCount
-                        property int peersRevision: app.peersRevision
-                        property variant activeCards: []
-
-                        onPeerCountChanged: {
-                            renderPeers();
-                        }
-
-                        onPeersRevisionChanged: {
-                            renderPeers();
-                        }
-
-                        function renderPeers() {
-                            // Destroy old card instances to free memory
-                            for (var i = 0; i < activeCards.length; ++i) {
-                                if (activeCards[i]) {
-                                    activeCards[i].destroy();
-                                }
-                            }
-                            activeCards = [];
-                            peersContainer.removeAll();
-
-                            var list = app.peers;
-                            if (!list) {
-                                return;
-                            }
-                            var newCards = [];
-                            for (var j = 0; j < list.length; ++j) {
-                                var card = peerCardDef.createObject();
-                                if (card) {
-                                    var p = list[j];
-                                    card.peerFingerprint = p.fingerprint;
-                                    card.peerAlias = p.alias;
-                                    card.peerModel = p.deviceModel;
-                                    card.peerAddress = p.displayAddress;
-                                    card.isHttps = p.isHttps;
-                                    peersContainer.add(card);
-                                    newCards.push(card);
-                                }
-                            }
-                            activeCards = newCards;
-                        }
-
                         onCreationCompleted: {
-                            renderPeers();
+                            app.populatePeers(peersContainer);
                         }
 
-                        attachedObjects: [
-                            ComponentDefinition {
-                                id: peerCardDef
-                                Container {
-                                    id: cardRoot
-                                    property string peerFingerprint: ""
-                                    property string peerAlias: ""
-                                    property string peerModel: ""
-                                    property string peerAddress: ""
-                                    property bool isHttps: false
-
-                                    topPadding: 16.0
-                                    bottomPadding: 16.0
-                                    leftPadding: 16.0
-                                    rightPadding: 16.0
-                                    bottomMargin: 12.0
-                                    background: Color.create("#F7FAFC")
-
-                                    Container {
-                                        layout: StackLayout {
-                                            orientation: LayoutOrientation.LeftToRight
-                                        }
-
-                                        // Left: Device details
-                                        Container {
-                                            layoutProperties: StackLayoutProperties {
-                                                spaceQuota: 3.0
-                                            }
-
-                                            Label {
-                                                text: cardRoot.peerAlias
-                                                textStyle.base: SystemDefaults.TextStyles.TitleText
-                                                textStyle.color: Color.create("#2D3748")
-                                            }
-                                            Label {
-                                                text: cardRoot.peerModel + " • " + cardRoot.peerAddress
-                                                textStyle.base: SystemDefaults.TextStyles.SmallText
-                                                textStyle.color: Color.create("#718096")
-                                            }
-                                            Label {
-                                                visible: cardRoot.isHttps
-                                                text: "HTTPS not supported in MVP"
-                                                textStyle.base: SystemDefaults.TextStyles.SmallText
-                                                textStyle.color: Color.create("#E53E3E")
-                                            }
-                                        }
-
-                                        // Right: Send button
-                                        Button {
-                                            text: "Send"
-                                            enabled: app.hasSelectedFile && !app.transferActive && !cardRoot.isHttps
-                                            layoutProperties: StackLayoutProperties {
-                                                spaceQuota: 1.0
-                                            }
-                                            verticalAlignment: VerticalAlignment.Center
-                                            onClicked: {
-                                                app.sendSelectedFile(cardRoot.peerFingerprint);
-                                            }
-                                        }
-                                    }
-                                }
+                        Connections {
+                            target: app
+                            onPeersRevisionChanged: {
+                                app.populatePeers(peersContainer);
                             }
-                        ]
+                            onSelectedFileChanged: {
+                                app.populatePeers(peersContainer);
+                            }
+                            onTransferStateChanged: {
+                                app.populatePeers(peersContainer);
+                            }
+                        }
                     }
 
                     Divider {}
@@ -608,7 +514,7 @@ TabbedPane {
                         textStyle.base: SystemDefaults.TextStyles.TitleText
                     }
                     Label {
-                        text: "Version 0.1.1 (Build c69c7c2)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
+                        text: "Version 0.1.1 (Build 3)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
                         textStyle.base: SystemDefaults.TextStyles.BodyText
                         textStyle.color: Color.create("#718096")
                     }

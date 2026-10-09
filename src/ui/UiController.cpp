@@ -7,6 +7,16 @@
 #include <bb/cascades/pickers/FilePicker.hpp>
 #include <bb/cascades/pickers/FilePickerMode.hpp>
 #include <bb/cascades/pickers/FilePickerSortFlag.hpp>
+#include <bb/cascades/Container>
+#include <bb/cascades/Label>
+#include <bb/cascades/Button>
+#include <bb/cascades/StackLayout>
+#include <bb/cascades/StackLayoutProperties>
+#include <bb/cascades/SystemDefaults>
+#include <bb/cascades/TextStyleDefinition>
+#include <bb/cascades/Color>
+#include <bb/cascades/VerticalAlignment>
+#include <bb/cascades/LayoutOrientation>
 #include <bb/system/InvokeManager.hpp>
 #include <bb/system/InvokeRequest.hpp>
 #else
@@ -694,6 +704,98 @@ QString UiController::formatBytes(qint64 bytes)
         double gb = (double)bytes / (1024.0 * 1024.0 * 1024.0);
         return QString("%1 GB").arg(QString::number(gb, 'f', 2));
     }
+}
+
+void UiController::populatePeers(QObject *containerObj)
+{
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    bb::cascades::Container *container = qobject_cast<bb::cascades::Container*>(containerObj);
+    if (!container) {
+        return;
+    }
+
+    container->removeAll();
+
+    for (int i = 0; i < m_peers.size(); ++i) {
+        QVariantMap p = m_peers.at(i).toMap();
+        QString alias = p.value("alias").toString();
+        QString model = p.value("deviceModel").toString();
+        QString addr = p.value("displayAddress").toString();
+        QString fp = p.value("fingerprint").toString();
+        bool isHttps = p.value("isHttps").toBool();
+
+        bb::cascades::Container *card = new bb::cascades::Container();
+        card->setTopPadding(16.0f);
+        card->setBottomPadding(16.0f);
+        card->setLeftPadding(16.0f);
+        card->setRightPadding(16.0f);
+        card->setBottomMargin(12.0f);
+        card->setBackground(bb::cascades::Color::fromARGB(0xFFF7FAFC));
+
+        bb::cascades::Container *row = new bb::cascades::Container();
+        bb::cascades::StackLayout *layout = new bb::cascades::StackLayout();
+        layout->setOrientation(bb::cascades::LayoutOrientation::LeftToRight);
+        row->setLayout(layout);
+
+        // Left column: Device details
+        bb::cascades::Container *left = new bb::cascades::Container();
+        bb::cascades::StackLayoutProperties *leftProps = new bb::cascades::StackLayoutProperties();
+        leftProps->setSpaceQuota(3.0f);
+        left->setLayoutProperties(leftProps);
+
+        bb::cascades::Label *aliasLabel = new bb::cascades::Label();
+        aliasLabel->setText(alias);
+        aliasLabel->textStyle()->setBase(bb::cascades::SystemDefaults::TextStyles::titleText());
+        aliasLabel->textStyle()->setColor(bb::cascades::Color::fromARGB(0xFF2D3748));
+        left->add(aliasLabel);
+
+        bb::cascades::Label *subLabel = new bb::cascades::Label();
+        subLabel->setText(model + " • " + addr);
+        subLabel->textStyle()->setBase(bb::cascades::SystemDefaults::TextStyles::smallText());
+        subLabel->textStyle()->setColor(bb::cascades::Color::fromARGB(0xFF718096));
+        left->add(subLabel);
+
+        if (isHttps) {
+            bb::cascades::Label *httpsLabel = new bb::cascades::Label();
+            httpsLabel->setText("HTTPS not supported in MVP");
+            httpsLabel->textStyle()->setBase(bb::cascades::SystemDefaults::TextStyles::smallText());
+            httpsLabel->textStyle()->setColor(bb::cascades::Color::fromARGB(0xFFE53E3E));
+            left->add(httpsLabel);
+        }
+        row->add(left);
+
+        // Right column: Send button
+        bb::cascades::Button *sendBtn = new bb::cascades::Button();
+        sendBtn->setText("Send");
+        sendBtn->setEnabled(hasSelectedFile() && !transferActive() && !isHttps);
+        sendBtn->setProperty("peerFingerprint", fp);
+        sendBtn->setVerticalAlignment(bb::cascades::VerticalAlignment::Center);
+        bb::cascades::StackLayoutProperties *btnProps = new bb::cascades::StackLayoutProperties();
+        btnProps->setSpaceQuota(1.0f);
+        sendBtn->setLayoutProperties(btnProps);
+
+        connect(sendBtn, SIGNAL(clicked()), this, SLOT(onSendCardButtonClicked()));
+        row->add(sendBtn);
+
+        card->add(row);
+        container->add(card);
+    }
+#else
+    Q_UNUSED(containerObj);
+#endif
+}
+
+void UiController::onSendCardButtonClicked()
+{
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    bb::cascades::Button *btn = qobject_cast<bb::cascades::Button*>(sender());
+    if (btn) {
+        QString fp = btn->property("peerFingerprint").toString();
+        if (!fp.isEmpty()) {
+            sendSelectedFile(fp);
+        }
+    }
+#endif
 }
 
 } // namespace localsend

@@ -3,7 +3,7 @@
     <id>com.localsend.bb10</id>
     <name>LocalSend</name>
     <versionNumber>0.1.1</versionNumber>
-    <buildId>2</buildId>
+    <buildId>3</buildId>
     <description>Unofficial native LocalSend client for BlackBerry 10</description>
     <author>Community</author>
 

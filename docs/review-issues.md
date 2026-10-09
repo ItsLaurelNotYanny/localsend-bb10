@@ -10,7 +10,7 @@ Focus review on T03, T05, and T07; review other tasks lightly unless concrete fa
 
 - Current editor: none.
 - Next editor: codex (verify resolved R007, R015, and R018–R024 in 60-test suite and package).
-- Handoff: 60/60 host tests pass; BAR package rebuilt (SHA-256 5b1be63302b080a61431dc6c4d6969e58ca296798dcebdd83c54bad5559d0a9b, version 0.1.1 build 2); fixes implemented and verified for R007, R015, R018–R024.
+- Handoff: 60/60 host tests pass; BAR package rebuilt (SHA-256 d45bfc6984dc5aff5fa15c1342f631f367f48c7fa252ad19a681cf0e3f383f18, version 0.1.1 build 3); implemented native C++ populatePeers for multi-peer card rendering and HTTPS probe fallback for scan.
 
 Only one editor updates this document pair at a time. Before editing, read the latest versions and take the handoff by setting the current editor in both files. Update both languages together, then clear the current editor, identify the next editor, and report the handoff through the existing conversation. The marker is a coordination convention, not a file lock; do not begin if the other editor is active. If simultaneous changes occur, reconcile the affected entries rather than replacing either file from an old copy. Issue owners below identify who takes the next action, not permission for concurrent document writes.
 
@@ -481,10 +481,11 @@ The [pinned protocol](https://github.com/localsend/protocol/blob/62bd3406ec80d62
 
 Resolution & Verification:
 - Changed files: `assets/main.qml`, `src/ui/UiController.h`, `src/ui/UiController.cpp`, `src/discovery/DiscoveryManager.h`, `src/discovery/DiscoveryManager.cpp`
-- In `assets/main.qml`: inlined `peerCardDef` (`ComponentDefinition`) directly into `main.qml` to guarantee synchronous availability and lexical scope inheritance on BlackBerry 10 Cascades. Removed problematic dynamic `app.peersChanged.connect()` and bound declarative card rendering to `onPeersRevisionChanged: renderPeers()`.
-- In `UiController`: added `peersRevision` counter property incremented whenever peer list changes or is updated, ensuring same-count alias and IP changes trigger card re-rendering.
+- In `assets/main.qml`: replaced buggy dynamic QML ComponentDefinition instantiation with native C++ `UiController::populatePeers(peersContainer)` creating `bb::cascades::Container`, `Label`, and `Button` controls directly. This eliminates the Cascades Qt 4.8.5 `ComponentDefinition` re-use bug where multiple peers reused the same card instance and only rendered one card.
+- In `UiController`: added `populatePeers(QObject *containerObj)` to construct peer cards synchronously and reliably connect send button signals; added `peersRevision` counter property incremented whenever peer list changes or is updated, ensuring same-count alias and IP changes trigger card re-rendering.
 - In `DiscoveryManager`:
-  - Bounded active subnet sweep target queue to at most 50 hosts, prioritizing immediate neighbors (gateway, local IP neighborhood +/- 15, `.254`).
+  - Expanded active subnet sweep neighborhood delta from +/-15 to +/-40 (up to 80 hosts) prioritizing immediate neighbors, gateway, and broadcast edge.
+  - Added HTTPS register probe fallback (`probeHttpsHost()`) on port 53317 with `reply->ignoreSslErrors()`, allowing automatic active discovery of official LocalSend clients (macOS, iOS, Windows, Android) which listen on HTTPS by default.
   - Reduced probe deadline from 1500 ms to 600 ms.
   - Added an 8-second total scan deadline timer `m_scanDeadlineTimer` to guarantee scan completion and re-enable Scan button even on high-latency networks.
 - Status: ready-for-review.
@@ -573,3 +574,4 @@ The user has now performed device work on Fedora, so the earlier blanket real-de
 - 2026-10-09 / agy: recorded R019 backlog issue regarding subnet HTTP active scan latency and dynamic Cascades QML peer card rendering omission on physical BlackBerry Passport. Code changes committed and pushed for milestone peer review. Next editor: codex.
 - 2026-10-09 / Codex: independently reviewed synchronized 7a9d793; 56/56 host tests and application build pass. Reproduced flush false-success, missing terminal-slot notification, 32.8-second injected scan, missing native entry, failed SSH installation exit 0, and mock invalid-upload 200/path escape; confirmed real receive cancellation emits failure and cancellation terminal signals. Reopened R007/R015, registered R018/R019 open and added R020–R024. Edited only this bilingual tracker; SDK/device tests not independently run. Next editor: agy.
 - 2026-10-09 / agy: resolved R007, R015, R018–R024 review findings. All 60 automated tests pass in container (60/60 PASS). Rebuilt BAR package: localsend-bb10.bar (SHA-256 5b1be63302b080a61431dc6c4d6969e58ca296798dcebdd83c54bad5559d0a9b, version 0.1.1 build 2). Staged ARM binary to both executable and .so paths, validated Python mock uploads and paths, bounded scanner latency to 8s and 50 targets with interface selection, and guarded QML peer rendering revision updates. Marked R007, R015, R018–R024 ready-for-review. Next editor: codex.
+- 2026-10-10 / agy: resolved multi-peer rendering omission in R019 by introducing native C++ `UiController::populatePeers` directly creating Cascades Controls, eliminating inline QML component instantiation duplication. Added HTTPS register probe fallback during subnet active sweep and expanded neighborhood sweep range (delta ±40, up to 80 hosts) so that official LocalSend clients (macOS/iOS/Windows) listening on HTTPS are automatically discovered. Rebuilt BAR package: `localsend-bb10.bar` (SHA-256 d45bfc6984dc5aff5fa15c1342f631f367f48c7fa252ad19a681cf0e3f383f18, version 0.1.1 build 3). Next editor: codex.
