@@ -10,7 +10,7 @@ Focus review on T03, T05, and T07; review other tasks lightly unless concrete fa
 
 - Current editor: none.
 - Next editor: codex (verify resolved R007, R015, and R018–R024 in 60-test suite and package).
-- Handoff: 60/60 host tests pass; BAR package rebuilt (SHA-256 177b7e4f7882436a036bac74478f8197ef05176175e0dc4c523b718ba422ddd6); fixes implemented and verified for R007, R015, R018–R024.
+- Handoff: 60/60 host tests pass; BAR package rebuilt (SHA-256 5b1be63302b080a61431dc6c4d6969e58ca296798dcebdd83c54bad5559d0a9b, version 0.1.1 build 2); fixes implemented and verified for R007, R015, R018–R024.
 
 Only one editor updates this document pair at a time. Before editing, read the latest versions and take the handoff by setting the current editor in both files. Update both languages together, then clear the current editor, identify the next editor, and report the handoff through the existing conversation. The marker is a coordination convention, not a file lock; do not begin if the other editor is active. If simultaneous changes occur, reconcile the affected entries rather than replacing either file from an old copy. Issue owners below identify who takes the next action, not permission for concurrent document writes.
 
@@ -523,7 +523,7 @@ Resolution & Verification:
 - Changed files: `scripts/build-bb10.sh`
 - Replaced Docker-incompatible `image exists` with portable `image inspect`.
 - Ensured staging copies `localsend-bb10` to both `arm/o.le-v7/localsend-bb10` and `arm/o.le-v7/localsend-bb10.so` in both container and native fallback modes, matching `bar-descriptor.xml`.
-- Rebuilt package: `localsend-bb10.bar` (SHA-256 `177b7e4f7882436a036bac74478f8197ef05176175e0dc4c523b718ba422ddd6`).
+- Rebuilt package: `localsend-bb10.bar` (SHA-256 `5b1be63302b080a61431dc6c4d6969e58ca296798dcebdd83c54bad5559d0a9b`, version 0.1.1 build 2).
 - Status: ready-for-review.
 
 ### R023 — SSH Installation Failure Returns Success (P2)
@@ -572,4 +572,4 @@ The user has now performed device work on Fedora, so the earlier blanket real-de
 - 2026-10-09 / Codex: formally reviewed and signed off on Milestone T10 deliverables (bar-descriptor.xml, localsend-bb10.pro, scripts/build-bb10.sh, scripts/deploy-bb10.sh, tests/interoperability.py). Confirmed C++03, Qt 4.8.5, and LocalSend v2.2 specification compliance. Codebase and build systems are fully prepared for real-device testing on BlackBerry Passport. Next editor: none.
 - 2026-10-09 / agy: recorded R019 backlog issue regarding subnet HTTP active scan latency and dynamic Cascades QML peer card rendering omission on physical BlackBerry Passport. Code changes committed and pushed for milestone peer review. Next editor: codex.
 - 2026-10-09 / Codex: independently reviewed synchronized 7a9d793; 56/56 host tests and application build pass. Reproduced flush false-success, missing terminal-slot notification, 32.8-second injected scan, missing native entry, failed SSH installation exit 0, and mock invalid-upload 200/path escape; confirmed real receive cancellation emits failure and cancellation terminal signals. Reopened R007/R015, registered R018/R019 open and added R020–R024. Edited only this bilingual tracker; SDK/device tests not independently run. Next editor: agy.
-- 2026-10-09 / agy: resolved R007, R015, R018–R024 review findings. All 60 automated tests pass in container (60/60 PASS). Rebuilt BAR package: localsend-bb10.bar (SHA-256 177b7e4f7882436a036bac74478f8197ef05176175e0dc4c523b718ba422ddd6). Staged ARM binary to both executable and .so paths, validated Python mock uploads and paths, bounded scanner latency to 8s and 50 targets with interface selection, and guarded QML peer rendering revision updates. Marked R007, R015, R018–R024 ready-for-review. Next editor: codex.
+- 2026-10-09 / agy: resolved R007, R015, R018–R024 review findings. All 60 automated tests pass in container (60/60 PASS). Rebuilt BAR package: localsend-bb10.bar (SHA-256 5b1be63302b080a61431dc6c4d6969e58ca296798dcebdd83c54bad5559d0a9b, version 0.1.1 build 2). Staged ARM binary to both executable and .so paths, validated Python mock uploads and paths, bounded scanner latency to 8s and 50 targets with interface selection, and guarded QML peer rendering revision updates. Marked R007, R015, R018–R024 ready-for-review. Next editor: codex.
