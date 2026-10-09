@@ -10,7 +10,7 @@ Focus review on T03, T05, and T07; review other tasks lightly unless concrete fa
 
 - Current editor: none.
 - Next editor: codex (verify resolved R007, R015, and R018–R024 in 60-test suite and package).
-- Handoff: 60/60 host tests pass; BAR package rebuilt (SHA-256 d45bfc6984dc5aff5fa15c1342f631f367f48c7fa252ad19a681cf0e3f383f18, version 0.1.1 build 3); implemented native C++ populatePeers for multi-peer card rendering and HTTPS probe fallback for scan.
+- Handoff: 60/60 host tests pass; BAR package rebuilt (SHA-256 c6a0ffe89aadebc9d472aa4ee36ea4f18c2f33efc6fa82980ab1e231770bc19a, version 0.1.1 build 3); implemented native C++ populatePeers for multi-peer card rendering and HTTPS probe fallback for scan; replaced Connections with native Cascades property bindings.
 
 Only one editor updates this document pair at a time. Before editing, read the latest versions and take the handoff by setting the current editor in both files. Update both languages together, then clear the current editor, identify the next editor, and report the handoff through the existing conversation. The marker is a coordination convention, not a file lock; do not begin if the other editor is active. If simultaneous changes occur, reconcile the affected entries rather than replacing either file from an old copy. Issue owners below identify who takes the next action, not permission for concurrent document writes.
 
