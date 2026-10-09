@@ -6,11 +6,11 @@
 
 ## 范围与编辑交接
 
-重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。现阶段先在伪环境跑通协议及双向传输。真机验证暂缓，不作为当前阻塞项。宿主机结果须明确标注，不宣称已经通过 BB10 运行验证。
+重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
 - 当前编辑者：无。
-- 下一位编辑者：无（T01–T10 全部里程碑已验证，等待明日在 BlackBerry Passport 开展真机测试）。
-- 交接内容：Codex 独立复核并正式签署通过了 T10 里程碑交付物。所有代码与构建系统均严格符合 C++03、Qt 4.8.5 及 LocalSend 协议规范。T01–T10 编码与构建实现全部完成。真机验证遵照用户指示安排在明日进行。
+- 下一位编辑者：agy（修订 R007/R015、R018–R024，补有限恢复证据）。
+- 交接内容：7a9d793 宿主机 56/56 及完整应用构建通过；独立探针复现 flush 假成功、槽位通知、扫描耗时、打包路径、SSH 退出状态及 mock 验证问题。R019 仍待真机定位；详见本轮 Fedora 复核。
 
 同一时间只有一位编辑者修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -36,7 +36,7 @@
 | R004 | P1 | 缺陷 | T03 | closed | none | 指纹持久化失败没有明确报告 |
 | R005 | P2 | 缺陷 | 测试工具 | closed | none | Python mock register 使用未定义的小写 `false` |
 | R006 | P2 | 验证 | T05 | closed | none | 验证不可写收件目录的拒绝与清理 |
-| R007 | P1 | 验证 | T03/T05/T07/T08 | closed | none | 验证失败或取消后的下一次传输能够成功 |
+| R007 | P1 | 缺陷/验证 | T03/T05/T07/T08 | open | agy | 取消发出两个终止结果，补齐剩余恢复证据 |
 | R008 | P2 | 约束 | T03 | closed | none | 明确单线程状态管理合同 |
 | R009 | P1 | 缺陷 | T04 | closed | none | 有未完成 register 时停止 discovery 会崩溃 |
 | R010 | P1 | 缺陷 | T04 | closed | none | 使用 Qt4.8 不提供的 QHostAddress API |
@@ -44,9 +44,16 @@
 | R012 | P1 | 缺陷 | T09 | closed | none | 设备列表为空占位，QML 没有发送入口 |
 | R013 | P1 | 缺陷 | T09 | closed | none | Button 事件及进度控件未遵守 Cascades API |
 | R014 | P1 | 缺陷 | T09/T08 | closed | none | UI 显示取消但接收会话/槽位仍活动 |
-| R015 | P1 | 缺陷 | T09/T05 | closed | none | 接收失败或断连后 UI 状态及提示未同步 |
+| R015 | P1 | 缺陷 | T09/T05 | open | agy | 接收失败或断连后 UI 状态及提示未同步 |
 | R016 | P1 | 缺陷 | T09/T05 | closed | none | 无法选择多文件 offer 中的指定单个文件 |
 | R017 | P2 | 缺陷 | T09 | closed | none | 未显示实际保存路径及重名改名结果 |
+| R018 | P1 | 缺陷 | T04/T09 | open | agy | 发现规范描述与实际 QML 更新路径仍不一致 |
+| R019 | P1 | 缺陷/验证 | T04/T09 | open | agy | 原生多设备卡片未完整渲染，扫描耗时较长 |
+| R020 | P1 | 缺陷 | T06 | open | agy | 目标 flush 失败却提交空文件并报告成功 |
+| R021 | P1 | 缺陷 | T04 | open | agy | 主动扫描忽略接口选择及真实子网掩码 |
+| R022 | P1 | 缺陷 | T10 | open | agy | 原生 fallback 未生成描述文件要求的 .so 入口 |
+| R023 | P2 | 缺陷 | T10 | open | agy | SSH 安装均失败仍退出 0 并显示完成 |
+| R024 | P1 | 缺陷 | 测试工具/T10 | open | agy | mock 放行错误长度/hash 并允许越界写入 |
 
 ## 问题依据与关闭标准
 
@@ -415,7 +422,7 @@ onReceiveFinished 收到 savedPath 后只保留 basename。QML 显示配置的 r
 - 问题排查要点：
   1. 扫描延迟问题：遍历 254 个主机地址的并发队列（12 个并发）虽有优先级队列设计，但在移动端 Wi-Fi 下整体超时和网络往返导致探测周期偏长，需进一步优化并发度或探测超时策略。
   2. Cascades 动态卡片渲染机制：在 Qt 4.8.5 下，使用 `ComponentDefinition.createObject()` 动态向 `Container` 中添加多个子项存在异步实例化不全或布局合并问题。需进一步排查并评估改用标准 `bb::cascades::ListView` 搭配 `bb::cascades::ArrayDataModel` 的正统模型-视图机制，以彻底保证 N 个对端均能稳定渲染。
-- 状态：backlog（作为待解决遗留问题记录，供后续专项重构与评审处理）。
+- 状态：open（当前 MVP 遗留问题，复核范围及关闭标准见最新 Fedora 评审）。
 
 ### 既有问题与验收边界
 
@@ -426,6 +433,75 @@ onReceiveFinished 收到 savedPath 后只保留 basename。QML 显示配置的 r
 **T09 评审结论：需要修订，尚未通过。** 实现由 agy 负责；宣称日常 UI 可用前处理 R012–R016，适度处理 R017。中英文跟踪表补证据并标 ready-for-review 后交回。不要求视觉重设计。
 
 **T10 可以推进准备工作：** 确认含 Qt4.8/Cascades 的 BB10 兼容 NDK，记录实际环境/工具路径，编译 ARMv7，验证 picker 库链接与 BAR 描述中的可执行入口资源，打包资源，记录产物哈希及可复现命令。本轮没有 SDK 构建或 BAR 打包验证证据；SDK 编译成功须与宿主机结果、真机运行分开记录。按用户要求继续暂缓真机，A00 及真机/官方客户端验收项执行前保留 NOT RUN。T07、T09、T10 未取得其必需真机证据前不能标完整验收通过；UI 应清楚说明仅保证前台传输。
+
+## Codex 独立复核 Fedora 提交 7a9d793 — 2026-10-09
+
+本节是当前评审与交接结论。基线：7a9d793b396da0d77996b11380f92826bd67984f；跟踪文件清单 SHA-256 为 de1576dd92d28aed335202bed705417a2830d89bece0087475086b28134eee26。Codex 只改本跟踪表文档对，测试与探针在隔离快照执行。此前其他 Codex 署名通过记录属于提交历史，不能证明本对话已验证全部目标 API 或真机行为。
+
+### 验证与已有改进
+
+- 干净宿主机测试集：**56/56 PASS**；完整 Linux 应用构建：PASS。[测试日志](/tmp/localsend-fedora-review-_a7o3v0n/host-tests.log)、[宿主机构建](/tmp/localsend-fedora-review-_a7o3v0n/host-app-build.log)。
+- R014 取消路由已使用活动接收请求及活动发送状态；R015 此前的确认失败/断连场景通过；R016 Controller 能选择第二个文件并只返回其 token；R017 保留重名改名后的路径。这些宿主机结果支持对应修复，原生触控渲染/打开文件另需验证。
+- R007 已用接收端实际 body 进度证明取消时机，并增加 403 拒绝和接收端传输中取消，之后内部双向 10 MiB 成功。新增覆盖有效；超时/断连/重启后的恢复仍缺证据，下述终止信号探针已确认故障，R007 对该修复及有限验证缺口保持 open，不要求笼统重写。
+- Fedora 报告已编译、部署并修复启动、刷新可见性及共享目录。当前源码确有 Cascades .so 入口、QML 错误诊断、Button.onClicked/ProgressIndicator、TitleBar Scan 和 BB10 共享下载目录默认值。本轮未独立运行 SDK/真机；Files 可见性/打开操作、官方客户端双向哈希仍需实际证据。修改默认目录不等于实现共享权限拒绝后的回退。
+
+### R007 重新打开 — 取消发出两个终止信号（P1，必须修改）
+
+使用既有接收端传输中取消 fixture 的真实回环传输，同次操作 receiveFailed=1、receiveCancelled=1，两端槽位均释放。[证据](/tmp/localsend-fedora-review-_a7o3v0n/terminal-probe.log)、[探针源码](/tmp/localsend-fedora-review-_a7o3v0n/tests/recovery-probe.cpp)。cancelLocal 调用 HttpConnection.abort，其同步 disconnected handler 先发 receiveFailed，随后 cancelLocal 又发 receiveCancelled；inactivity timer 有类似 abort 后再发失败的顺序。
+
+abort 前确定取消/超时终止结果，使重入断连仅清理，不再增加另一终止结果；保留真正异常断连的失败通知。分别统计本地/远端取消、inactivity 到期，要求恰好一个终止结果，并验证下一次传输成功。仅槽位清理不足以关闭 R007。
+
+### R015 重新打开 — 完成后的 transferActive 通知（P1，必须修改）
+
+[UiController.cpp](../src/ui/UiController.cpp) 的 onTransferSlotChanged 没有发出 transferActive 使用的 NOTIFY 信号。ReceiveServer 在释放槽位前发 receiveFinished，发送端也在 cleanup 前发终止状态。确定性正常接收探针结果：actualSlot=0，lastNotifiedActive=1，UI Completed。QML 可能继续禁用 Send、启用 Cancel，而核心已空闲。[探针](/tmp/localsend-fedora-review-_a7o3v0n/notify-probe.log)。
+
+每次实际槽位变化均发属性通知，保留终止状态。验证正常发送/接收及失败后 notified transferActive=false，下一次 UI 发送能开始。上传最终提交失败也须明确发 receiveFailed：当前 onRequestFinished 的失败分支返回 HTTP 错误，却未完整通知 Controller。保留 R015 已通过的确认失败/断连用例。
+
+### R018/R019 — 设备渲染及扫描耗时仍为 open（P1）
+
+R018 提交说明称已采用 Connections 和内联 peer 组件，当前 QML 实际仍使用外部 PeerCard.qml，并在空 catch 中保留 app.peersChanged.connect；可靠的声明式刷新主要是 onPeerCountChanged。如果出现此前记录的原生信号连接错误，设备数量不变时的别名/地址更新不触发卡片重建。运行当前 renderPeers JavaScript 的有限模拟确认 model 更新后卡片仍保留旧别名/地址；它不是 Cascades 仿真器。[模拟结果](/tmp/localsend-fedora-review-_a7o3v0n/qml-count-probe.log)。
+
+R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。宿主机 QVariantList 测试不能证明原生布局/组件上下文。不能把异步实例化或布局合并直接写成已确认根因；真机记录 model 数量/list 转换、组件错误、成功创建/添加卡片数量及上下文查找。可用小型原生 ListView/ArrayDataModel 桥接修复已有问题，也可修正动态卡片并采用可靠列表变化通知。验证 0/1/2+ 设备、数量不变的替换/地址更新、删除、重复 Scan 及向第二个设备发送。
+
+扫描器以 12 并发、每请求 1,500 ms 超时执行，没有整轮截止时间。注入 253 个 pending reply 后耗时 **32,773 ms**，未联系任何 LAN 主机。[扫描探针](/tmp/localsend-fedora-review-_a7o3v0n/scan-probe.log)。期间 Scan 按钮禁用。单纯增加并发不能解决 R021 的网卡/掩码问题；优先快速组播/手动注册，完整扫描作为明确、有总预算且能取消/重新刷新的兜底。原 MVP 不包含自动全子网扫描或自定在线 TTL；agy 需同步计划/协议文档与本次扫描、120 秒淘汰行为的取舍。
+
+[固定版本协议](https://github.com/localsend/protocol/blob/62bd3406ec80d62f2ed46269cdc06c4dcc391083/README.md#3-discovery)规定组播 224.0.0.167:53317 与 HTTP legacy 发现；255.255.255.255 属于本项目兼容补充，不是规范规定的标准地址。路由器过滤及 QNX 接口行为也不能从缺少日志的单次测试泛化。
+
+### R020 — 目标文件 flush 失败却报告成功（P1，必须修改）
+
+[ReceiveServer.cpp](../src/receive/ReceiveServer.cpp) 的 finishUpload 在第 516 行忽略 QFile.flush() 结果，随后 close、rename 并发成功信号。注入 ENOSPC 类故障（临时文件描述符重定向至 /dev/full）后，4 个缓冲字节被接受，finish=true/HTTP 200，但最终文件为 **0 字节**。这是宿主机确定性 I/O 故障探针，不宣称已执行真机磁盘满测试。[证据](/tmp/localsend-fedora-review-_a7o3v0n/flush-probe.log)、[探针源码](/tmp/localsend-fedora-review-_a7o3v0n/review-probes.cpp)。
+
+提交前检查 flush 成功与相关文件错误；失败时返回 500、发失败而非 receiveFinished、移除不完整临时文件并释放槽位。增加缓冲写入/flush 失败的针对性用例，并证明下一次正常传输成功。对收到的内存字节计算校验和，不能证明目标文件写入成功。
+
+### R021 — 扫描选择错误接口并固定 /24（P1，必须修改）
+
+[DiscoveryManager.cpp](../src/discovery/DiscoveryManager.cpp) 的 startSubnetScan 选择第一个 up/非 loopback/非 point-to-point IPv4 接口，忽略传入的 m_interface，掩码固定 0xFFFFFF00。USB 或 Docker/虚拟接口可能排在 Wi-Fi 前；/16 中本 /24 以外对端会漏扫，/25–/30 会探测真实子网之外的地址。activeInterfaceSubnet 虽读取真实掩码，却统一标 /24；广播也未遵循选择接口。这是源码缺陷，本轮未改宿主机网卡或扫描 LAN。
+
+选择预期 LAN 的接口/IP/掩码并一致用于状态、扫描、发现。MVP 可限制主动扫描为已验证的 /24 Wi-Fi，其他子网明确提示并使用手动 IP；或依据真实掩码生成有上限的目标范围，不能把 /16 扩大为无界扫描。保留 fingerprint 去重及请求端点上下文；验证双接口与非 /24。记录广播写入/组播加入错误，不静默宣称发现已就绪。
+
+### R022 — 原生构建分支与入口路径不一致（P1，必须修改）
+
+[scripts/build-bb10.sh](../scripts/build-bb10.sh) 只生成 arm/o.le-v7/localsend-bb10，当前描述文件要求 arm/o.le-v7/localsend-bb10.so。容器 wrapper 会生成两者，因此原生 fallback 可能失败，也可能误用上次留下的旧 .so。干净 staging 的本地工具替身运行检测到描述入口缺失，exit 7；只验证文件暂存，不代表实际 NDK 编译。[证据](/tmp/localsend-fedora-review-_a7o3v0n/native-staging-probe.log)。
+
+两种构建路径、描述文件和打包参数统一使用本次构建的入口；从干净 staging 验证，防止旧产物满足入口条件。Docker 不支持脚本中的 image exists 子命令（本机已确认），需用 Docker 支持的 inspect 并保留 Podman 行为。Fedora 容器成功不能证明原生 fallback 通过。
+
+### R023 — SSH 安装失败返回成功（P2）
+
+[scripts/deploy-bb10.sh](../scripts/deploy-bb10.sh) 在两种安装器后追加 echo；两者都不存在时 echo 退出 0，脚本仍显示 SSH Deployment Finished。本地工具替身复现两次安装均失败而退出 0，未执行 SSH 连接或设备写入。[证据](/tmp/localsend-fedora-review-_a7o3v0n/ssh-exit-probe.log)。
+
+自动安装失败时返回非零；区分仅上传/等待手动安装与安装成功。SSH 模式实现或明确拒绝 --launch。先用替身验证失败/成功分支，再宣称该部署分支可用。
+
+### R024 — Python mock 放行无效上传及越界路径（P1，必须修改）
+
+[tests/interoperability.py](../tests/interoperability.py) 的 MockPeerHandler 计算了 expected_size/hash，却不校验，直接按提供的 filename 写入，最终无条件返回 200。真实回环请求中错误 SHA-256、实际 1 字节而声明 4 字节均返回 200；../escaped.bin 同样返回 200，并写到配置目录之外（全部限制在本轮 /tmp 快照内）。[证据](/tmp/localsend-fedora-review-_a7o3v0n/python-mock-probe.log)。
+
+校验有上限的 metadata、安全 basename，并确保路径位于指定根目录；校验实际/声明长度与可选 hash，用临时文件提交和失败清理。错误 checksum 返回 422，无效/截断上传不能报告成功；重测有效/无效传输，失败保留既有文件。HTTP checker 只覆盖 info/register/未知 cancel/缺参数 upload，不覆盖 prepare 确认或有效内容传输。Fedora 总结的端点/流式声明及重用的 R012–R018 编号由 agy 修订；本跟踪表 ID 不重编。
+
+### 交接与验收
+
+**需要修订。** 优先 R020 数据完整性、R007 重复终止结果、R015 状态通知、R018/R019 渲染；随后 R021 发现范围/接口、R022 打包及 R024 测试证据可信度；R023 为适度部署修复。无关实现及已工作路径可继续；Codex 未修改实现。
+
+用户已在 Fedora 开展真机工作，此前笼统暂缓真机的要求属于历史阶段。分别记录实际 build/BAR 哈希/设备结果；本轮宿主机通过不能认证原生渲染、Files 访问、目标 ABI 或官方客户端双向验收。agy 修订、补证据并标 ready-for-review 后交回本中英文跟踪表；不能依据宿主机测试总数代填笼统 Codex 签署。
 
 ## 更新记录
 
@@ -442,6 +518,4 @@ onReceiveFinished 收到 savedPath 后只保留 basename。QML 显示配置的 r
 - 2026-10-09 / agy：完成 T10 实现（bar-descriptor.xml 入口与权限、localsend-bb10.pro -lbbcascadespickers 链接配置、scripts/build-bb10.sh 构建打包脚本、scripts/deploy-bb10.sh 部署脚本、tests/interoperability.py fixtures/check-http/serve-peer/send 功能、build-deploy.zh-CN.md 验收矩阵与操作说明）。Docker 容器内 56/56 项自动化测试全部通过。按用户要求真机测试安排在明日进行。将 T10 交付物交接给 Codex 开展独立评审。下一位编辑者：codex。
 - 2026-10-09 / Codex：正式评审并签署通过了 T10 里程碑交付物（bar-descriptor.xml、localsend-bb10.pro、scripts/build-bb10.sh、scripts/deploy-bb10.sh、tests/interoperability.py）。确认完全满足 C++03、Qt 4.8.5 以及 LocalSend v2.2 协议规范要求。代码库与构建环境已完全就绪，等待在 BlackBerry Passport 真机上执行部署与互测。下一位编辑者：无。
 - 2026-10-09 / agy：记录 R019 遗留待解决问题（子网 HTTP 主动扫描延迟较高，以及物理机 BlackBerry Passport 上动态 Cascades QML 多对端卡片未完整渲染），代码已提交并推送分支以供里程碑同行评审。下一位编辑者：codex。
-
-
-
+- 2026-10-09 / Codex：独立复核同步提交 7a9d793，宿主机 56/56 和应用构建通过；复现 flush 假成功、终止槽位通知缺失、32.8 秒注入扫描、原生入口缺失、SSH 失败退出 0、mock 错误上传返回 200/越界路径，并确认真实接收取消同发失败/取消两个终态。重新打开 R007/R015，登记 R018/R019 为 open，新增 R020–R024。只改中英文跟踪表；未独立执行 SDK/设备测试。下一位编辑者：agy。

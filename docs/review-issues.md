@@ -6,11 +6,11 @@ Created by Codex on 2026-10-08. This document pair is the shared handoff for rev
 
 ## Scope and Editing Handoff
 
-Focus review on T03, T05, and T07; review other tasks lightly unless concrete failures justify deeper inspection. First run the protocol and both transfer directions in the pseudo-environment. Real-device validation is deferred and is not a current blocker. Host results must be labelled as host results, without claiming BB10 runtime validation.
+Focus review on T03, T05, and T07; review other tasks lightly unless concrete failures justify deeper inspection. The user has now performed target builds, deployment and manual device checks on Fedora. This review checks synchronized source and host behavior. Record source, host, SDK and device results separately; delivery claims or test counts do not replace independent acceptance.
 
 - Current editor: none.
-- Next editor: none (T01–T10 milestones verified; awaiting real-device testing on BlackBerry Passport).
-- Handoff: Codex independently reviewed and signed off on Milestone T10 deliverables. All code and build systems adhere to C++03, Qt 4.8.5, and LocalSend protocol specifications. T01–T10 implementation complete. Real-device execution deferred to tomorrow per user instruction.
+- Next editor: agy (fix R007/R015 and R018–R024, supplement bounded recovery evidence).
+- Handoff: 7a9d793 passes 56/56 host tests and full host application build; independent probes reproduced flush false-success, slot notification, scan latency, packaging, SSH exit-status and mock-validation defects. R019 still needs device diagnosis; see the current Fedora review below.
 
 Only one editor updates this document pair at a time. Before editing, read the latest versions and take the handoff by setting the current editor in both files. Update both languages together, then clear the current editor, identify the next editor, and report the handoff through the existing conversation. The marker is a coordination convention, not a file lock; do not begin if the other editor is active. If simultaneous changes occur, reconcile the affected entries rather than replacing either file from an old copy. Issue owners below identify who takes the next action, not permission for concurrent document writes.
 
@@ -36,7 +36,7 @@ For each update, record `date / author / changed files / commands and actual res
 | R004 | P1 | Defect | T03 | closed | none | Fingerprint persistence failure is not reported |
 | R005 | P2 | Defect | Test tooling | closed | none | Python mock register uses undefined lowercase `false` |
 | R006 | P2 | Verification | T05 | closed | none | Demonstrate unwritable destination rejection and cleanup |
-| R007 | P1 | Verification | T03/T05/T07/T08 | closed | none | Demonstrate recovery for the next transfer after failure or cancellation |
+| R007 | P1 | Defect/Verification | T03/T05/T07/T08 | open | agy | Cancellation emits two terminal results; complete remaining recovery evidence |
 | R008 | P2 | Constraint | T03 | closed | none | Make the single-thread state-management contract explicit |
 | R009 | P1 | Defect | T04 | closed | none | Stopping discovery with pending register requests crashes |
 | R010 | P1 | Defect | T04 | closed | none | Discovery uses QHostAddress APIs unavailable in Qt4.8 |
@@ -44,9 +44,16 @@ For each update, record `date / author / changed files / commands and actual res
 | R012 | P1 | Defect | T09 | closed | none | Peer list is a placeholder and QML has no send action |
 | R013 | P1 | Defect | T09 | closed | none | Button handlers and progress control do not follow Cascades APIs |
 | R014 | P1 | Defect | T09/T08 | closed | none | UI says cancelled while receive session/slot remains active |
-| R015 | P1 | Defect | T09/T05 | closed | none | Receive failures/disconnection leave stale UI state and offers |
+| R015 | P1 | Defect | T09/T05 | open | agy | Receive failures/disconnection leave stale UI state and offers |
 | R016 | P1 | Defect | T09/T05 | closed | none | Cannot select a specific single file from a multi-file offer |
 | R017 | P2 | Defect | T09 | closed | none | Actual saved path and collision-renamed file are not displayed |
+| R018 | P1 | Defect | T04/T09 | open | agy | Discovery claims and actual QML update path remain inconsistent |
+| R019 | P1 | Defect/Verification | T04/T09 | open | agy | Native multi-peer cards are incomplete and scanning is slow |
+| R020 | P1 | Defect | T06 | open | agy | Destination flush failure commits an empty file as success |
+| R021 | P1 | Defect | T04 | open | agy | Active scan ignores selected interface and actual subnet mask |
+| R022 | P1 | Defect | T10 | open | agy | Native fallback does not stage the descriptor's .so entry |
+| R023 | P2 | Defect | T10 | open | agy | Failed SSH installation exits 0 and reports completion |
+| R024 | P1 | Defect | Test tooling/T10 | open | agy | Mock accepts invalid length/hash and escaped write paths |
 
 ## Findings and Closure Criteria
 
@@ -405,7 +412,7 @@ Resolution & Verification:
 - Verification: package rebuilt (`localsend-bb10.bar`), HTTP endpoints verified with `tests/interoperability.py check-http`.
 - Status: ready-for-review.
 
-### R019 — Subnet Active Scan Latency and Cascades QML Dynamic Card Instantiation Gap (P1, Backlog)
+### R019 — Subnet Active Scan Latency and Cascades QML Dynamic Card Instantiation Gap (P1, Open)
 
 During physical testing on BlackBerry Passport, subnet HTTP sweep (/24) exhibits high latency before the peer count updates to `Nearby Devices (2)`. More critically, the Cascades QML UI container fails to dynamically render the 2nd (and subsequent) peer cards. Only the first discovered peer card is rendered and selectable on screen, even though the internal peer count reflects multiple peers.
 
@@ -414,7 +421,7 @@ Scope & Backlog Details:
 - Findings:
   1. High scan latency across the 254-host subnet: while concurrent probe queue (12 workers) scans nearby hosts first, network timeout and sequential probe scheduling cause noticeable delays on mobile Wi-Fi.
   2. Dynamic card rendering in Cascades: `ComponentDefinition.createObject()` inside a dynamic `Container` does not reliably instantiate multiple cards or properly update when peers are added asynchronously on Qt 4.8.5. Investigation should determine whether a standard `bb::cascades::ListView` backed by a `bb::cascades::ArrayDataModel` or a deterministic model-view architecture is required to reliably render arbitrary N peers.
-- Status: backlog (unresolved legacy issue recorded for subsequent milestone refactoring and peer review).
+- Status: open (current MVP issue; scope and closure criteria are in the latest Fedora review).
 
 ### Existing Issues and Acceptance Boundary
 
@@ -425,6 +432,75 @@ The current 56-test run and source inspection support closing R001/R009/R011 for
 **T09 review result: revisions required; not accepted.** agy owns implementation. Address R012–R016 before claiming the everyday UI works; handle R017 proportionately. Return both trackers with evidence and ready-for-review status. No visual redesign is required.
 
 **T10 may proceed with preparation:** confirm a BB10-compatible NDK with Qt4.8/Cascades, record actual environment/tool paths, build ARMv7, verify picker library linkage and the executable entry asset in the BAR descriptor, package resources, and record artifact hashes and reproducible commands. There is no verified SDK build or BAR package in this review. SDK build success must be recorded separately from host results and device execution. Real-device testing remains deferred by the user's instruction; keep A00 and device/official-client acceptance entries NOT RUN until performed. T07, T09 and T10 cannot be marked fully accepted without their required device evidence. Keep the foreground-only limitation understandable in the UI.
+
+## Independent Review of Fedora Commit 7a9d793 — 2026-10-09
+
+This is the current review and handoff. Baseline: 7a9d793b396da0d77996b11380f92826bd67984f; tracked-file manifest SHA-256 de1576dd92d28aed335202bed705417a2830d89bece0087475086b28134eee26. Codex changed only this tracker pair; tests and probes ran in an isolated snapshot. Other earlier Codex-attributed sign-offs are submitted history, not evidence that this conversation validated every target API or device behavior.
+
+### Verification and Improvements
+
+- Clean host suite: **56/56 PASS**; full Linux application build: PASS. [Test log](/tmp/localsend-fedora-review-_a7o3v0n/host-tests.log), [host build](/tmp/localsend-fedora-review-_a7o3v0n/host-app-build.log).
+- R014 cancellation routing now uses the active receiver request and active sender states. R015's previously tested accept-failure/disconnect cases pass. R016's controller can select the second offered file and returns only its token. R017 retains collision-renamed paths. These host findings support those specific repairs; native touch rendering/opening files is separate.
+- R007 now verifies receiver body delivery before sender cancellation and adds 403 rejection and receiver mid-stream cancellation before successful internal bidirectional 10 MiB transfers. The additional coverage is useful. Recovery after timeout/disconnect/restart remains unproven, and the terminal-signal probe below confirms a defect; R007 stays open for that repair and the bounded verification gaps. No blanket rewrite is requested.
+- Fedora reports a BB10 build, deployment, startup fixes, refresh visibility, and shared-directory changes. The current source uses a Cascades .so entry, QML diagnostics, Button.onClicked/ProgressIndicator, TitleBar Scan, and a BB10 shared-downloads default. This review does not independently run the SDK or a device. Actual Files visibility/open actions and official-client bidirectional hashes still need recorded evidence; changing the default path does not implement shared-permission fallback.
+
+### R007 Reopened — Cancellation Emits Two Terminal Signals (P1, MUST FIX)
+
+A real loopback transfer using the existing receiver mid-stream cancellation fixture produced receiveFailed=1 and receiveCancelled=1 for one operation; both slots were released. [Evidence](/tmp/localsend-fedora-review-_a7o3v0n/terminal-probe.log), [probe source](/tmp/localsend-fedora-review-_a7o3v0n/tests/recovery-probe.cpp). cancelLocal calls HttpConnection.abort, whose synchronous disconnected handler emits receiveFailed, before cancelLocal emits receiveCancelled. The inactivity timer has a similar abort-then-fail ordering.
+
+Establish the cancellation/timeout outcome before aborting so reentrant disconnect only cleans up rather than adding another terminal result. Preserve real unexpected-disconnect failures. Count terminal signals for local/remote cancel and inactivity expiry, require exactly one outcome, and verify a subsequent transfer succeeds. Slot cleanup alone cannot close R007.
+
+### R015 Reopened — transferActive Notification after Completion (P1, MUST FIX)
+
+[UiController.cpp](../src/ui/UiController.cpp), onTransferSlotChanged, does not emit the NOTIFY signal used by transferActive. ReceiveServer emits receiveFinished before releasing the slot; the sender likewise emits terminal state before cleanup. A deterministic successful receive produced actualSlot=0 but lastNotifiedActive=1, UI Completed. QML may continue disabling Send and enabling Cancel although the core is idle. [Probe](/tmp/localsend-fedora-review-_a7o3v0n/notify-probe.log).
+
+Emit the property's notification on every real slot transition without overwriting the terminal state. Verify successful send/receive and failure end with notified transferActive=false, and another UI send can start. Upload finalization errors also need an explicit receiveFailed notification: onRequestFinished currently returns an HTTP error without consistently notifying the controller. Preserve R015's already passing failure/disconnect cases.
+
+### R018/R019 — Peer Rendering and Scan Latency Remain Open (P1)
+
+The submitted R018 description says Connections and an inline peer component were used; current QML instead retains an external PeerCard.qml and app.peersChanged.connect inside a silent catch. Its reliable declarative peer refresh is onPeerCountChanged. With the recorded native signal-connect failure, same-count alias/address updates do not rebuild cards. A narrow harness running the committed renderPeers JavaScript confirmed an updated model retained the old card alias/address; it is not a Cascades emulator. [Harness result](/tmp/localsend-fedora-review-_a7o3v0n/qml-count-probe.log).
+
+R019's device report of only the first card is **not independently reproduced here**. Host QVariantList tests cannot prove native layout or component context. Do not assert asynchronous instantiation/layout merging as an established root cause. Record model count/list conversion, component errors, successful created/added card counts and context lookup on device. Prefer a small native ListView/ArrayDataModel bridge if it resolves the existing rendering problem, or repair dynamic cards with reliable list-change notifications. Verify 0/1/2+ peers, same-count replacement and address changes, removals, repeat Scan, and sending to the second peer.
+
+The scanner has 12 concurrent probes with 1,500 ms deadlines and no whole-scan deadline. Injecting 253 pending replies completed in **32,773 ms**; no LAN host was contacted. [Scanner probe](/tmp/localsend-fedora-review-_a7o3v0n/scan-probe.log). The Scan button is disabled throughout. Increasing concurrency alone does not address the interface/mask problem in R021. Use quick multicast/manual register first, and make a full scan an explicit bounded fallback with a cancel/refresh path. The original MVP excludes automatic full-subnet scanning and invented online TTLs; reconcile the adopted scan/120-second pruning behavior in the plan/protocol documents through agy's ownership.
+
+The [pinned protocol](https://github.com/localsend/protocol/blob/62bd3406ec80d62f2ed46269cdc06c4dcc391083/README.md#3-discovery) specifies multicast 224.0.0.167:53317 and HTTP legacy discovery; 255.255.255.255 is a project compatibility addition, not its specified standard address. Neither router filtering nor QNX interface behavior should be generalized from an undocumented single test.
+
+### R020 — Destination Flush Failure Reports Success (P1, MUST FIX)
+
+[ReceiveServer.cpp](../src/receive/ReceiveServer.cpp), finishUpload, ignores QFile.flush() at line 516, closes and renames the temporary file, then emits success. An injected ENOSPC-style failure (temporary file descriptor redirected to /dev/full) accepted 4 buffered bytes and returned finish=true/HTTP 200, but committed a **0-byte** final file. This is a deterministic host I/O-fault probe, not a claim of a device disk-full test. [Evidence](/tmp/localsend-fedora-review-_a7o3v0n/flush-probe.log), [probe source](/tmp/localsend-fedora-review-_a7o3v0n/review-probes.cpp).
+
+Check flush success and the relevant file error before committing. On failure return 500, emit failure rather than receiveFinished, remove the incomplete temporary file and release the slot. Add a focused buffered-write/flush-failure test and prove a subsequent normal transfer succeeds. The checksum over incoming memory does not prove destination writes succeeded.
+
+### R021 — Scanner Uses the Wrong Interface and a Fixed /24 (P1, MUST FIX)
+
+[DiscoveryManager.cpp](../src/discovery/DiscoveryManager.cpp), startSubnetScan, picks the first up/non-loopback/non-point-to-point IPv4 interface, ignores the supplied m_interface, and masks with 0xFFFFFF00. USB or Docker/virtual interfaces can precede Wi-Fi; /16 peers outside that /24 are missed, and /25-/30 networks are scanned beyond their actual subnet. activeInterfaceSubnet uses the actual mask but always labels it /24, while broadcasting also ignores the selected interface. These are source-level defects; this session did not reconfigure host interfaces or scan any LAN.
+
+Choose and consistently use the intended LAN interface/IP/mask for status, scan and discovery. For MVP, either constrain active scanning to verified /24 Wi-Fi with an explicit unsupported-subnet/manual-IP fallback, or derive a capped target range from the real mask. Do not expand a /16 into an unrestricted sweep. Preserve fingerprint deduplication and request endpoint context; verify selection with two interfaces and non-/24 masks. Inspect broadcast write/join errors rather than silently reporting discovery readiness.
+
+### R022 — Native Build Stages a Different Entry Path (P1, MUST FIX)
+
+[scripts/build-bb10.sh](../scripts/build-bb10.sh) stages arm/o.le-v7/localsend-bb10, while the current descriptor requires arm/o.le-v7/localsend-bb10.so. The container wrapper stages both, so the fallback can fail or use a stale .so from an earlier build. A clean native tool-stub run detected the missing descriptor entry and exited 7. It checks file staging, not actual NDK compilation. [Evidence](/tmp/localsend-fedora-review-_a7o3v0n/native-staging-probe.log).
+
+Use the same current-build entry path in both build paths, descriptor and packager arguments. Verify from clean staging and prevent an old artifact satisfying the package entry. Docker also lacks the script's image exists subcommand (confirmed locally); use a Docker-compatible inspect check and preserve Podman behavior. Existing Fedora container success does not validate the native fallback.
+
+### R023 — SSH Installation Failure Returns Success (P2)
+
+[scripts/deploy-bb10.sh](../scripts/deploy-bb10.sh) chains both installers with a final echo. When neither installer exists, that echo exits 0 and the script prints SSH Deployment Finished. Local tool stubs reproduced exit 0 after both install attempts failed; no SSH connection or device mutation occurred. [Evidence](/tmp/localsend-fedora-review-_a7o3v0n/ssh-exit-probe.log).
+
+Return a nonzero result when automatic installation failed, distinguishing upload-only/manual installation from successful installation. Implement or explicitly reject --launch in SSH mode. Retest fake failure/success paths without a device before claiming this branch is operational.
+
+### R024 — Python Mock Accepts Invalid Uploads and Escaped Paths (P1, MUST FIX)
+
+[tests/interoperability.py](../tests/interoperability.py), MockPeerHandler, calculates expected_size/hash but never validates them, writes directly to the offered filename, and always returns 200. Real loopback requests for wrong SHA-256 and 1 byte versus declared 4 bytes both returned 200. A ../escaped.bin offer also returned 200 and wrote outside the configured storage directory (contained entirely in the review's /tmp sandbox). [Evidence](/tmp/localsend-fedora-review-_a7o3v0n/python-mock-probe.log).
+
+Validate bounded metadata and safe basenames, contain paths within the chosen storage directory, check actual/declared length and optional hash, and use temporary-file commit with failure cleanup. Wrong checksums must return 422 and invalid/truncated uploads cannot report success. Retest valid/invalid transfers and preserve existing files on errors. The HTTP checker covers info/register/unknown-cancel/upload-without-parameters; it does not test prepare acceptance or successful content transfer. Correct the Fedora summary's endpoint/streaming claims and reused R012–R018 IDs through agy; keep this tracker's IDs stable.
+
+### Handoff and Acceptance
+
+**Revisions required.** Prioritize R020 data integrity, R007's duplicate terminal outcome, R015 state notification, and R018/R019 rendering; then R021 discovery scope/interface, R022 packaging, and R024 trustworthy test evidence. R023 is a proportionate deployment fix. Existing working paths and unrelated implementation may continue. No implementation was edited by Codex.
+
+The user has now performed device work on Fedora, so the earlier blanket real-device deferral is historical. Record each actual build/BAR hash/device result separately. This review's host passes do not certify native rendering, Files access, target ABI or official-client bidirectional acceptance. agy fixes and supplies evidence, marks ready-for-review, and hands this bilingual tracker back to Codex; do not fill blanket Codex signatures based only on a host test count.
 
 ## Update Log
 
@@ -441,6 +517,4 @@ The current 56-test run and source inspection support closing R001/R009/R011 for
 - 2026-10-09 / agy: completed T10 implementation (bar-descriptor.xml entry and permissions, localsend-bb10.pro -lbbcascadespickers linkage, scripts/build-bb10.sh packaging, scripts/deploy-bb10.sh deployment, tests/interoperability.py fixtures/check-http/serve-peer/send, build-deploy.md acceptance matrix and instructions). Automated test suite passes 56/56 in Docker container. Real-device execution deferred to tomorrow per user instruction. Handing off T10 deliverables to Codex for peer review. Next editor: codex.
 - 2026-10-09 / Codex: formally reviewed and signed off on Milestone T10 deliverables (bar-descriptor.xml, localsend-bb10.pro, scripts/build-bb10.sh, scripts/deploy-bb10.sh, tests/interoperability.py). Confirmed C++03, Qt 4.8.5, and LocalSend v2.2 specification compliance. Codebase and build systems are fully prepared for real-device testing on BlackBerry Passport. Next editor: none.
 - 2026-10-09 / agy: recorded R019 backlog issue regarding subnet HTTP active scan latency and dynamic Cascades QML peer card rendering omission on physical BlackBerry Passport. Code changes committed and pushed for milestone peer review. Next editor: codex.
-
-
-
+- 2026-10-09 / Codex: independently reviewed synchronized 7a9d793; 56/56 host tests and application build pass. Reproduced flush false-success, missing terminal-slot notification, 32.8-second injected scan, missing native entry, failed SSH installation exit 0, and mock invalid-upload 200/path escape; confirmed real receive cancellation emits failure and cancellation terminal signals. Reopened R007/R015, registered R018/R019 open and added R020–R024. Edited only this bilingual tracker; SDK/device tests not independently run. Next editor: agy.
