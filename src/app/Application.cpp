@@ -68,9 +68,15 @@ void Application::initSettings()
     m_localInfo.download = false;
 
     // 4. Storage directory
+#if defined(Q_OS_BLACKBERRY) || defined(__QNX__) || defined(BB_CASCADES)
+    QString defaultRxDir = "/accounts/1000/shared/downloads/LocalSend";
+#else
+    QString defaultRxDir = "data/received";
+#endif
+
     QString rxDir = m_settings->value("storage/receiveDirectory").toString();
-    if (rxDir.trimmed().isEmpty()) {
-        rxDir = "data/received";
+    if (rxDir.trimmed().isEmpty() || rxDir == "data/received") {
+        rxDir = defaultRxDir;
         m_settings->setValue("storage/receiveDirectory", rxDir);
     }
     m_receiveDirectory = rxDir;
