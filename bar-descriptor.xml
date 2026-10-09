@@ -13,15 +13,18 @@
         <autoOrients>true</autoOrients>
     </initialWindow>
 
+    <asset path="arm/o.le-v7/localsend-bb10.so" entry="true" type="Qnx/Cascades">localsend-bb10.so</asset>
     <asset path="assets">assets</asset>
-    <asset path="assets/icon.png">icon.png</asset>
+    <asset path="icon.png">icon.png</asset>
     <icon>
         <image>icon.png</image>
     </icon>
 
     <entryPointType>Qnx/Cascades</entryPointType>
     <cascades>
-        <entryPoint>app</entryPoint>
+        <entryPoint>
+            <name>localsend-bb10</name>
+        </entryPoint>
     </cascades>
 
     <permission system="true">run_native</permission>
