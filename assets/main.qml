@@ -56,7 +56,7 @@ TabbedPane {
                             textStyle.color: Color.White
                         }
                         Label {
-                            text: app.networkStatus + " • Port " + app.devicePort
+                            text: app.networkStatus + " • Port " + app.devicePort + " • v0.1.1 [9050d30]"
                             textStyle.base: SystemDefaults.TextStyles.SmallText
                             textStyle.color: Color.create("#68D391")
                         }
@@ -608,7 +608,7 @@ TabbedPane {
                         textStyle.base: SystemDefaults.TextStyles.TitleText
                     }
                     Label {
-                        text: "Version 0.1.0 (MVP)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
+                        text: "Version 0.1.1 (Build 9050d30)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
                         textStyle.base: SystemDefaults.TextStyles.BodyText
                         textStyle.color: Color.create("#718096")
                     }

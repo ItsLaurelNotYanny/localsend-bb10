@@ -2,8 +2,8 @@
 <qnx xmlns="http://www.qnx.com/schemas/application/1.0">
     <id>com.localsend.bb10</id>
     <name>LocalSend</name>
-    <versionNumber>0.1.0</versionNumber>
-    <buildId>1</buildId>
+    <versionNumber>0.1.1</versionNumber>
+    <buildId>2</buildId>
     <description>Unofficial native LocalSend client for BlackBerry 10</description>
     <author>Community</author>
 
