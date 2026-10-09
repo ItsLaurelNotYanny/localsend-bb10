@@ -2,10 +2,12 @@
 #include <QStringList>
 #include <QDebug>
 
-#if defined(BB_CASCADES) || defined(qnx) || defined(Q_OS_QNX)
+#if defined(BB_CASCADES) || defined(Q_OS_BLACKBERRY) || defined(__QNX__)
 #include <bb/cascades/Application>
 #include <bb/cascades/QmlDocument>
 #include <bb/cascades/AbstractPane>
+#include <QDeclarativeError>
+#define CASCADES_ENABLED 1
 #else
 #include <QCoreApplication>
 #endif
@@ -13,9 +15,13 @@
 #include "app/Application.h"
 #include "ui/UiController.h"
 
+#if defined(CASCADES_ENABLED)
+Q_DECL_EXPORT int main(int argc, char **argv)
+#else
 int main(int argc, char **argv)
+#endif
 {
-#if defined(BB_CASCADES) || defined(qnx) || defined(Q_OS_QNX)
+#if defined(CASCADES_ENABLED)
     bb::cascades::Application app(argc, argv);
 #else
     QCoreApplication app(argc, argv);
@@ -32,7 +38,7 @@ int main(int argc, char **argv)
 
     localsend::UiController controller(&coreApp);
 
-#if defined(BB_CASCADES) || defined(qnx) || defined(Q_OS_QNX)
+#if defined(CASCADES_ENABLED)
     bb::cascades::QmlDocument *qml = bb::cascades::QmlDocument::create("asset:///main.qml").parent(&app);
     if (!qml) {
         std::cerr << "Failed to load asset:///main.qml" << std::endl;
@@ -44,6 +50,12 @@ int main(int argc, char **argv)
     bb::cascades::AbstractPane *root = qml->createRootObject<bb::cascades::AbstractPane>();
     if (!root) {
         std::cerr << "Failed to create root pane from main.qml" << std::endl;
+        if (qml->hasErrors()) {
+            QList<QDeclarativeError> errs = qml->errors();
+            for (int i = 0; i < errs.size(); ++i) {
+                std::cerr << "QML Error: " << errs.at(i).toString().toStdString() << std::endl;
+            }
+        }
         return 1;
     }
 

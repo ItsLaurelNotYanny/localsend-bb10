@@ -9,10 +9,16 @@ TabbedPane {
         Page {
             titleBar: TitleBar {
                 title: "LocalSend BB10"
+                acceptAction: ActionItem {
+                    title: "Scan"
+                    onTriggered: {
+                        app.refreshDevices();
+                    }
+                }
             }
             actions: [
                 ActionItem {
-                    title: "Refresh"
+                    title: "Scan"
                     ActionBar.placement: ActionBarPlacement.OnBar
                     onTriggered: {
                         app.refreshDevices();
@@ -88,7 +94,7 @@ TabbedPane {
                         Button {
                             text: app.hasSelectedFile ? "Change Selected File" : "Choose File to Send"
                             horizontalAlignment: HorizontalAlignment.Fill
-                            onTriggered: {
+                            onClicked: {
                                 app.chooseFile();
                             }
                         }
@@ -103,7 +109,7 @@ TabbedPane {
 
                     Label {
                         visible: app.peers.length === 0
-                        text: "Scanning for LocalSend peers on Wi-Fi..."
+                        text: "Scanning for LocalSend peers on Wi-Fi... Tap Scan above or add IP below."
                         textStyle.base: SystemDefaults.TextStyles.SubtitleText
                         textStyle.color: Color.create("#718096")
                     }
@@ -114,8 +120,54 @@ TabbedPane {
                         topPadding: 8.0
                         bottomPadding: 8.0
 
-                        // Dynamic peer items built from app.peers
-                        // Each item has device alias, model, address, and a Send button
+                        property variant activeCards: []
+                        property variant peerList: app.peers
+
+                        onPeerListChanged: {
+                            renderPeers();
+                        }
+
+                        function renderPeers() {
+                            // Destroy old card instances to free memory
+                            for (var i = 0; i < activeCards.length; ++i) {
+                                if (activeCards[i]) {
+                                    activeCards[i].destroy();
+                                }
+                            }
+                            activeCards = [];
+                            peersContainer.removeAll();
+
+                            var list = app.peers;
+                            if (!list) {
+                                return;
+                            }
+                            var newCards = [];
+                            for (var j = 0; j < list.length; ++j) {
+                                var card = peerCardDef.createObject();
+                                if (card) {
+                                    var p = list[j];
+                                    card.peerFingerprint = p.fingerprint;
+                                    card.peerAlias = p.alias;
+                                    card.peerModel = p.deviceModel;
+                                    card.peerAddress = p.displayAddress;
+                                    card.isHttps = p.isHttps;
+                                    peersContainer.add(card);
+                                    newCards.push(card);
+                                }
+                            }
+                            activeCards = newCards;
+                        }
+
+                        onCreationCompleted: {
+                            renderPeers();
+                        }
+
+                        attachedObjects: [
+                            ComponentDefinition {
+                                id: peerCardDef
+                                source: "asset:///PeerCard.qml"
+                            }
+                        ]
                     }
 
                     Divider {}
@@ -151,7 +203,7 @@ TabbedPane {
                     Button {
                         text: "Connect to Device"
                         horizontalAlignment: HorizontalAlignment.Fill
-                        onTriggered: {
+                        onClicked: {
                             app.addManualPeer(manualIpField.text, parseInt(manualPortField.text));
                             manualIpField.text = "";
                         }
@@ -177,6 +229,54 @@ TabbedPane {
             titleBar: TitleBar {
                 title: "Transfer Activity"
             }
+
+            attachedObjects: [
+                ComponentDefinition {
+                    id: candidateFileCardDef
+                    Container {
+                        id: candRoot
+                        property string fileId: ""
+                        property string fileName: ""
+                        property string fileSize: ""
+                        property bool isSelected: false
+
+                        topPadding: 8.0
+                        bottomPadding: 8.0
+                        leftPadding: 12.0
+                        rightPadding: 12.0
+                        bottomMargin: 4.0
+                        background: candRoot.isSelected ? Color.create("#CBD5E0") : Color.create("#EDF2F7")
+
+                        Container {
+                            layout: StackLayout {
+                                orientation: LayoutOrientation.LeftToRight
+                            }
+
+                            Label {
+                                text: (candRoot.isSelected ? "● " : "○ ") + candRoot.fileName + " (" + candRoot.fileSize + ")"
+                                layoutProperties: StackLayoutProperties {
+                                    spaceQuota: 3.0
+                                }
+                                textStyle.base: SystemDefaults.TextStyles.BodyText
+                                textStyle.color: candRoot.isSelected ? Color.create("#2B6CB0") : Color.create("#2D3748")
+                                verticalAlignment: VerticalAlignment.Center
+                            }
+
+                            Button {
+                                text: candRoot.isSelected ? "Selected" : "Select"
+                                enabled: !candRoot.isSelected
+                                layoutProperties: StackLayoutProperties {
+                                    spaceQuota: 1.0
+                                }
+                                verticalAlignment: VerticalAlignment.Center
+                                onClicked: {
+                                    app.selectIncomingFile(candRoot.fileId);
+                                }
+                            }
+                        }
+                    }
+                }
+            ]
 
             ScrollView {
                 Container {
@@ -205,9 +305,69 @@ TabbedPane {
                             textStyle.color: Color.create("#2D3748")
                         }
                         Label {
-                            text: "File: " + app.incomingFileName + " (" + app.incomingFileSize + ")"
+                            text: "Selected: " + app.incomingFileName + " (" + app.incomingFileSize + ")"
                             textStyle.base: SystemDefaults.TextStyles.BodyText
                             textStyle.color: Color.create("#2D3748")
+                        }
+
+                        // Candidate selection for multi-file offer
+                        Label {
+                            visible: app.incomingFiles.length > 1
+                            text: "Choose file to receive (" + app.incomingFiles.length + " offered):"
+                            textStyle.base: SystemDefaults.TextStyles.SmallText
+                            textStyle.color: Color.create("#718096")
+                            topMargin: 8.0
+                        }
+
+                        Container {
+                            id: candidateFilesContainer
+                            visible: app.incomingFiles.length > 1
+                            topPadding: 4.0
+                            bottomPadding: 4.0
+
+                            property variant activeCandidateCards: []
+                            property variant candidateList: app.incomingFiles
+                            property string selectedCandidateId: app.selectedIncomingFileId
+
+                            onCandidateListChanged: {
+                                renderCandidates();
+                            }
+                            onSelectedCandidateIdChanged: {
+                                renderCandidates();
+                            }
+
+                            function renderCandidates() {
+                                for (var i = 0; i < activeCandidateCards.length; ++i) {
+                                    if (activeCandidateCards[i]) {
+                                        activeCandidateCards[i].destroy();
+                                    }
+                                }
+                                activeCandidateCards = [];
+                                candidateFilesContainer.removeAll();
+
+                                var files = app.incomingFiles;
+                                if (!files) {
+                                    return;
+                                }
+                                var cards = [];
+                                for (var j = 0; j < files.length; ++j) {
+                                    var c = candidateFileCardDef.createObject();
+                                    if (c) {
+                                        var f = files[j];
+                                        c.fileId = f.id;
+                                        c.fileName = f.fileName;
+                                        c.fileSize = f.formattedSize;
+                                        c.isSelected = (f.id === app.selectedIncomingFileId);
+                                        candidateFilesContainer.add(c);
+                                        cards.push(c);
+                                    }
+                                }
+                                activeCandidateCards = cards;
+                            }
+
+                            onCreationCompleted: {
+                                renderCandidates();
+                            }
                         }
 
                         Container {
@@ -218,21 +378,19 @@ TabbedPane {
 
                             Button {
                                 text: "Accept"
-                                color: Color.create("#38A169")
                                 layoutProperties: StackLayoutProperties {
                                     spaceQuota: 1.0
                                 }
-                                onTriggered: {
-                                    app.acceptIncoming(app.incomingRequestId, app.incomingFileId);
+                                onClicked: {
+                                    app.acceptIncoming(app.incomingRequestId, app.selectedIncomingFileId);
                                 }
                             }
                             Button {
                                 text: "Decline"
-                                color: Color.create("#E53E3E")
                                 layoutProperties: StackLayoutProperties {
                                     spaceQuota: 1.0
                                 }
-                                onTriggered: {
+                                onClicked: {
                                     app.rejectIncoming(app.incomingRequestId);
                                 }
                             }
@@ -268,9 +426,11 @@ TabbedPane {
                         }
 
                         // Progress indicator
-                        ProgressBar {
-                            value: app.transferProgress
+                        ProgressIndicator {
+                            fromValue: 0.0
                             toValue: 100.0
+                            value: app.transferProgress
+                            state: ProgressIndicatorState.Progress
                             topMargin: 12.0
                             bottomMargin: 12.0
                         }
@@ -278,10 +438,27 @@ TabbedPane {
                         Button {
                             text: "Cancel Transfer"
                             enabled: app.transferActive
-                            color: Color.create("#E53E3E")
                             horizontalAlignment: HorizontalAlignment.Fill
-                            onTriggered: {
+                            onClicked: {
                                 app.cancelTransfer();
+                            }
+                        }
+
+                        Label {
+                            visible: app.lastSavedFilePath.length > 0
+                            text: "Saved file:\n" + app.lastSavedFilePath
+                            textStyle.base: SystemDefaults.TextStyles.SmallText
+                            textStyle.color: Color.create("#2B6CB0")
+                            topMargin: 8.0
+                        }
+
+                        Button {
+                            visible: app.lastSavedFilePath.length > 0
+                            text: "Open Received File"
+                            horizontalAlignment: HorizontalAlignment.Fill
+                            topMargin: 8.0
+                            onClicked: {
+                                app.openFile(app.lastSavedFilePath);
                             }
                         }
                     }
@@ -295,6 +472,14 @@ TabbedPane {
                         text: app.receiveDirectory
                         textStyle.base: SystemDefaults.TextStyles.SmallText
                         textStyle.color: Color.create("#718096")
+                    }
+                    Button {
+                        text: "Open Downloads Folder"
+                        horizontalAlignment: HorizontalAlignment.Fill
+                        topMargin: 8.0
+                        onClicked: {
+                            app.openReceiveDirectory();
+                        }
                     }
                 }
             }
@@ -329,7 +514,7 @@ TabbedPane {
                     Button {
                         text: "Save Device Name"
                         horizontalAlignment: HorizontalAlignment.Fill
-                        onTriggered: {
+                        onClicked: {
                             app.setDeviceAlias(aliasEditField.text);
                         }
                     }

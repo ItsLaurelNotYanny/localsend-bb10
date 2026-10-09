@@ -7,7 +7,14 @@
 #include <bb/cascades/pickers/FilePicker.hpp>
 #include <bb/cascades/pickers/FilePickerMode.hpp>
 #include <bb/cascades/pickers/FilePickerSortFlag.hpp>
+#include <bb/system/InvokeManager.hpp>
+#include <bb/system/InvokeRequest.hpp>
+#else
+#include <QDesktopServices>
 #endif
+#include <QUrl>
+#include <QFile>
+#include <QDir>
 
 namespace localsend {
 
@@ -26,6 +33,8 @@ UiController::UiController(Application *app, QObject *parent)
             this, SIGNAL(deviceAliasChanged()));
     connect(m_app, SIGNAL(localInfoChanged(DeviceInfo)),
             this, SIGNAL(devicePortChanged()));
+    connect(m_app, SIGNAL(transferSlotChanged(bool,QString)),
+            this, SLOT(onTransferSlotChanged(bool,QString)));
 
     // Connect DiscoveryManager signals
     if (m_app->discoveryManager()) {
@@ -59,6 +68,10 @@ UiController::UiController(Application *app, QObject *parent)
                 this, SLOT(onReceiveFinished(QString,QString)));
         connect(m_app->receiveServer(), SIGNAL(receiveCancelled(QString,QString)),
                 this, SLOT(onReceiveCancelled(QString,QString)));
+        connect(m_app->receiveServer(), SIGNAL(offerCancelled(QString,QString)),
+                this, SLOT(onReceiveOfferCancelled(QString,QString)));
+        connect(m_app->receiveServer(), SIGNAL(receiveFailed(QString,QString)),
+                this, SLOT(onReceiveFailed(QString,QString)));
     }
 
     updatePeersModel();
@@ -66,6 +79,12 @@ UiController::UiController(Application *app, QObject *parent)
 
 UiController::~UiController()
 {
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    if (m_activeFilePicker) {
+        delete m_activeFilePicker.data();
+        m_activeFilePicker = 0;
+    }
+#endif
 }
 
 QString UiController::deviceAlias() const
@@ -127,11 +146,18 @@ void UiController::addManualPeer(const QString &ipv4, int port)
 void UiController::chooseFile()
 {
 #if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    if (m_activeFilePicker) {
+        // Picker dialog already active; prevent duplicate allocations
+        return;
+    }
+
     bb::cascades::pickers::FilePicker *picker = new bb::cascades::pickers::FilePicker(this);
+    m_activeFilePicker = picker;
     picker->setType(bb::cascades::pickers::FileType::Other);
     picker->setTitle(tr("Select File to Send"));
     picker->setMode(bb::cascades::pickers::FilePickerMode::Picker);
     connect(picker, SIGNAL(fileSelected(QStringList)), this, SLOT(onFilePicked(QStringList)));
+    connect(picker, SIGNAL(canceled()), this, SLOT(onFilePickerCanceled()));
     picker->open();
 #else
     qDebug() << "[UiController] chooseFile called in non-Cascades environment";
@@ -140,9 +166,25 @@ void UiController::chooseFile()
 
 void UiController::onFilePicked(const QStringList &selectedFiles)
 {
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    if (m_activeFilePicker) {
+        m_activeFilePicker->deleteLater();
+        m_activeFilePicker = 0;
+    }
+#endif
     if (!selectedFiles.isEmpty()) {
         setSelectedFilePath(selectedFiles.first());
     }
+}
+
+void UiController::onFilePickerCanceled()
+{
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    if (m_activeFilePicker) {
+        m_activeFilePicker->deleteLater();
+        m_activeFilePicker = 0;
+    }
+#endif
 }
 
 void UiController::setSelectedFilePath(const QString &path)
@@ -219,10 +261,54 @@ bool UiController::sendSelectedFile(const QString &fingerprint)
     return true;
 }
 
+void UiController::setSelectedIncomingFileId(const QString &fileId)
+{
+    selectIncomingFile(fileId);
+}
+
+void UiController::selectIncomingFile(const QString &fileId)
+{
+    if (fileId.isEmpty() || m_selectedIncomingFileId == fileId) {
+        return;
+    }
+
+    for (int i = 0; i < m_incomingFiles.size(); ++i) {
+        QVariantMap map = m_incomingFiles.at(i).toMap();
+        if (map.value("id").toString() == fileId) {
+            m_selectedIncomingFileId = fileId;
+            m_incomingFileId = fileId;
+            m_incomingFileName = map.value("fileName").toString();
+            m_incomingFileSize = map.value("formattedSize").toString();
+            emit selectedIncomingFileIdChanged();
+            emit incomingOfferChanged();
+            return;
+        }
+    }
+}
+
 void UiController::acceptIncoming(const QString &requestId, const QString &fileId)
 {
+    if (!m_hasIncomingOffer || m_incomingRequestId != requestId) {
+        return;
+    }
+
+    QString targetFileId = fileId.trimmed().isEmpty() ? m_selectedIncomingFileId : fileId.trimmed();
+    bool ok = false;
     if (m_app->receiveServer()) {
-        m_app->receiveServer()->accept(requestId, fileId);
+        ok = m_app->receiveServer()->accept(requestId, targetFileId);
+    }
+
+    if (!ok) {
+        m_hasIncomingOffer = false;
+        m_transferState = "Failed";
+        m_lastError = "Failed to accept file (destination directory or storage error)";
+        m_transferStatusText = m_lastError;
+
+        emit incomingOfferChanged();
+        emit transferStateChanged();
+        emit transferStatusTextChanged();
+        emit lastErrorChanged();
+        return;
     }
 
     m_hasIncomingOffer = false;
@@ -238,6 +324,10 @@ void UiController::acceptIncoming(const QString &requestId, const QString &fileI
 
 void UiController::rejectIncoming(const QString &requestId)
 {
+    if (!m_hasIncomingOffer || m_incomingRequestId != requestId) {
+        return;
+    }
+
     if (m_app->receiveServer()) {
         m_app->receiveServer()->reject(requestId);
     }
@@ -253,14 +343,26 @@ void UiController::rejectIncoming(const QString &requestId)
 
 void UiController::cancelTransfer()
 {
-    if (m_app->sendManager() && m_app->sendManager()->state() != SendManager::State_Idle) {
+    bool sendActive = m_app->sendManager() &&
+                      (m_app->sendManager()->state() == SendManager::State_Preparing ||
+                       m_app->sendManager()->state() == SendManager::State_Uploading);
+
+    if (sendActive) {
         m_app->sendManager()->cancel();
-    } else if (m_app->receiveServer()) {
-        if (m_app->receiveServer()->hasPendingOffer()) {
-            m_app->receiveServer()->reject(m_app->receiveServer()->pendingRequestId());
-        } else if (m_app->receiveServer()->hasActiveSession()) {
-            m_app->receiveServer()->cancelLocal(m_app->receiveServer()->pendingRequestId());
+    } else if (m_app->receiveServer() && m_app->receiveServer()->hasPendingOffer()) {
+        m_app->receiveServer()->reject(m_app->receiveServer()->pendingRequestId());
+    } else if (m_app->receiveServer() && m_app->receiveServer()->hasActiveSession()) {
+        m_app->receiveServer()->cancelLocal(m_app->receiveServer()->activeRequestId());
+    } else if (m_app->isTransferActive()) {
+        QString activeId = m_app->activeTransferId();
+        if (m_app->sendManager() && m_app->sendManager()->activeRequestId() == activeId) {
+            m_app->sendManager()->cancel();
+        } else if (m_app->receiveServer()) {
+            m_app->receiveServer()->cancelLocal(activeId);
         }
+    } else {
+        // Nothing active to cancel
+        return;
     }
 
     m_transferState = "Cancelled";
@@ -274,6 +376,45 @@ void UiController::clearError()
 {
     m_lastError.clear();
     emit lastErrorChanged();
+}
+
+void UiController::openFile(const QString &filePath)
+{
+    QString target = filePath.trimmed().isEmpty() ? m_lastSavedFilePath : filePath.trimmed();
+    if (target.isEmpty() || !QFile::exists(target)) {
+        m_lastError = "File does not exist: " + target;
+        emit lastErrorChanged();
+        return;
+    }
+
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    bb::system::InvokeManager mgr;
+    bb::system::InvokeRequest request;
+    request.setAction("bb.action.VIEW");
+    request.setUri(QUrl::fromLocalFile(target));
+    mgr.invoke(request);
+#else
+    QDesktopServices::openUrl(QUrl::fromLocalFile(target));
+#endif
+}
+
+void UiController::openReceiveDirectory()
+{
+    QString dirPath = m_app->receiveDirectory();
+    QDir dir(dirPath);
+    if (!dir.exists()) {
+        dir.mkpath(".");
+    }
+
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    bb::system::InvokeManager mgr;
+    bb::system::InvokeRequest request;
+    request.setAction("bb.action.OPEN");
+    request.setUri(QUrl::fromLocalFile(dirPath));
+    mgr.invoke(request);
+#else
+    QDesktopServices::openUrl(QUrl::fromLocalFile(dirPath));
+#endif
 }
 
 void UiController::onPeerUpdated(const PeerDevice &peer)
@@ -387,12 +528,26 @@ void UiController::onIncomingOffer(const QString &requestId, const PeerDevice &p
     m_incomingRequestId = requestId;
     m_incomingPeerAlias = peer.info.alias.isEmpty() ? peer.address.toString() : peer.info.alias;
 
+    m_incomingFiles.clear();
+    for (int i = 0; i < files.size(); ++i) {
+        const FileMeta &meta = files.at(i);
+        QVariantMap map;
+        map["id"] = meta.id;
+        map["fileName"] = meta.fileName;
+        map["size"] = meta.size;
+        map["formattedSize"] = formatBytes(meta.size);
+        map["fileType"] = meta.fileType;
+        m_incomingFiles.append(map);
+    }
+
     if (!files.isEmpty()) {
         const FileMeta &meta = files.first();
+        m_selectedIncomingFileId = meta.id;
         m_incomingFileName = meta.fileName;
         m_incomingFileSize = formatBytes(meta.size);
         m_incomingFileId = meta.id;
     } else {
+        m_selectedIncomingFileId.clear();
         m_incomingFileName = "Unknown";
         m_incomingFileSize = "0 B";
         m_incomingFileId.clear();
@@ -402,6 +557,7 @@ void UiController::onIncomingOffer(const QString &requestId, const PeerDevice &p
     m_transferStatusText = QString("Incoming transfer request from %1").arg(m_incomingPeerAlias);
 
     emit incomingOfferChanged();
+    emit selectedIncomingFileIdChanged();
     emit transferStateChanged();
     emit transferStatusTextChanged();
 }
@@ -427,11 +583,13 @@ void UiController::onReceiveFinished(const QString &sessionId, const QString &sa
     m_transferState = "Completed";
     m_transferProgress = 100;
     m_hasIncomingOffer = false;
+    m_lastSavedFilePath = savedPath;
 
     QString baseName = QFileInfo(savedPath).fileName();
-    m_transferStatusText = QString("Received %1 successfully!").arg(baseName);
+    m_transferStatusText = QString("Received %1 successfully! Saved to: %2").arg(baseName).arg(savedPath);
 
     emit incomingOfferChanged();
+    emit lastSavedFilePathChanged();
     emit transferStateChanged();
     emit transferProgressChanged();
     emit transferStatusTextChanged();
@@ -448,6 +606,44 @@ void UiController::onReceiveCancelled(const QString &sessionId, const QString &r
     emit incomingOfferChanged();
     emit transferStateChanged();
     emit transferStatusTextChanged();
+}
+
+void UiController::onReceiveOfferCancelled(const QString &requestId, const QString &reason)
+{
+    if (m_hasIncomingOffer && m_incomingRequestId == requestId) {
+        m_hasIncomingOffer = false;
+        m_transferState = "Idle";
+        m_transferStatusText = QString("Offer cancelled: %1").arg(reason);
+
+        emit incomingOfferChanged();
+        emit transferStateChanged();
+        emit transferStatusTextChanged();
+    }
+}
+
+void UiController::onReceiveFailed(const QString &id, const QString &reason)
+{
+    Q_UNUSED(id);
+    m_hasIncomingOffer = false;
+    m_transferState = "Failed";
+    m_lastError = QString("Receive failed: %1").arg(reason);
+    m_transferStatusText = m_lastError;
+
+    emit incomingOfferChanged();
+    emit transferStateChanged();
+    emit transferStatusTextChanged();
+    emit lastErrorChanged();
+}
+
+void UiController::onTransferSlotChanged(bool busy, const QString &activeRequestId)
+{
+    Q_UNUSED(activeRequestId);
+    if (!busy) {
+        if (m_hasIncomingOffer && m_app->receiveServer() && !m_app->receiveServer()->hasPendingOffer()) {
+            m_hasIncomingOffer = false;
+            emit incomingOfferChanged();
+        }
+    }
 }
 
 QString UiController::formatBytes(qint64 bytes)

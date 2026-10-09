@@ -8,9 +8,11 @@ DiscoveryManager::DiscoveryManager(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
     , m_nam(nam)
     , m_udpSocket(new QUdpSocket(this))
+    , m_announceTimer(new QTimer(this))
     , m_multicastAddress(QHostAddress("224.0.0.167"))
 {
     connect(m_udpSocket, SIGNAL(readyRead()), this, SLOT(onUdpReadyRead()));
+    connect(m_announceTimer, SIGNAL(timeout()), this, SLOT(onAnnounceTimeout()));
 }
 
 DiscoveryManager::~DiscoveryManager()
@@ -45,11 +47,19 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
         return false;
     }
 
-    // Join LocalSend multicast group
-    if (m_interface.isValid()) {
-        m_udpSocket->joinMulticastGroup(m_multicastAddress, m_interface);
-    } else {
-        m_udpSocket->joinMulticastGroup(m_multicastAddress);
+    // Join LocalSend multicast group on all active network interfaces
+    QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
+    for (int i = 0; i < ifaces.size(); ++i) {
+        const QNetworkInterface &iface = ifaces.at(i);
+        if ((iface.flags() & QNetworkInterface::IsUp) && (iface.flags() & QNetworkInterface::CanMulticast)) {
+            m_udpSocket->joinMulticastGroup(m_multicastAddress, iface);
+        }
+    }
+    m_udpSocket->joinMulticastGroup(m_multicastAddress);
+
+    // Start periodic 30s announcement heartbeat to handle network drops and late-joining peers
+    if (m_announceTimer) {
+        m_announceTimer->start(30000);
     }
 
     // Broadcast initial presence announcement
@@ -59,6 +69,10 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
 
 void DiscoveryManager::stop()
 {
+    if (m_announceTimer) {
+        m_announceTimer->stop();
+    }
+
     if (m_udpSocket && m_udpSocket->isOpen()) {
         m_udpSocket->close();
     }
@@ -78,6 +92,49 @@ void DiscoveryManager::stop()
 
 void DiscoveryManager::refresh()
 {
+    // 1. Prune peers not seen within the last 120 seconds
+    QDateTime cutoff = QDateTime::currentDateTime().addSecs(-120);
+    QList<QString> staleFp;
+    for (QMap<QString, PeerDevice>::const_iterator it = m_peers.begin(); it != m_peers.end(); ++it) {
+        if (it.value().lastSeen < cutoff) {
+            staleFp.append(it.key());
+        }
+    }
+    for (int i = 0; i < staleFp.size(); ++i) {
+        m_peers.remove(staleFp.at(i));
+        emit peerRemoved(staleFp.at(i));
+    }
+
+    // 2. Re-join multicast groups on active interfaces
+    QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
+    for (int i = 0; i < ifaces.size(); ++i) {
+        const QNetworkInterface &iface = ifaces.at(i);
+        if ((iface.flags() & QNetworkInterface::IsUp) && (iface.flags() & QNetworkInterface::CanMulticast)) {
+            m_udpSocket->joinMulticastGroup(m_multicastAddress, iface);
+        }
+    }
+    m_udpSocket->joinMulticastGroup(m_multicastAddress);
+
+    // 3. Send full-channel discovery announcements (multicast + broadcast + subnets)
+    sendUdpAnnouncement(true);
+
+    // 4. Reset 30s periodic announcement heartbeat
+    if (m_announceTimer && m_announceTimer->isActive()) {
+        m_announceTimer->start(30000);
+    }
+
+    // 5. Active probe: HTTP register check to all known peers
+    QList<PeerDevice> currentPeers = m_peers.values();
+    for (int i = 0; i < currentPeers.size(); ++i) {
+        const PeerDevice &peer = currentPeers.at(i);
+        if (peer.info.protocol.toLower() == "http") {
+            sendHttpRegister(peer.address, peer.info.port);
+        }
+    }
+}
+
+void DiscoveryManager::onAnnounceTimeout()
+{
     sendUdpAnnouncement(true);
 }
 
@@ -95,7 +152,41 @@ void DiscoveryManager::sendUdpAnnouncement(bool announce)
     QString err;
     QByteArray datagram = ProtocolJson::encodeAnnouncement(m_localInfo, announce, &err);
     if (!datagram.isEmpty()) {
+        // 1. Send to standard LocalSend multicast address (224.0.0.167:53317)
         m_udpSocket->writeDatagram(datagram, m_multicastAddress, DEFAULT_PORT);
+
+        // 2. Send to standard LocalSend global broadcast address (255.255.255.255:53317)
+        m_udpSocket->writeDatagram(datagram, QHostAddress::Broadcast, DEFAULT_PORT);
+
+        // 3. Send to local subnet directed broadcast on active physical LAN interfaces
+        // Fallback: calculate broadcast from IP & netmask if OS report is null
+        QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
+        for (int i = 0; i < ifaces.size(); ++i) {
+            const QNetworkInterface &iface = ifaces.at(i);
+            if (!(iface.flags() & QNetworkInterface::IsUp) ||
+                (iface.flags() & QNetworkInterface::IsLoopBack) ||
+                (iface.flags() & QNetworkInterface::IsPointToPoint)) {
+                continue;
+            }
+            QList<QNetworkAddressEntry> entries = iface.addressEntries();
+            for (int j = 0; j < entries.size(); ++j) {
+                const QNetworkAddressEntry &entry = entries.at(j);
+                if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol) {
+                    continue;
+                }
+                QHostAddress bcast = entry.broadcast();
+                if (bcast.isNull() && !entry.netmask().isNull()) {
+                    quint32 ipVal = entry.ip().toIPv4Address();
+                    quint32 maskVal = entry.netmask().toIPv4Address();
+                    if (maskVal != 0) {
+                        bcast = QHostAddress(ipVal | (~maskVal));
+                    }
+                }
+                if (!bcast.isNull() && bcast != QHostAddress::Broadcast) {
+                    m_udpSocket->writeDatagram(datagram, bcast, DEFAULT_PORT);
+                }
+            }
+        }
     }
 }
 
@@ -221,6 +312,17 @@ void DiscoveryManager::onRegisterReplyFinished()
 
     if (reply->error() != QNetworkReply::NoError) {
         emit discoveryError(reply->errorString());
+
+        // If this peer was previously recorded, remove it as it is unreachable
+        for (QMap<QString, PeerDevice>::iterator it = m_peers.begin(); it != m_peers.end(); ++it) {
+            if (it.value().address == target.address && it.value().info.port == target.info.port) {
+                QString fp = it.key();
+                m_peers.erase(it);
+                emit peerRemoved(fp);
+                break;
+            }
+        }
+
         // Fallback to multicast response with announce:false
         sendUdpAnnouncement(false);
         reply->deleteLater();
@@ -252,9 +354,17 @@ void DiscoveryManager::handleIncomingRegister(const DeviceInfo &info, const QHos
         return;
     }
 
+    QHostAddress cleanAddress = peerAddress;
+    if (cleanAddress.protocol() == QAbstractSocket::IPv6Protocol) {
+        quint32 ipv4 = cleanAddress.toIPv4Address();
+        if (ipv4 != 0) {
+            cleanAddress = QHostAddress(ipv4);
+        }
+    }
+
     PeerDevice peer;
     peer.info = info;
-    peer.address = peerAddress;
+    peer.address = cleanAddress;
     peer.lastSeen = QDateTime::currentDateTime();
 
     m_peers.insert(info.fingerprint, peer);

@@ -8,6 +8,7 @@
 #include <QNetworkReply>
 #include <QMap>
 #include <QList>
+#include <QTimer>
 
 #include "protocol/ProtocolTypes.h"
 
@@ -40,6 +41,7 @@ signals:
 private slots:
     void onUdpReadyRead();
     void onRegisterReplyFinished();
+    void onAnnounceTimeout();
 
 private:
     void sendUdpAnnouncement(bool announce);
@@ -47,6 +49,7 @@ private:
 
     QNetworkAccessManager *m_nam;
     QUdpSocket *m_udpSocket;
+    QTimer *m_announceTimer;
     DeviceInfo m_localInfo;
     QNetworkInterface m_interface;
     QHostAddress m_multicastAddress;
