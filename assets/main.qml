@@ -56,13 +56,60 @@ TabbedPane {
                             textStyle.color: Color.White
                         }
                         Label {
-                            text: app.networkStatus + " • Port " + app.devicePort + " • v0.1.1.3"
+                            text: app.networkStatus + " • Port " + app.devicePort + " • " + app.appVersion
                             textStyle.base: SystemDefaults.TextStyles.SmallText
                             textStyle.color: Color.create("#68D391")
                         }
                     }
 
                     Divider {}
+
+                    // Incoming transfer alert banner on Radar tab
+                    Container {
+                        visible: app.hasIncomingOffer
+                        topPadding: 16.0
+                        bottomPadding: 16.0
+                        leftPadding: 16.0
+                        rightPadding: 16.0
+                        bottomMargin: 12.0
+                        background: Color.create("#FEFCBF")
+
+                        Label {
+                            text: "Incoming File Transfer!"
+                            textStyle.base: SystemDefaults.TextStyles.TitleText
+                            textStyle.color: Color.create("#B7791F")
+                        }
+                        Label {
+                            text: "From: " + app.incomingPeerAlias + "\nFile: " + app.incomingFileName + " (" + app.incomingFileSize + ")"
+                            textStyle.base: SystemDefaults.TextStyles.BodyText
+                            textStyle.color: Color.create("#2D3748")
+                        }
+                        Container {
+                            layout: StackLayout {
+                                orientation: LayoutOrientation.LeftToRight
+                            }
+                            topMargin: 12.0
+
+                            Button {
+                                text: "Accept"
+                                layoutProperties: StackLayoutProperties {
+                                    spaceQuota: 1.0
+                                }
+                                onClicked: {
+                                    app.acceptIncoming(app.incomingRequestId);
+                                }
+                            }
+                            Button {
+                                text: "Decline"
+                                layoutProperties: StackLayoutProperties {
+                                    spaceQuota: 1.0
+                                }
+                                onClicked: {
+                                    app.rejectIncoming(app.incomingRequestId);
+                                }
+                            }
+                        }
+                    }
 
                     // Selected file section
                     Header {
@@ -119,26 +166,9 @@ TabbedPane {
                     // Peer list rendering
                     Container {
                         id: peersContainer
+                        objectName: "peersContainer"
                         topPadding: 8.0
                         bottomPadding: 8.0
-
-                        property int peersRevision: app.peersRevision
-                        property bool hasFile: app.hasSelectedFile
-                        property bool transferActive: app.transferActive
-
-                        onPeersRevisionChanged: {
-                            app.populatePeers(peersContainer);
-                        }
-                        onHasFileChanged: {
-                            app.populatePeers(peersContainer);
-                        }
-                        onTransferActiveChanged: {
-                            app.populatePeers(peersContainer);
-                        }
-
-                        onCreationCompleted: {
-                            app.populatePeers(peersContainer);
-                        }
                     }
 
                     Divider {}
@@ -508,6 +538,29 @@ TabbedPane {
                     Divider {}
 
                     Header {
+                        title: "Diagnostics & Logs"
+                    }
+                    Label {
+                        text: "Diagnostic Log File:"
+                        textStyle.base: SystemDefaults.TextStyles.BodyText
+                    }
+                    Label {
+                        text: app.diagnosticLogPath
+                        textStyle.base: SystemDefaults.TextStyles.SmallText
+                        textStyle.color: Color.create("#4A5568")
+                    }
+                    Button {
+                        text: "Open Diagnostic Log"
+                        horizontalAlignment: HorizontalAlignment.Fill
+                        topMargin: 8.0
+                        onClicked: {
+                            app.openDiagnosticLog();
+                        }
+                    }
+
+                    Divider {}
+
+                    Header {
                         title: "About LocalSend for BB10"
                     }
                     Label {
@@ -515,7 +568,7 @@ TabbedPane {
                         textStyle.base: SystemDefaults.TextStyles.TitleText
                     }
                     Label {
-                        text: "Version 0.1.1 (Build 3)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
+                        text: "Version 0.1.1 (Build 6)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
                         textStyle.base: SystemDefaults.TextStyles.BodyText
                         textStyle.color: Color.create("#718096")
                     }

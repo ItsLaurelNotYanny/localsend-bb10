@@ -99,10 +99,17 @@ bool Application::start(QString *error)
     QDir dir(m_receiveDirectory);
     if (!dir.exists()) {
         if (!dir.mkpath(".")) {
-            if (error) {
-                *error = QString("Failed to create receive directory: %1").arg(m_receiveDirectory);
+            QString fallbackDir = "data/received";
+            QDir fallback(fallbackDir);
+            if (fallback.mkpath(".")) {
+                m_receiveDirectory = fallbackDir;
+            } else {
+                if (error) {
+                    *error = QString("Failed to create receive directory: %1 (fallback %2 also failed)")
+                                 .arg(m_receiveDirectory).arg(fallbackDir);
+                }
+                return false;
             }
-            return false;
         }
     }
 

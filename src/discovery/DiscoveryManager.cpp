@@ -4,6 +4,7 @@
 #include <QNetworkRequest>
 #include <QTimer>
 #include <QSet>
+#include <QDebug>
 
 DiscoveryManager::DiscoveryManager(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
@@ -135,10 +136,18 @@ void DiscoveryManager::refresh()
         m_announceTimer->start(30000);
     }
 
-    // 5. Active probe: HTTP register check to all known peers
+    // 5. Active probe: Direct unicast UDP announcement and HTTP register to known peers
+    QString err;
+    QByteArray dgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &err);
     QList<PeerDevice> currentPeers = m_peers.values();
     for (int i = 0; i < currentPeers.size(); ++i) {
         const PeerDevice &peer = currentPeers.at(i);
+        if (!dgram.isEmpty() && m_udpSocket && m_udpSocket->isOpen()) {
+            m_udpSocket->writeDatagram(dgram, peer.address, DEFAULT_PORT);
+            if (peer.info.port != DEFAULT_PORT && peer.info.port > 0) {
+                m_udpSocket->writeDatagram(dgram, peer.address, peer.info.port);
+            }
+        }
         if (peer.info.protocol.toLower() == "http") {
             sendHttpRegister(peer.address, peer.info.port);
         }
@@ -190,18 +199,20 @@ void DiscoveryManager::sendUdpAnnouncement(bool announce)
                     continue;
                 }
                 QHostAddress bcast = entry.broadcast();
-                if (bcast.isNull() && !entry.netmask().isNull()) {
-                    quint32 ipVal = entry.ip().toIPv4Address();
-                    quint32 maskVal = entry.netmask().toIPv4Address();
-                    if (maskVal != 0) {
-                        bcast = QHostAddress(ipVal | (~maskVal));
-                    }
+                quint32 ipVal = entry.ip().toIPv4Address();
+                quint32 maskVal = entry.netmask().toIPv4Address();
+                if (maskVal == 0) {
+                    maskVal = 0xFFFFFF00;
+                }
+                if (bcast.isNull()) {
+                    bcast = QHostAddress(ipVal | (~maskVal));
                 }
                 if (!bcast.isNull() && bcast != QHostAddress::Broadcast) {
                     m_udpSocket->writeDatagram(datagram, bcast, DEFAULT_PORT);
                 }
             }
         }
+        qDebug() << "[Discovery] UDP announcement sent (announce=" << announce << ")";
     }
 }
 
@@ -245,6 +256,8 @@ void DiscoveryManager::onUdpReadyRead()
         peer.lastSeen = QDateTime::currentDateTime();
 
         m_peers.insert(info.fingerprint, peer);
+        qDebug() << "[Discovery] Peer updated via UDP:" << info.alias << "(" << info.deviceModel << ")"
+                 << senderAddress.toString() << ":" << info.port << "protocol:" << info.protocol;
         emit peerUpdated(peer);
 
         // Respond ONLY IF peer announced (announce: true)
@@ -261,6 +274,11 @@ void DiscoveryManager::onUdpReadyRead()
 
 void DiscoveryManager::registerPeer(const QHostAddress &address, quint16 port)
 {
+    QString uErr;
+    QByteArray dgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &uErr);
+    if (!dgram.isEmpty() && m_udpSocket && m_udpSocket->isOpen()) {
+        m_udpSocket->writeDatagram(dgram, address, port > 0 ? port : DEFAULT_PORT);
+    }
     sendHttpRegister(address, port);
 }
 
@@ -387,6 +405,8 @@ void DiscoveryManager::handleIncomingRegister(const DeviceInfo &info, const QHos
     peer.lastSeen = QDateTime::currentDateTime();
 
     m_peers.insert(info.fingerprint, peer);
+    qDebug() << "[Discovery] Peer updated via HTTP register:" << info.alias << "(" << info.deviceModel << ")"
+             << cleanAddress.toString() << ":" << info.port << "protocol:" << info.protocol;
     emit peerUpdated(peer);
 }
 
@@ -604,6 +624,20 @@ void DiscoveryManager::startSubnetScan()
         m_scanQueue.append(QHostAddress(targetIpVal));
     }
 
+    // Fast unicast UDP announcement sweep to all target hosts
+    // This immediately bypasses router multicast/broadcast filtering
+    // and causes modern LocalSend peers (macOS, iOS, Android, Windows) to register back via HTTP
+    QString uErr;
+    QByteArray sweepDgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &uErr);
+    if (!sweepDgram.isEmpty() && m_udpSocket && m_udpSocket->isOpen()) {
+        for (int i = 0; i < m_scanQueue.size(); ++i) {
+            m_udpSocket->writeDatagram(sweepDgram, m_scanQueue.at(i), DEFAULT_PORT);
+        }
+    }
+
+    qDebug() << "[Discovery] Subnet scan started for" << m_scanQueue.size() << "hosts on base"
+             << QHostAddress(baseIpVal).toString();
+
     m_isScanning = true;
     emit scanningChanged(true);
 
@@ -690,6 +724,14 @@ void DiscoveryManager::pumpScanQueue()
 
         QNetworkReply *reply = m_nam->post(req, body);
         if (reply) {
+            qDebug() << "[Discovery] Probing" << targetAddr.toString();
+            // Also send direct unicast UDP datagram to target host
+            QString uErr;
+            QByteArray dgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &uErr);
+            if (!dgram.isEmpty() && m_udpSocket && m_udpSocket->isOpen()) {
+                m_udpSocket->writeDatagram(dgram, targetAddr, DEFAULT_PORT);
+            }
+
             m_activeProbes.insert(reply, targetAddr);
             connect(reply, SIGNAL(finished()), this, SLOT(onProbeReplyFinished()));
 
@@ -744,10 +786,19 @@ void DiscoveryManager::onProbeReplyFinished()
                     return;
                 }
                 m_peers.insert(peer.info.fingerprint, peer);
+                qDebug() << "[Discovery] Peer updated via HTTP probe:" << peer.info.alias
+                         << targetAddr.toString() << ":" << peer.info.port;
                 emit peerUpdated(peer);
             }
         }
     } else {
+        // If HTTP probe failed, send another direct UDP announcement as fallback
+        QString uErr;
+        QByteArray dgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &uErr);
+        if (!dgram.isEmpty() && m_udpSocket && m_udpSocket->isOpen()) {
+            m_udpSocket->writeDatagram(dgram, targetAddr, DEFAULT_PORT);
+        }
+
         // If HTTP failed (e.g. RemoteHostClosedError or TLS reset on port 53317), probe HTTPS as fallback
         if (reply->error() == QNetworkReply::RemoteHostClosedError ||
             reply->error() == QNetworkReply::ProtocolUnknownError ||

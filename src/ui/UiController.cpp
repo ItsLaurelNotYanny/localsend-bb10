@@ -232,6 +232,7 @@ void UiController::setSelectedFilePath(const QString &path)
     m_selectedFileSize = formatBytes(fi.size());
 
     emit selectedFileChanged();
+    populatePeers();
 }
 
 void UiController::clearSelectedFile()
@@ -241,6 +242,7 @@ void UiController::clearSelectedFile()
     m_selectedFileSize.clear();
 
     emit selectedFileChanged();
+    populatePeers();
 }
 
 bool UiController::sendSelectedFile(const QString &fingerprint)
@@ -423,6 +425,9 @@ void UiController::openFile(const QString &filePath)
     bb::system::InvokeRequest request;
     request.setAction("bb.action.VIEW");
     request.setUri(QUrl::fromLocalFile(target));
+    if (target.endsWith(".txt", Qt::CaseInsensitive)) {
+        request.setMimeType("text/plain");
+    }
     mgr.invoke(request);
 #else
     QDesktopServices::openUrl(QUrl::fromLocalFile(target));
@@ -446,6 +451,33 @@ void UiController::openReceiveDirectory()
 #else
     QDesktopServices::openUrl(QUrl::fromLocalFile(dirPath));
 #endif
+}
+
+QString UiController::diagnosticLogPath() const
+{
+    QString docPath = "/accounts/1000/shared/documents/localsend_launch.txt";
+    if (QFile::exists(docPath)) {
+        return docPath;
+    }
+    QString dataPath = "data/localsend_launch.txt";
+    if (QFile::exists(dataPath)) {
+        return dataPath;
+    }
+    return docPath;
+}
+
+void UiController::openDiagnosticLog()
+{
+    QString path = diagnosticLogPath();
+    if (!QFile::exists(path)) {
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream out(&f);
+            out << "LocalSend diagnostic log initialized.\n";
+            f.close();
+        }
+    }
+    openFile(path);
 }
 
 void UiController::onPeerUpdated(const PeerDevice &peer)
@@ -504,6 +536,7 @@ void UiController::updatePeersModel()
     m_peersRevision++;
     emit peersChanged();
     emit networkStatusChanged();
+    populatePeers();
 }
 
 void UiController::onSendStateChanged(const QString &requestId, const QString &state)
@@ -688,6 +721,7 @@ void UiController::onTransferSlotChanged(bool busy, const QString &activeRequest
         }
     }
     emit transferStateChanged();
+    populatePeers();
 }
 
 QString UiController::formatBytes(qint64 bytes)
@@ -706,10 +740,17 @@ QString UiController::formatBytes(qint64 bytes)
     }
 }
 
+void UiController::setPeersContainer(QObject *containerObj)
+{
+    m_peersContainer = containerObj;
+    populatePeers();
+}
+
 void UiController::populatePeers(QObject *containerObj)
 {
 #if defined(BB_CASCADES) || defined(Q_OS_QNX)
-    bb::cascades::Container *container = qobject_cast<bb::cascades::Container*>(containerObj);
+    QObject *target = containerObj ? containerObj : m_peersContainer.data();
+    bb::cascades::Container *container = qobject_cast<bb::cascades::Container*>(target);
     if (!container) {
         return;
     }

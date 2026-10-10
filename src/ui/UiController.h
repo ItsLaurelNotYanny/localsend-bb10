@@ -22,6 +22,7 @@ class UiController : public QObject {
     Q_PROPERTY(QString deviceAlias READ deviceAlias WRITE setDeviceAlias NOTIFY deviceAliasChanged)
     Q_PROPERTY(int devicePort READ devicePort NOTIFY devicePortChanged)
     Q_PROPERTY(QString receiveDirectory READ receiveDirectory NOTIFY receiveDirectoryChanged)
+    Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
 
     // Peer list property
     Q_PROPERTY(QVariantList peers READ peers NOTIFY peersChanged)
@@ -57,6 +58,7 @@ class UiController : public QObject {
 
     // Error and notifications
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
+    Q_PROPERTY(QString diagnosticLogPath READ diagnosticLogPath CONSTANT)
 
 public:
     explicit UiController(Application *app, QObject *parent = 0);
@@ -66,6 +68,7 @@ public:
     QString deviceAlias() const;
     int devicePort() const;
     QString receiveDirectory() const;
+    QString appVersion() const { return "v0.1.1.6"; }
     QVariantList peers() const { return m_peers; }
     int peerCount() const { return m_peers.size(); }
     int peersRevision() const { return m_peersRevision; }
@@ -110,7 +113,10 @@ public:
     Q_INVOKABLE void clearError();
     Q_INVOKABLE void openFile(const QString &filePath = QString());
     Q_INVOKABLE void openReceiveDirectory();
-    Q_INVOKABLE void populatePeers(QObject *containerObj);
+    Q_INVOKABLE QString diagnosticLogPath() const;
+    Q_INVOKABLE void openDiagnosticLog();
+    Q_INVOKABLE void setPeersContainer(QObject *containerObj);
+    Q_INVOKABLE void populatePeers(QObject *containerObj = 0);
 
 signals:
     void deviceAliasChanged();
@@ -165,6 +171,7 @@ private:
 
     Application *m_app;
     QPointer<QObject> m_activeFilePicker;
+    QPointer<QObject> m_peersContainer;
 
     QVariantList m_peers;
     int m_peersRevision;
