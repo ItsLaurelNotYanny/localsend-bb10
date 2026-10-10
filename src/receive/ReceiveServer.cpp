@@ -87,7 +87,7 @@ void ReceiveServer::onHeadersReady(const HttpRequestHead &head)
     m_connStates[conn].head = head;
     QString path = head.target.path();
 
-    if (head.method == "GET" && path == "/api/localsend/v2/info") {
+    if (head.method == "GET" && (path == "/api/localsend/v2/info" || path == "/api/localsend/v1/info")) {
         handleInfoRoute(conn);
     } else if (head.method == "POST" && path == "/api/localsend/v2/register") {
         if (head.contentLength > ProtocolJson::MAX_JSON_SIZE) {
