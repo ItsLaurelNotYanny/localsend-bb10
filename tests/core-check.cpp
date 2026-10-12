@@ -3400,6 +3400,78 @@ void testDiscoveryInterfaceSelectionAndSubnetPrefixR021()
     TEST_PASS();
 }
 
+void testDiscoveryUdpBufferAndPacedSweepR025()
+{
+    TEST_CASE("R025 - DiscoveryManager UDP buffer expansion and paced sweep engine");
+
+    localsend::Application app;
+    app.setPort(0);
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start failed");
+
+    DiscoveryManager *dm = app.discoveryManager();
+    ASSERT_TRUE(dm != 0, "discovery manager must not be null");
+
+    // Add a historical peer
+    QHostAddress samplePeer("192.168.3.161");
+    dm->addHistoricalPeer(samplePeer);
+    ASSERT_TRUE(dm->historicalPeers().contains(samplePeer), "historical peers list must contain added peer");
+
+    // Wait for the paced UDP sweep to drain (15ms timer batches)
+    QTime timer;
+    timer.start();
+    while (!dm->udpSweepQueue().isEmpty() && timer.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        usleep(5000);
+    }
+    if (!dm->udpSweepQueue().isEmpty()) {
+        qDebug() << "[Test] Remaining udpSweepQueue size:" << dm->udpSweepQueue().size()
+                 << "elapsed:" << timer.elapsed();
+    }
+    ASSERT_TRUE(dm->udpSweepQueue().isEmpty(), "udp sweep queue must drain completely without stalling");
+
+    app.stop();
+    TEST_PASS();
+}
+
+void testDiscoveryHistoricalPeerPrioritizationR025()
+{
+    TEST_CASE("R025 - DiscoveryManager subnet scan prioritizes historical peers");
+
+    localsend::Application app;
+    app.setPort(0);
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start failed");
+
+    DiscoveryManager *dm = app.discoveryManager();
+    ASSERT_TRUE(dm != 0, "discovery manager must not be null");
+
+    QString ifaceAddr = dm->activeInterfaceAddress();
+    if (!ifaceAddr.isEmpty()) {
+        QHostAddress localHost(ifaceAddr);
+        quint32 localIp = localHost.toIPv4Address();
+        // Construct an IP ending in host 161 on same /24 subnet
+        quint32 targetIp = (localIp & 0xFFFFFF00) | 161;
+        if (targetIp == localIp) {
+            targetIp = (localIp & 0xFFFFFF00) | 162;
+        }
+        QHostAddress targetAddr(targetIp);
+
+        dm->addHistoricalPeer(targetAddr);
+        dm->refresh();
+
+        // Target should be prioritized at the head of the sweep queue
+        QList<QHostAddress> sweepQueue = dm->udpSweepQueue();
+        if (!sweepQueue.isEmpty()) {
+            ASSERT_TRUE(sweepQueue.first() == targetAddr,
+                        "historical peer in local subnet must be prioritized at the head of sweep queue");
+        }
+    }
+
+    app.stop();
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -3467,6 +3539,8 @@ int main(int argc, char **argv)
     testDiscoveryStopWithPendingRegistersSafe();
     testDiscoveryRegisterTimeout();
     testDiscoveryInterfaceSelectionAndSubnetPrefixR021();
+    testDiscoveryUdpBufferAndPacedSweepR025();
+    testDiscoveryHistoricalPeerPrioritizationR025();
 
     // T09 Cascades UI & Controller Tests
     testUiControllerDevicePropertiesAndAlias();

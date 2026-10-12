@@ -37,7 +37,7 @@ if [ -n "${CONTAINER_CLI}" ] && [ -d "${BBNDK_PATH}" ]; then
         -v "${ROOT_DIR}:/workspace:z" \
         -w /workspace \
         bb10-toolchain:latest \
-        bb10-build /workspace
+        /workspace/docker/bb10-toolchain/bin/bb10-build /workspace
 
     echo "=== Build and Packaging Complete ==="
     exit 0
@@ -87,6 +87,7 @@ blackberry-nativepackager \
     -devMode \
     "${ROOT_DIR}/bar-descriptor.xml" \
     -e "${ROOT_DIR}/arm/o.le-v7/localsend-bb10.so" localsend-bb10.so \
+    -e "${ROOT_DIR}/icon.png" icon.png \
     -C "${ROOT_DIR}" assets
 
 echo "=== Packaging Complete ==="

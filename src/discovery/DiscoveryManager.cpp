@@ -4,7 +4,16 @@
 #include <QNetworkRequest>
 #include <QTimer>
 #include <QSet>
+#include <QFile>
+#include <QTextStream>
+#include <QStringList>
+#include <QRegExp>
 #include <QDebug>
+
+#if defined(Q_OS_UNIX) || defined(Q_OS_QNX) || !defined(Q_OS_WIN)
+#include <sys/types.h>
+#include <sys/socket.h>
+#endif
 
 DiscoveryManager::DiscoveryManager(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
@@ -13,12 +22,14 @@ DiscoveryManager::DiscoveryManager(QNetworkAccessManager *nam, QObject *parent)
     , m_announceTimer(new QTimer(this))
     , m_scanPumpTimer(new QTimer(this))
     , m_scanDeadlineTimer(new QTimer(this))
+    , m_udpSweepTimer(new QTimer(this))
     , m_multicastAddress(QHostAddress("224.0.0.167"))
     , m_isScanning(false)
 {
     connect(m_udpSocket, SIGNAL(readyRead()), this, SLOT(onUdpReadyRead()));
     connect(m_announceTimer, SIGNAL(timeout()), this, SLOT(onAnnounceTimeout()));
     connect(m_scanPumpTimer, SIGNAL(timeout()), this, SLOT(pumpScanQueue()));
+    connect(m_udpSweepTimer, SIGNAL(timeout()), this, SLOT(pumpUdpSweep()));
     m_scanDeadlineTimer->setSingleShot(true);
     connect(m_scanDeadlineTimer, SIGNAL(timeout()), this, SLOT(cancelSubnetScan()));
 }
@@ -55,6 +66,9 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
         return false;
     }
 
+    // Configure expanded send/receive buffers (64 KiB) for QNX io-pkt-v4
+    setSocketBuffers();
+
     // Join LocalSend multicast group on all active network interfaces
     QList<QNetworkInterface> ifaces = QNetworkInterface::allInterfaces();
     for (int i = 0; i < ifaces.size(); ++i) {
@@ -86,7 +100,7 @@ void DiscoveryManager::stop()
         m_announceTimer->stop();
     }
 
-    if (m_udpSocket && m_udpSocket->isOpen()) {
+    if (m_udpSocket && (m_udpSocket->isValid() || m_udpSocket->isOpen())) {
         m_udpSocket->close();
     }
 
@@ -142,7 +156,7 @@ void DiscoveryManager::refresh()
     QList<PeerDevice> currentPeers = m_peers.values();
     for (int i = 0; i < currentPeers.size(); ++i) {
         const PeerDevice &peer = currentPeers.at(i);
-        if (!dgram.isEmpty() && m_udpSocket && m_udpSocket->isOpen()) {
+        if (!dgram.isEmpty() && m_udpSocket && (m_udpSocket->isValid() || m_udpSocket->isOpen())) {
             m_udpSocket->writeDatagram(dgram, peer.address, DEFAULT_PORT);
             if (peer.info.port != DEFAULT_PORT && peer.info.port > 0) {
                 m_udpSocket->writeDatagram(dgram, peer.address, peer.info.port);
@@ -169,7 +183,7 @@ void DiscoveryManager::updateLocalInfo(const DeviceInfo &info)
 
 void DiscoveryManager::sendUdpAnnouncement(bool announce)
 {
-    if (!m_udpSocket || !m_udpSocket->isOpen()) {
+    if (!m_udpSocket || (!m_udpSocket->isValid() && !m_udpSocket->isOpen())) {
         return;
     }
 
@@ -255,6 +269,7 @@ void DiscoveryManager::onUdpReadyRead()
         peer.address = senderAddress;
         peer.lastSeen = QDateTime::currentDateTime();
 
+        addHistoricalPeer(senderAddress);
         m_peers.insert(info.fingerprint, peer);
         qDebug() << "[Discovery] Peer updated via UDP:" << info.alias << "(" << info.deviceModel << ")"
                  << senderAddress.toString() << ":" << info.port << "protocol:" << info.protocol;
@@ -274,9 +289,10 @@ void DiscoveryManager::onUdpReadyRead()
 
 void DiscoveryManager::registerPeer(const QHostAddress &address, quint16 port)
 {
+    addHistoricalPeer(address);
     QString uErr;
     QByteArray dgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &uErr);
-    if (!dgram.isEmpty() && m_udpSocket && m_udpSocket->isOpen()) {
+    if (!dgram.isEmpty() && m_udpSocket && (m_udpSocket->isValid() || m_udpSocket->isOpen())) {
         m_udpSocket->writeDatagram(dgram, address, port > 0 ? port : DEFAULT_PORT);
     }
     sendHttpRegister(address, port);
@@ -356,8 +372,15 @@ void DiscoveryManager::onRegisterReplyFinished()
             }
         }
 
-        // Fallback to multicast response with announce:false
-        sendUdpAnnouncement(false);
+        // If HTTP register failed due to TLS handshake/protocol mismatch, probe HTTPS fallback
+        if (reply->error() == QNetworkReply::RemoteHostClosedError ||
+            reply->error() == QNetworkReply::ProtocolUnknownError ||
+            reply->error() == QNetworkReply::SslHandshakeFailedError) {
+            probeHttpsHost(target.address);
+        } else {
+            // Fallback to multicast response with announce:false
+            sendUdpAnnouncement(false);
+        }
         reply->deleteLater();
         return;
     }
@@ -372,6 +395,7 @@ void DiscoveryManager::onRegisterReplyFinished()
                 reply->deleteLater();
                 return;
             }
+            addHistoricalPeer(peer.address);
             m_peers.insert(peer.info.fingerprint, peer);
             emit peerUpdated(peer);
         } else {
@@ -404,6 +428,7 @@ void DiscoveryManager::handleIncomingRegister(const DeviceInfo &info, const QHos
     peer.address = cleanAddress;
     peer.lastSeen = QDateTime::currentDateTime();
 
+    addHistoricalPeer(cleanAddress);
     m_peers.insert(info.fingerprint, peer);
     qDebug() << "[Discovery] Peer updated via HTTP register:" << info.alias << "(" << info.deviceModel << ")"
              << cleanAddress.toString() << ":" << info.port << "protocol:" << info.protocol;
@@ -418,6 +443,88 @@ QList<PeerDevice> DiscoveryManager::peers() const
 PeerDevice DiscoveryManager::findPeer(const QString &fingerprint) const
 {
     return m_peers.value(fingerprint);
+}
+
+void DiscoveryManager::addHistoricalPeer(const QHostAddress &addr)
+{
+    if (addr.isNull() || addr == QHostAddress::LocalHost || addr == QHostAddress::Broadcast) {
+        return;
+    }
+
+    QHostAddress cleanAddr = addr;
+    if (cleanAddr.protocol() == QAbstractSocket::IPv6Protocol) {
+        quint32 ipv4 = cleanAddr.toIPv4Address();
+        if (ipv4 != 0) {
+            cleanAddr = QHostAddress(ipv4);
+        }
+    }
+
+    if (cleanAddr.protocol() != QAbstractSocket::IPv4Protocol) {
+        return;
+    }
+
+    m_historicalPeers.removeAll(cleanAddr);
+    m_historicalPeers.prepend(cleanAddr);
+    while (m_historicalPeers.size() > 50) {
+        m_historicalPeers.removeLast();
+    }
+}
+
+void DiscoveryManager::setSocketBuffers()
+{
+    if (!m_udpSocket) {
+        return;
+    }
+
+    // Set Qt-level socket buffer options (Qt 5+)
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+    m_udpSocket->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption, 65536);
+    m_udpSocket->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption, 65536);
+#endif
+
+    // Set native POSIX / QNX socket buffer options
+    // (Critical on QNX io-pkt-v4 where default non-blocking UDP SO_SNDBUF is ~8-9 KiB)
+#if !defined(Q_OS_WIN)
+    int fd = m_udpSocket->socketDescriptor();
+    if (fd >= 0) {
+        int bufSize = 65536;
+        ::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (const char *)&bufSize, sizeof(bufSize));
+        ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const char *)&bufSize, sizeof(bufSize));
+    }
+#endif
+}
+
+QList<QHostAddress> DiscoveryManager::loadArpCacheIps() const
+{
+    QList<QHostAddress> result;
+    QFile file("/proc/net/arp");
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return result;
+    }
+
+    QTextStream in(&file);
+    in.readLine(); // Skip header
+    while (!in.atEnd()) {
+        QString line = in.readLine().trimmed();
+        if (line.isEmpty()) {
+            continue;
+        }
+        QStringList parts = line.split(QRegExp("\\s+"), QString::SkipEmptyParts);
+        if (parts.size() >= 4) {
+            QString ipStr = parts.at(0);
+            QString flagsStr = parts.at(2);
+            bool ok = false;
+            int flags = flagsStr.toInt(&ok, 0);
+            // Flags: 0x2 is ATF_COM (completed ARP entry)
+            if (ok && (flags & 0x2)) {
+                QHostAddress addr(ipStr);
+                if (addr.protocol() == QAbstractSocket::IPv4Protocol && !addr.isNull()) {
+                    result.append(addr);
+                }
+            }
+        }
+    }
+    return result;
 }
 
 bool DiscoveryManager::selectPrimaryInterface(QNetworkInterface *outIface, QNetworkAddressEntry *outEntry) const
@@ -512,10 +619,6 @@ QString DiscoveryManager::activeInterfaceSubnet() const
 
 void DiscoveryManager::startSubnetScan()
 {
-    if (m_isScanning) {
-        return;
-    }
-
     cancelSubnetScan();
 
     QNetworkInterface iface;
@@ -541,11 +644,40 @@ void DiscoveryManager::startSubnetScan()
     QList<int> hostOrder;
     QSet<int> seen;
 
-    if (prefixLen >= 24) {
-        int maxHost = static_cast<int>((~maskVal) & 0xFF);
-        if (maxHost < 2) maxHost = 254;
+    int maxHost = static_cast<int>((~maskVal) & 0xFF);
+    if (maxHost < 2) maxHost = 254;
 
-        // 1. Immediate neighbors (delta ±1 to ±40)
+    // 1. Historical peers within this subnet (MRU order, top priority)
+    for (int i = 0; i < m_historicalPeers.size(); ++i) {
+        const QHostAddress &hAddr = m_historicalPeers.at(i);
+        quint32 hIpVal = hAddr.toIPv4Address();
+        if ((hIpVal & maskVal) == netVal) {
+            int h = static_cast<int>(hIpVal & (~maskVal));
+            if (h != localHostNum && h >= 1 && h <= maxHost && !seen.contains(h)) {
+                hostOrder.append(h);
+                seen.insert(h);
+                qDebug() << "[Discovery] Prioritizing historical peer host:" << hAddr.toString();
+            }
+        }
+    }
+
+    // 2. Active ARP cache hosts (completed ARP entries on LAN)
+    QList<QHostAddress> arpHosts = loadArpCacheIps();
+    for (int i = 0; i < arpHosts.size(); ++i) {
+        const QHostAddress &aAddr = arpHosts.at(i);
+        quint32 aIpVal = aAddr.toIPv4Address();
+        if ((aIpVal & maskVal) == netVal) {
+            int h = static_cast<int>(aIpVal & (~maskVal));
+            if (h != localHostNum && h >= 1 && h <= maxHost && !seen.contains(h)) {
+                hostOrder.append(h);
+                seen.insert(h);
+                qDebug() << "[Discovery] Prioritizing active ARP host:" << aAddr.toString();
+            }
+        }
+    }
+
+    if (prefixLen >= 24) {
+        // 3. Immediate neighbors (delta ±1 to ±40)
         for (int delta = 1; delta <= 40; ++delta) {
             int left = localHostNum - delta;
             int right = localHostNum + delta;
@@ -559,7 +691,7 @@ void DiscoveryManager::startSubnetScan()
             }
         }
 
-        // 2. Common gateway & device hosts
+        // 4. Common gateway & device hosts
         static const int commonHosts[] = {1, 2, 3, 4, 10, 50, 100, 101, 102, 150, 200, 254};
         for (size_t k = 0; k < sizeof(commonHosts)/sizeof(commonHosts[0]); ++k) {
             int h = commonHosts[k];
@@ -569,7 +701,7 @@ void DiscoveryManager::startSubnetScan()
             }
         }
 
-        // 3. Additional nearby hosts up to cap (max 80 hosts for responsive scan)
+        // 5. Additional nearby hosts up to cap (max 80 hosts for responsive scan)
         for (int h = 1; h <= maxHost && hostOrder.size() < 80; ++h) {
             if (h != localHostNum && !seen.contains(h)) {
                 hostOrder.append(h);
@@ -624,15 +756,20 @@ void DiscoveryManager::startSubnetScan()
         m_scanQueue.append(QHostAddress(targetIpVal));
     }
 
-    // Fast unicast UDP announcement sweep to all target hosts
-    // This immediately bypasses router multicast/broadcast filtering
-    // and causes modern LocalSend peers (macOS, iOS, Android, Windows) to register back via HTTP
-    QString uErr;
-    QByteArray sweepDgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &uErr);
-    if (!sweepDgram.isEmpty() && m_udpSocket && m_udpSocket->isOpen()) {
-        for (int i = 0; i < m_scanQueue.size(); ++i) {
-            m_udpSocket->writeDatagram(sweepDgram, m_scanQueue.at(i), DEFAULT_PORT);
-        }
+    // Configure expanded UDP socket send/recv buffers (64 KiB) before sweeping
+    setSocketBuffers();
+
+    // Start paced unicast UDP announcement sweep across the subnet.
+    // Instead of blasting all datagrams simultaneously in a tight C++ loop (which overruns
+    // QNX 6.5 io-pkt 8 KiB socket send buffers and causes ENOBUFS packet drops),
+    // we enqueue them into m_udpSweepQueue and pace transmission via m_udpSweepTimer
+    // at 15 ms intervals (5 datagrams/batch, ~260 ms for 88 hosts).
+    if (m_udpSweepTimer) {
+        m_udpSweepTimer->stop();
+    }
+    m_udpSweepQueue = m_scanQueue;
+    if (m_udpSweepTimer && !m_udpSweepQueue.isEmpty()) {
+        m_udpSweepTimer->start(15);
     }
 
     qDebug() << "[Discovery] Subnet scan started for" << m_scanQueue.size() << "hosts on base"
@@ -642,7 +779,7 @@ void DiscoveryManager::startSubnetScan()
     emit scanningChanged(true);
 
     if (m_scanDeadlineTimer) {
-        m_scanDeadlineTimer->start(8000); // 8-second bounded whole-scan deadline
+        m_scanDeadlineTimer->start(12000); // 12-second bounded whole-scan deadline
     }
 
     pumpScanQueue();
@@ -653,6 +790,10 @@ void DiscoveryManager::cancelSubnetScan()
     if (m_scanDeadlineTimer) {
         m_scanDeadlineTimer->stop();
     }
+    if (m_udpSweepTimer) {
+        m_udpSweepTimer->stop();
+    }
+    m_udpSweepQueue.clear();
 
     m_scanQueue.clear();
 
@@ -681,6 +822,67 @@ void DiscoveryManager::cancelSubnetScan()
     if (m_isScanning) {
         m_isScanning = false;
         emit scanningChanged(false);
+    }
+}
+
+void DiscoveryManager::pumpUdpSweep()
+{
+    if (!m_udpSocket || (!m_udpSocket->isValid() && !m_udpSocket->isOpen()) || m_udpSweepQueue.isEmpty()) {
+        if (m_udpSweepTimer) {
+            m_udpSweepTimer->stop();
+        }
+        if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
+            if (m_scanDeadlineTimer) {
+                m_scanDeadlineTimer->stop();
+            }
+            if (m_isScanning) {
+                m_isScanning = false;
+                emit scanningChanged(false);
+            }
+        }
+        return;
+    }
+
+    QString uErr;
+    QByteArray sweepDgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &uErr);
+    if (sweepDgram.isEmpty()) {
+        if (m_udpSweepTimer) {
+            m_udpSweepTimer->stop();
+        }
+        m_udpSweepQueue.clear();
+        return;
+    }
+
+    const int BATCH_SIZE = 5;
+    int sentCount = 0;
+
+    while (!m_udpSweepQueue.isEmpty() && sentCount < BATCH_SIZE) {
+        QHostAddress target = m_udpSweepQueue.takeFirst();
+        qint64 bytesWritten = m_udpSocket->writeDatagram(sweepDgram, target, DEFAULT_PORT);
+        if (bytesWritten < 0) {
+            // Buffer full (ENOBUFS) or temporary socket congestion
+            qDebug() << "[Discovery] UDP sweep write failed to" << target.toString()
+                     << "error:" << m_udpSocket->errorString() << "- requeuing and throttling";
+            m_udpSweepQueue.prepend(target);
+            break; // Pause this batch, wait for next timer tick to allow network stack to drain
+        }
+        sentCount++;
+    }
+
+    if (m_udpSweepQueue.isEmpty()) {
+        if (m_udpSweepTimer) {
+            m_udpSweepTimer->stop();
+        }
+        qDebug() << "[Discovery] UDP sweep completed successfully";
+        if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
+            if (m_scanDeadlineTimer) {
+                m_scanDeadlineTimer->stop();
+            }
+            if (m_isScanning) {
+                m_isScanning = false;
+                emit scanningChanged(false);
+            }
+        }
     }
 }
 
@@ -725,25 +927,19 @@ void DiscoveryManager::pumpScanQueue()
         QNetworkReply *reply = m_nam->post(req, body);
         if (reply) {
             qDebug() << "[Discovery] Probing" << targetAddr.toString();
-            // Also send direct unicast UDP datagram to target host
-            QString uErr;
-            QByteArray dgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &uErr);
-            if (!dgram.isEmpty() && m_udpSocket && m_udpSocket->isOpen()) {
-                m_udpSocket->writeDatagram(dgram, targetAddr, DEFAULT_PORT);
-            }
 
             m_activeProbes.insert(reply, targetAddr);
             connect(reply, SIGNAL(finished()), this, SLOT(onProbeReplyFinished()));
 
-            // 600 ms deadline for subnet scan probe (fast responsive LAN sweep)
+            // 450 ms deadline for subnet scan probe (fast responsive LAN sweep)
             QTimer *timer = new QTimer(reply);
             timer->setSingleShot(true);
             connect(timer, SIGNAL(timeout()), reply, SLOT(abort()));
-            timer->start(600);
+            timer->start(450);
         }
     }
 
-    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
+    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty() && m_udpSweepQueue.isEmpty()) {
         if (m_scanDeadlineTimer) {
             m_scanDeadlineTimer->stop();
         }
@@ -785,6 +981,7 @@ void DiscoveryManager::onProbeReplyFinished()
                     pumpScanQueue();
                     return;
                 }
+                addHistoricalPeer(peer.address);
                 m_peers.insert(peer.info.fingerprint, peer);
                 qDebug() << "[Discovery] Peer updated via HTTP probe:" << peer.info.alias
                          << targetAddr.toString() << ":" << peer.info.port;
@@ -795,7 +992,7 @@ void DiscoveryManager::onProbeReplyFinished()
         // If HTTP probe failed, send another direct UDP announcement as fallback
         QString uErr;
         QByteArray dgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &uErr);
-        if (!dgram.isEmpty() && m_udpSocket && m_udpSocket->isOpen()) {
+        if (!dgram.isEmpty() && m_udpSocket && (m_udpSocket->isValid() || m_udpSocket->isOpen())) {
             m_udpSocket->writeDatagram(dgram, targetAddr, DEFAULT_PORT);
         }
 
@@ -849,7 +1046,7 @@ void DiscoveryManager::probeHttpsHost(const QHostAddress &addr)
         QTimer *timer = new QTimer(reply);
         timer->setSingleShot(true);
         connect(timer, SIGNAL(timeout()), reply, SLOT(abort()));
-        timer->start(600);
+        timer->start(450);
     }
 }
 
@@ -881,6 +1078,7 @@ void DiscoveryManager::onHttpsProbeReplyFinished()
             if (ProtocolJson::decodeRegisterResponse(respData, target, &peer, &err)) {
                 if (peer.info.fingerprint != m_localInfo.fingerprint) {
                     peer.info.protocol = "https";
+                    addHistoricalPeer(peer.address);
                     m_peers.insert(peer.info.fingerprint, peer);
                     emit peerUpdated(peer);
                 }
@@ -890,7 +1088,7 @@ void DiscoveryManager::onHttpsProbeReplyFinished()
 
     reply->deleteLater();
 
-    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
+    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty() && m_udpSweepQueue.isEmpty()) {
         if (m_scanDeadlineTimer) {
             m_scanDeadlineTimer->stop();
         }
