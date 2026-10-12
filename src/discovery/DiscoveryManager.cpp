@@ -46,6 +46,10 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
 
     m_localInfo = localInfo;
     m_interface = iface;
+    if (!m_interface.isValid()) {
+        QNetworkAddressEntry primaryEntry;
+        selectPrimaryInterface(&m_interface, &primaryEntry);
+    }
 
     // Bind UDP socket to port 53317 with address sharing (Qt4/Qt5 dual baseline)
     qDebug() << "[Discovery] Starting DiscoveryManager on interface:" << (m_interface.isValid() ? m_interface.name() : "default")
@@ -65,7 +69,8 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
     }
 
     qDebug() << "[Discovery] UDP socket bind result:" << bound << "port:" << DEFAULT_PORT
-             << "state:" << m_udpSocket->state() << "isValid:" << m_udpSocket->isValid();
+             << "state:" << m_udpSocket->state() << "isValid:" << m_udpSocket->isValid()
+             << "isOpen:" << m_udpSocket->isOpen();
 
     if (!bound) {
         if (error) {
@@ -91,7 +96,11 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
 
     if (m_interface.isValid()) {
         m_udpSocket->setMulticastInterface(m_interface);
-        qDebug() << "[Discovery] Multicast outgoing interface set to:" << m_interface.name();
+        QNetworkInterface actualMcast = m_udpSocket->multicastInterface();
+        qDebug() << "[Discovery] Multicast outgoing interface requested:" << m_interface.name()
+                 << "effective:" << (actualMcast.isValid() ? actualMcast.name() : m_interface.name());
+    } else {
+        qDebug() << "[Discovery] No active LAN interface resolved for multicast outgoing configuration";
     }
 
     // Start periodic 30s announcement heartbeat to handle network drops and late-joining peers
@@ -512,19 +521,27 @@ void DiscoveryManager::setSocketBuffers()
     if (fd >= 0) {
         int bufSize = 65536;
         int resSnd = ::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (const char *)&bufSize, sizeof(bufSize));
+        int errSnd = (resSnd < 0) ? errno : 0;
         int resRcv = ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const char *)&bufSize, sizeof(bufSize));
+        int errRcv = (resRcv < 0) ? errno : 0;
 
         int actualSnd = 0;
         int actualRcv = 0;
         socklen_t optLen = sizeof(actualSnd);
         int getSnd = ::getsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&actualSnd, &optLen);
+        int errGetSnd = (getSnd < 0) ? errno : 0;
         optLen = sizeof(actualRcv);
         int getRcv = ::getsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&actualRcv, &optLen);
+        int errGetRcv = (getRcv < 0) ? errno : 0;
 
         qDebug() << "[Discovery] Socket buffers: setsockopt SO_SNDBUF (req=65536, res=" << resSnd
-                 << ", actual=" << (getSnd == 0 ? actualSnd : -1) << ")"
-                 << "SO_RCVBUF (req=65536, res=" << resRcv
-                 << ", actual=" << (getRcv == 0 ? actualRcv : -1) << ")";
+                 << (errSnd ? QString(" errno=%1").arg(errSnd) : QString())
+                 << ", actual=" << (getSnd == 0 ? actualSnd : -1)
+                 << (errGetSnd ? QString(" get_errno=%1").arg(errGetSnd) : QString())
+                 << ") SO_RCVBUF (req=65536, res=" << resRcv
+                 << (errRcv ? QString(" errno=%1").arg(errRcv) : QString())
+                 << ", actual=" << (getRcv == 0 ? actualRcv : -1)
+                 << (errGetRcv ? QString(" get_errno=%1").arg(errGetRcv) : QString()) << ")";
     }
 #endif
 }
@@ -557,12 +574,25 @@ void DiscoveryManager::queueUdpSweepTarget(const QHostAddress &addr)
     if (addr.isNull() || addr == QHostAddress::LocalHost || addr == QHostAddress::Broadcast) {
         return;
     }
+    quint32 targetIp = addr.toIPv4Address();
+    if (m_udpSweepAttempts.value(targetIp, 0) >= 3) {
+        qDebug() << "[Discovery] Target" << addr.toString()
+                 << "already reached maximum attempts (3) for this scan; skipping fallback enqueue";
+        return;
+    }
     if (!m_udpSweepQueue.contains(addr)) {
         m_udpSweepQueue.append(addr);
     }
     if (m_udpSweepTimer && !m_udpSweepTimer->isActive()) {
         m_udpSweepTimer->start(15);
     }
+}
+
+void DiscoveryManager::injectScanTarget(const QHostAddress &addr)
+{
+    m_scanQueue.append(addr);
+    m_isScanning = true;
+    pumpScanQueue();
 }
 
 QList<QHostAddress> DiscoveryManager::loadArpCacheIps() const
@@ -698,6 +728,16 @@ void DiscoveryManager::startSubnetScan()
         return;
     }
 
+    if (iface.isValid() && (!m_interface.isValid() || m_interface.name() != iface.name())) {
+        m_interface = iface;
+        if (m_udpSocket && (m_udpSocket->isValid() || m_udpSocket->isOpen())) {
+            m_udpSocket->setMulticastInterface(m_interface);
+            QNetworkInterface actualMcast = m_udpSocket->multicastInterface();
+            qDebug() << "[Discovery] Multicast outgoing interface refreshed to:" << m_interface.name()
+                     << "effective:" << (actualMcast.isValid() ? actualMcast.name() : m_interface.name());
+        }
+    }
+
     quint32 localIpVal = entry.ip().toIPv4Address();
     quint32 maskVal = entry.netmask().toIPv4Address();
     if (maskVal == 0) maskVal = 0xFFFFFF00;
@@ -819,6 +859,7 @@ void DiscoveryManager::startSubnetScan()
     quint32 baseIpVal = (prefixLen >= 24) ? netVal : (localIpVal & 0xFFFFFF00);
 
     m_scanQueue.clear();
+    m_udpSweepAttempts.clear();
     for (int i = 0; i < hostOrder.size(); ++i) {
         quint32 targetIpVal = baseIpVal | static_cast<quint32>(hostOrder.at(i));
         if (allLocalIps.contains(targetIpVal)) {
@@ -903,13 +944,13 @@ void DiscoveryManager::pumpUdpSweep()
         if (m_udpSweepTimer) {
             m_udpSweepTimer->stop();
         }
-        m_udpSweepAttempts.clear();
         if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
             if (m_scanDeadlineTimer) {
                 m_scanDeadlineTimer->stop();
             }
             if (m_isScanning) {
                 m_isScanning = false;
+                m_udpSweepAttempts.clear();
                 emit scanningChanged(false);
             }
         }
@@ -934,6 +975,11 @@ void DiscoveryManager::pumpUdpSweep()
     while (!m_udpSweepQueue.isEmpty() && sentCount < BATCH_SIZE) {
         QHostAddress target = m_udpSweepQueue.takeFirst();
         quint32 targetIp = target.toIPv4Address();
+        if (m_udpSweepAttempts.value(targetIp, 0) >= MAX_ATTEMPTS) {
+            qDebug() << "[Discovery] Target" << target.toString()
+                     << "already reached max attempts (" << MAX_ATTEMPTS << "); skipping send";
+            continue;
+        }
         int attempts = m_udpSweepAttempts.value(targetIp, 0) + 1;
         m_udpSweepAttempts.insert(targetIp, attempts);
 
@@ -978,7 +1024,6 @@ void DiscoveryManager::pumpUdpSweep()
         if (m_udpSweepTimer) {
             m_udpSweepTimer->stop();
         }
-        m_udpSweepAttempts.clear();
         qDebug() << "[Discovery] UDP sweep completed successfully";
         if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
             if (m_scanDeadlineTimer) {
@@ -986,6 +1031,7 @@ void DiscoveryManager::pumpUdpSweep()
             }
             if (m_isScanning) {
                 m_isScanning = false;
+                m_udpSweepAttempts.clear();
                 emit scanningChanged(false);
             }
         }
@@ -1051,6 +1097,7 @@ void DiscoveryManager::pumpScanQueue()
         }
         if (m_isScanning) {
             m_isScanning = false;
+            m_udpSweepAttempts.clear();
             emit scanningChanged(false);
         }
     }
@@ -1197,6 +1244,7 @@ void DiscoveryManager::onHttpsProbeReplyFinished()
         }
         if (m_isScanning) {
             m_isScanning = false;
+            m_udpSweepAttempts.clear();
             emit scanningChanged(false);
         }
     }

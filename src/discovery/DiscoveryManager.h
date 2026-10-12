@@ -43,6 +43,8 @@ public:
     bool getSocketBufferSizes(int *sndBuf, int *rcvBuf) const;
     void queueUdpSweepTarget(const QHostAddress &addr);
     int udpSweepAttempts(const QHostAddress &addr) const { return m_udpSweepAttempts.value(addr.toIPv4Address(), 0); }
+    QNetworkInterface activeInterface() const { return m_interface; }
+    void injectScanTarget(const QHostAddress &addr);
 
 signals:
     void peerUpdated(const PeerDevice &peer);
