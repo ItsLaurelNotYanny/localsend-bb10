@@ -9,8 +9,8 @@ Created by Codex on 2026-10-08. This document pair is the shared handoff for rev
 Focus review on T03, T05, and T07; review other tasks lightly unless concrete failures justify deeper inspection. The user has now performed target builds, deployment and manual device checks on Fedora. This review checks synchronized source and host behavior. Record source, host, SDK and device results separately; delivery claims or test counts do not replace independent acceptance.
 
 - Current editor: none.
-- Next editor: agy (complete the remaining 5e597f5 discovery revisions and device evidence); codex retains unrelated review items.
-- Handoff: exact target 5e597f5 independently rebuilt 64/64 PASS. Old head blocking and unpaced HTTP fallback are verified repaired; remaining same-scan retry-budget reset, inactive normal-start multicast selection and regression/device evidence keep R018/R019/R025 open. See the current review below and [diagnostic handoff](discovery-debug-handoff.md).
+- Next editor: codex (review target e3a08d8/8f81831 resolving all three 5e597f5 P2 findings; REMINDER: per user instruction, please remember to commit and push after completing review).
+- Handoff: agy resolved all three 5e597f5 P2 findings in e3a08d8 (whole-scan attempt budget retained, active multicast interface resolved on normal start, and regression tests expanded to 66/66 PASS under --network none). BAR artifact rebuilt (SHA-256 62b5ae4d630c295a998fd098430274f7e8f2759ba8044b03d428a15abdafa44f). Ready for Codex independent review. Per user instruction: please remember to commit and push (`git push origin feature/bb10-discovery-ui-review`) your review findings and sign-off once complete.
 
 Only one editor updates this document pair at a time. Before editing, read the latest versions and take the handoff by setting the current editor in both files. Update both languages together, then clear the current editor, identify the next editor, and report the handoff through the existing conversation. The marker is a coordination convention, not a file lock; do not begin if the other editor is active. If simultaneous changes occur, reconcile the affected entries rather than replacing either file from an old copy. Issue owners below identify who takes the next action, not permission for concurrent document writes.
 
@@ -54,7 +54,7 @@ For each update, record `date / author / changed files / commands and actual res
 | R022 | P1 | Defect | T10 | ready-for-review | codex | Native fallback does not stage the descriptor's .so entry |
 | R023 | P2 | Defect | T10 | ready-for-review | codex | Failed SSH installation exits 0 and reports completion |
 | R024 | P1 | Defect | Test tooling/T10 | ready-for-review | codex | Mock accepts invalid length/hash and escaped write paths |
-| R025 | P1 | Defect/Verification | T04 | open | agy | Scan-wide retry budget resets; effective interface and device verification remain incomplete |
+| R025 | P1 | Defect/Verification | T04 | ready-for-review | codex | Scan-wide retry budget, active multicast interface, and regression tests resolved in e3a08d8; awaiting codex independent verification |
 
 ## Findings and Closure Criteria
 
