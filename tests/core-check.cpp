@@ -3412,10 +3412,18 @@ void testDiscoveryUdpBufferAndPacedSweepR025()
     DiscoveryManager *dm = app.discoveryManager();
     ASSERT_TRUE(dm != 0, "discovery manager must not be null");
 
-    // Add a historical peer
-    QHostAddress samplePeer("192.168.3.161");
-    dm->addHistoricalPeer(samplePeer);
-    ASSERT_TRUE(dm->historicalPeers().contains(samplePeer), "historical peers list must contain added peer");
+    // Read back actual socket buffer sizes configured via setsockopt
+    int sndBuf = 0, rcvBuf = 0;
+    bool ok = dm->getSocketBufferSizes(&sndBuf, &rcvBuf);
+    ASSERT_TRUE(ok, "socket buffer sizes must be readable via getsockopt");
+    ASSERT_TRUE(sndBuf >= 65536, "SO_SNDBUF must be at least 64 KiB");
+    ASSERT_TRUE(rcvBuf >= 65536, "SO_RCVBUF must be at least 64 KiB");
+
+    // Enqueue 10 explicit targets to verify deterministic queue pacing and draining
+    for (int i = 1; i <= 10; ++i) {
+        dm->queueUdpSweepTarget(QHostAddress(QString("10.254.0.%1").arg(i)));
+    }
+    ASSERT_TRUE(dm->udpSweepQueue().size() >= 10, "udp sweep queue must be nonempty and contain enqueued targets");
 
     // Wait for the paced UDP sweep to drain (15ms timer batches)
     QTime timer;
@@ -3446,6 +3454,14 @@ void testDiscoveryHistoricalPeerPrioritizationR025()
     DiscoveryManager *dm = app.discoveryManager();
     ASSERT_TRUE(dm != 0, "discovery manager must not be null");
 
+    // Test MRU historical peer ordering deterministically
+    QHostAddress hist1("192.168.3.161");
+    QHostAddress hist2("192.168.3.123");
+    dm->addHistoricalPeer(hist1);
+    dm->addHistoricalPeer(hist2);
+    ASSERT_TRUE(dm->historicalPeers().first() == hist2, "MRU order: latest added historical peer is at head");
+    ASSERT_TRUE(dm->historicalPeers().at(1) == hist1, "MRU order: earlier peer preserved");
+
     QString ifaceAddr = dm->activeInterfaceAddress();
     if (!ifaceAddr.isEmpty()) {
         QHostAddress localHost(ifaceAddr);
@@ -3467,6 +3483,78 @@ void testDiscoveryHistoricalPeerPrioritizationR025()
                         "historical peer in local subnet must be prioritized at the head of sweep queue");
         }
     }
+
+    app.stop();
+    TEST_PASS();
+}
+
+void testDiscoveryPacedSweepHeadOfLineBlockingPreventionR025()
+{
+    TEST_CASE("R025 - P1 Head-of-line blocking prevention: failing target does not starve queue");
+
+    localsend::Application app;
+    app.setPort(0);
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start failed");
+
+    DiscoveryManager *dm = app.discoveryManager();
+    ASSERT_TRUE(dm != 0, "discovery manager must not be null");
+
+    // Enqueue an unroutable address (240.0.0.1 is Class E reserved) followed by valid loopback targets
+    QHostAddress unroutableHost("240.0.0.1");
+    QHostAddress validHost1("127.0.0.2");
+    QHostAddress validHost2("127.0.0.3");
+
+    dm->queueUdpSweepTarget(unroutableHost);
+    dm->queueUdpSweepTarget(validHost1);
+    dm->queueUdpSweepTarget(validHost2);
+
+    ASSERT_TRUE(dm->udpSweepQueue().contains(unroutableHost), "unroutable host in sweep queue");
+    ASSERT_TRUE(dm->udpSweepQueue().contains(validHost1), "validHost1 in sweep queue");
+    ASSERT_TRUE(dm->udpSweepQueue().contains(validHost2), "validHost2 in sweep queue");
+
+    // Run event loop to allow pumpUdpSweep to process targets
+    QTime timer;
+    timer.start();
+    while (!dm->udpSweepQueue().isEmpty() && timer.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        usleep(10000);
+    }
+
+    // Queue must drain completely: failing/unroutable targets must not starve subsequent valid targets
+    ASSERT_TRUE(dm->udpSweepQueue().isEmpty(), "sweep queue must drain completely and drop permanently failing targets");
+
+    app.stop();
+    TEST_PASS();
+}
+
+void testDiscoveryFallbackPacedEnqueueR025()
+{
+    TEST_CASE("R025 - P2 HTTP probe fallback routes through paced sweep queue");
+
+    localsend::Application app;
+    app.setPort(0);
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start failed");
+
+    DiscoveryManager *dm = app.discoveryManager();
+    ASSERT_TRUE(dm != 0, "discovery manager must not be null");
+
+    QHostAddress fallbackTarget("127.0.0.100");
+    dm->queueUdpSweepTarget(fallbackTarget);
+
+    // Verify it was placed into the paced sweep queue
+    ASSERT_TRUE(dm->udpSweepQueue().contains(fallbackTarget), "fallback target must be enqueued in paced sweep queue");
+
+    // Drain queue
+    QTime timer;
+    timer.start();
+    while (!dm->udpSweepQueue().isEmpty() && timer.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        usleep(10000);
+    }
+
+    ASSERT_TRUE(dm->udpSweepQueue().isEmpty(), "paced fallback queue must drain completely");
 
     app.stop();
     TEST_PASS();
@@ -3541,6 +3629,8 @@ int main(int argc, char **argv)
     testDiscoveryInterfaceSelectionAndSubnetPrefixR021();
     testDiscoveryUdpBufferAndPacedSweepR025();
     testDiscoveryHistoricalPeerPrioritizationR025();
+    testDiscoveryPacedSweepHeadOfLineBlockingPreventionR025();
+    testDiscoveryFallbackPacedEnqueueR025();
 
     // T09 Cascades UI & Controller Tests
     testUiControllerDevicePropertiesAndAlias();

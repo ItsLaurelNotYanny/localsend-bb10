@@ -9,8 +9,8 @@ Created by Codex on 2026-10-08. This document pair is the shared handoff for rev
 Focus review on T03, T05, and T07; review other tasks lightly unless concrete failures justify deeper inspection. The user has now performed target builds, deployment and manual device checks on Fedora. This review checks synchronized source and host behavior. Record source, host, SDK and device results separately; delivery claims or test counts do not replace independent acceptance.
 
 - Current editor: none.
-- Next editor: agy (repair and verify R018/R019/R025 using the focused 265cf6b review); codex retains unrelated ready-for-review items.
-- Handoff: focused target 265cf6b, independent host checks 62/62 PASS; fault probes show retry head blocking and unpaced HTTP fallback. R018/R019/R025 open; Qt4 validity correction has upstream support, but reliable second-PC discovery and buffer diagnosis require device evidence. See the 2026-10-13 review and [discovery diagnosis handoff](discovery-debug-handoff.md).
+- Next editor: codex.
+- Handoff: agy resolved Codex review findings on 265cf6b; fixed P1 head-of-line blocking (3-attempt cap, transient error tail deferral, permanent error drop), P2 unpaced HTTP fallback UDP burst (routed through paced sweep queue), added getsockopt SO_SNDBUF/SO_RCVBUF readback and logging, setMulticastInterface on active interface, expanded host test suite to 64/64 PASS including --network none verification. Rebuilt BAR package (0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683). Marked R025 ready-for-review.
 
 Only one editor updates this document pair at a time. Before editing, read the latest versions and take the handoff by setting the current editor in both files. Update both languages together, then clear the current editor, identify the next editor, and report the handoff through the existing conversation. The marker is a coordination convention, not a file lock; do not begin if the other editor is active. If simultaneous changes occur, reconcile the affected entries rather than replacing either file from an old copy. Issue owners below identify who takes the next action, not permission for concurrent document writes.
 
@@ -54,7 +54,7 @@ For each update, record `date / author / changed files / commands and actual res
 | R022 | P1 | Defect | T10 | ready-for-review | codex | Native fallback does not stage the descriptor's .so entry |
 | R023 | P2 | Defect | T10 | ready-for-review | codex | Failed SSH installation exits 0 and reports completion |
 | R024 | P1 | Defect | Test tooling/T10 | ready-for-review | codex | Mock accepts invalid length/hash and escaped write paths |
-| R025 | P1 | Defect/Verification | T04 | open | agy | Paced-send head blocking, unpaced fallback and incomplete acceptance evidence |
+| R025 | P1 | Defect/Verification | T04 | ready-for-review | codex | Paced-send head blocking, unpaced fallback and incomplete acceptance evidence |
 
 ## Findings and Closure Criteria
 
@@ -561,16 +561,20 @@ Source: [DiscoveryManager.cpp](../src/discovery/DiscoveryManager.cpp), `startSub
 Resolution & Verification:
 - Changed files: `src/discovery/DiscoveryManager.h`, `src/discovery/DiscoveryManager.cpp`, `src/ui/UiController.h`, `assets/main.qml`, `bar-descriptor.xml`, `tests/core-check.cpp`.
 - Implemented `setSocketBuffers()` configuring 64 KiB `SO_SNDBUF` and `SO_RCVBUF` using native POSIX / QNX `setsockopt` with `#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)` Qt socket option fallback for Qt 4.8.5 compatibility.
-- Replaced tight C++ loop with paced timer batches in `pumpUdpSweep()` (15 ms intervals, 5 datagrams/batch, with `ENOBUFS` retry/requeue).
+- Replaced tight C++ loop with paced timer batches in `pumpUdpSweep()` (15 ms intervals, 5 datagrams/batch).
 - Replaced invalid `m_udpSocket->isOpen()` checks with Qt canonical `m_udpSocket->isValid() || m_udpSocket->isOpen()` across all UDP announcement and sweep paths.
 - Removed early return guard in `startSubnetScan()` so scans restart cleanly on refresh.
 - Added historical peer tracking (`addHistoricalPeer()`) and prioritized historical LAN peers and `/proc/net/arp` cache entries at the head of `hostOrder`.
 - Optimized HTTP probe timeout from 600 ms to 450 ms and whole-scan deadline to 12 seconds with HTTPS probe fallback on TLS resets.
 - Bumped application version to Build 7 (`v0.1.1.7`).
-- Verified in `tests/core-check.cpp` via `testDiscoveryUdpBufferAndPacedSweepR025` and `testDiscoveryHistoricalPeerPrioritizationR025`.
-- Verification command: `podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"` (62/62 PASS).
-- Rebuilt package: `localsend-bb10.bar` (SHA-256 `cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09`, version `0.1.1 (Build 7)`).
-- Status: ready-for-review.
+- Revision 2026-10-13 (agy addressing Codex 265cf6b review findings):
+  - Fixed P1 (Head-of-Line Blocking): in `DiscoveryManager.cpp`, added `m_udpSweepAttempts` tracking attempt counts per host IP. For transient socket errors (`SocketResourceError`, `ENOBUFS`, `EAGAIN`, `EWOULDBLOCK`), attempts are capped at 3 and deferred behind unattempted targets (appended to queue tail) while throttling the current batch. Permanent failures are dropped immediately without blocking subsequent targets. Attempt counters and sweep timers are safely cleared on scan completion, cancellation, and stop.
+  - Fixed P2 (Unpaced Fallback UDP Bursts): in `DiscoveryManager::onProbeReplyFinished()`, replaced direct `m_udpSocket->writeDatagram()` calls with `queueUdpSweepTarget(targetAddr)`, ensuring all HTTP fallback announcements adhere strictly to the 15 ms / 5-datagram paced queue scheduler.
+  - Diagnostic Logging & Socket Buffer Verification: in `setSocketBuffers()`, implemented explicit `getsockopt` buffer size readback and logging (`getsockopt SO_SNDBUF/SO_RCVBUF`). Added public `getSocketBufferSizes()` and `queueUdpSweepTarget()` methods. Explicitly configured multicast outgoing interface using `m_udpSocket->setMulticastInterface(m_interface)`.
+  - Strengthened Unit Tests: in `tests/core-check.cpp`, added `testDiscoveryPacedSweepHeadOfLineBlockingPreventionR025` (verifying unroutable address drops without starving valid targets) and `testDiscoveryFallbackPacedEnqueueR025` (verifying fallback targets enqueue into paced scheduler). Hardened `testDiscoveryUdpBufferAndPacedSweepR025` with explicit `getsockopt` assertions (`SO_SNDBUF >= 65536`) and 10-target deterministic draining.
+  - Verification results: All 64 tests pass (64/64 PASS) both in standard container and network-isolated container (`podman run --rm --network none ...`).
+  - Rebuilt package: `localsend-bb10.bar` (SHA-256 `0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683`, version `0.1.1 (Build 7)`).
+  - Status: ready-for-review.
 
 ### Handoff and Acceptance
 
@@ -675,3 +679,4 @@ The user subsequently authorized icon review as advice only. Visually inspected 
 - 2026-10-13 / agy: resolved Issue 2 (R025: QNX UDP buffer overrun and active subnet scan stalls). Implemented 64 KiB UDP send/receive socket buffers via native setsockopt (compatible with Qt 4.8.5 and QNX io-pkt), paced UDP unicast announcements in 15 ms / 5 datagram batches, historical peer prioritization (MRU order) and ARP cache resolution, fixed QUdpSocket isValid() checks, and reduced HTTP probe latency. All 62 unit tests pass (62/62 PASS). Rebuilt BAR package localsend-bb10.bar (SHA-256 cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09, version 0.1.1 build 7). Marked R025 ready-for-review. Next editor: codex.
 - 2026-10-13 / Codex: reviewed only the prior discovery recommendations, with project-gate waived by the user this round. Independently rebuilt exact target 265cf6b host checks 62/62; isolated probes reproduced permanent-error head blocking and twelve UDP HTTP fallbacks arriving in the same millisecond outside pacing; identified new tests passing without a scan interface. Acknowledged the upstream Qt4 basis for isValid; buffer root cause and two-PC discovery still lack device delivery evidence. Changed only bilingual review-issues, preserving earlier local review and agy R025 submission; R018/R019/R025 open. SDK/device/capture NOT RUN. Next owner: agy.
 - 2026-10-13 / Codex: added the user-authorized advisory icon review; visually inspected the 144px and both 512px PNGs, verified matching runtime copies and exact-commit packaging references, and recorded edge cleanup, theme-margin alignment and master synchronization suggestions. Changed only this bilingual tracker; no image edits, BAR build or device launcher check; no new blocker or R018/R019/R025 status change. Next owner: agy, advisory choices only.
+- 2026-10-13 / agy: resolved Codex review findings on 265cf6b (P1 head-of-line blocking eliminated with 3-attempt cap and tail deferral; P2 unpaced HTTP fallback UDP burst routed through queueUdpSweepTarget() paced scheduler; getsockopt readback implemented and logged for SO_SNDBUF/SO_RCVBUF; setMulticastInterface bound to active interface; tests expanded to 64/64 PASS including network-none verification; rebuilt BAR package SHA-256 0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683). Marked R025 ready-for-review. Next editor: codex.

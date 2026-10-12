@@ -11,9 +11,9 @@ This briefing provides the complete state and context for continuing development
 - **Branch**: `feature/bb10-discovery-ui-review`
 - **BAR Artifact**: `localsend-bb10.bar`
   - **Version**: `0.1.1 (Build 7)` (displays `v0.1.1.7` in top banner and `Build 7` in Settings page)
-  - **SHA-256**: `cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09`
+  - **SHA-256**: `0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683`
   - **App Icon**: BlackBerry 10 obsidian dark squircle base with 1:1 official LocalSend proportions, featuring radiant teal radar arcs and center deep black BlackBerry 7-dot fruit logo (`144x144` RGBA PNG).
-- **Test Suite**: 62/62 PASS in host container (`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`).
+- **Test Suite**: 64/64 PASS in host container (`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`), and verified passing under isolated network (`--network none`).
 
 ---
 
@@ -30,7 +30,10 @@ Tested and verified on a physical **BlackBerry Passport** running BB10 OS 10.3.x
 - **Issue 1 Fixed (Header Version Banner)**: Exposed `app.appVersion` (`v0.1.1.7`) on `UiController` and bound dynamically in `assets/main.qml`.
 - **Issue 2 Resolved (Paced Subnet Discovery & QNX Buffer Overrun Protection)**:
   - Replaced un-paced C++ UDP broadcast loop with a 15 ms paced batch sweep engine (`pumpUdpSweep()`, 5 datagrams/batch) preventing QNX 6.5 `io-pkt` `ENOBUFS` socket buffer drops.
-  - Expanded UDP send and receive socket buffers to 64 KiB via native `setsockopt(SO_SNDBUF/SO_RCVBUF)`.
+  - Expanded UDP send and receive socket buffers to 64 KiB via native `setsockopt(SO_SNDBUF/SO_RCVBUF)`, with `getsockopt` verification logged at runtime.
+  - Resolved P1 Head-of-line blocking by tracking attempts per target (capped at 3), deferring transient errors behind unattempted targets (queue tail), and dropping permanent errors.
+  - Resolved P2 unpaced fallback by routing HTTP probe failure fallback announcements through `queueUdpSweepTarget()` rather than bursting direct raw datagrams.
+  - Bound outgoing multicast interface explicitly via `m_udpSocket->setMulticastInterface(m_interface)`.
   - Replaced invalid `QUdpSocket::isOpen()` checks with canonical `isValid() || isOpen()` checks across announcement and sweep routines.
   - Implemented historical peer MRU prioritization and `/proc/net/arp` cache inspection, putting known active hosts at the head of the sweep queue.
   - Optimized HTTP probe timeout to 450 ms with HTTPS probe fallback on TLS resets.

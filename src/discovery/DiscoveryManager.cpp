@@ -13,6 +13,7 @@
 #if defined(Q_OS_UNIX) || defined(Q_OS_QNX) || !defined(Q_OS_WIN)
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <errno.h>
 #endif
 
 DiscoveryManager::DiscoveryManager(QNetworkAccessManager *nam, QObject *parent)
@@ -47,6 +48,10 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
     m_interface = iface;
 
     // Bind UDP socket to port 53317 with address sharing (Qt4/Qt5 dual baseline)
+    qDebug() << "[Discovery] Starting DiscoveryManager on interface:" << (m_interface.isValid() ? m_interface.name() : "default")
+             << "IP:" << activeInterfaceAddress()
+             << "Subnet:" << activeInterfaceSubnet();
+
 #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
     bool bound = m_udpSocket->bind(QHostAddress::AnyIPv4, DEFAULT_PORT,
                                    QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint);
@@ -58,6 +63,9 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
         bound = m_udpSocket->bind(DEFAULT_PORT,
                                   QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint);
     }
+
+    qDebug() << "[Discovery] UDP socket bind result:" << bound << "port:" << DEFAULT_PORT
+             << "state:" << m_udpSocket->state() << "isValid:" << m_udpSocket->isValid();
 
     if (!bound) {
         if (error) {
@@ -74,10 +82,17 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
     for (int i = 0; i < ifaces.size(); ++i) {
         const QNetworkInterface &iface = ifaces.at(i);
         if ((iface.flags() & QNetworkInterface::IsUp) && (iface.flags() & QNetworkInterface::CanMulticast)) {
-            m_udpSocket->joinMulticastGroup(m_multicastAddress, iface);
+            bool joined = m_udpSocket->joinMulticastGroup(m_multicastAddress, iface);
+            qDebug() << "[Discovery] Join multicast group on" << iface.name() << "result:" << joined;
         }
     }
-    m_udpSocket->joinMulticastGroup(m_multicastAddress);
+    bool globalJoin = m_udpSocket->joinMulticastGroup(m_multicastAddress);
+    qDebug() << "[Discovery] Join global multicast group result:" << globalJoin;
+
+    if (m_interface.isValid()) {
+        m_udpSocket->setMulticastInterface(m_interface);
+        qDebug() << "[Discovery] Multicast outgoing interface set to:" << m_interface.name();
+    }
 
     // Start periodic 30s announcement heartbeat to handle network drops and late-joining peers
     if (m_announceTimer) {
@@ -95,6 +110,7 @@ bool DiscoveryManager::start(const DeviceInfo &localInfo, const QNetworkInterfac
 void DiscoveryManager::stop()
 {
     cancelSubnetScan();
+    m_udpSweepAttempts.clear();
 
     if (m_announceTimer) {
         m_announceTimer->stop();
@@ -191,10 +207,10 @@ void DiscoveryManager::sendUdpAnnouncement(bool announce)
     QByteArray datagram = ProtocolJson::encodeAnnouncement(m_localInfo, announce, &err);
     if (!datagram.isEmpty()) {
         // 1. Send to standard LocalSend multicast address (224.0.0.167:53317)
-        m_udpSocket->writeDatagram(datagram, m_multicastAddress, DEFAULT_PORT);
+        qint64 mRes = m_udpSocket->writeDatagram(datagram, m_multicastAddress, DEFAULT_PORT);
 
         // 2. Send to standard LocalSend global broadcast address (255.255.255.255:53317)
-        m_udpSocket->writeDatagram(datagram, QHostAddress::Broadcast, DEFAULT_PORT);
+        qint64 bRes = m_udpSocket->writeDatagram(datagram, QHostAddress::Broadcast, DEFAULT_PORT);
 
         // 3. Send to local subnet directed broadcast on active physical LAN interfaces
         // Fallback: calculate broadcast from IP & netmask if OS report is null
@@ -222,11 +238,13 @@ void DiscoveryManager::sendUdpAnnouncement(bool announce)
                     bcast = QHostAddress(ipVal | (~maskVal));
                 }
                 if (!bcast.isNull() && bcast != QHostAddress::Broadcast) {
-                    m_udpSocket->writeDatagram(datagram, bcast, DEFAULT_PORT);
+                    qint64 dRes = m_udpSocket->writeDatagram(datagram, bcast, DEFAULT_PORT);
+                    qDebug() << "[Discovery] Directed broadcast to" << bcast.toString() << "res=" << dRes;
                 }
             }
         }
-        qDebug() << "[Discovery] UDP announcement sent (announce=" << announce << ")";
+        qDebug() << "[Discovery] UDP announcement sent (announce=" << announce
+                 << "len=" << datagram.size() << "multicast=" << mRes << "broadcast=" << bRes << ")";
     }
 }
 
@@ -240,7 +258,11 @@ void DiscoveryManager::onUdpReadyRead()
         quint16 senderPort = 0;
         m_udpSocket->readDatagram(datagram.data(), datagram.size(), &senderAddress, &senderPort);
 
+        qDebug() << "[Discovery] UDP datagram received from" << senderAddress.toString()
+                 << ":" << senderPort << "len=" << datagram.size();
+
         if (datagram.size() > ProtocolJson::MAX_JSON_SIZE) {
+            qWarning() << "[Discovery] Datagram oversized, dropped";
             continue; // Ignore oversized datagram
         }
 
@@ -248,6 +270,7 @@ void DiscoveryManager::onUdpReadyRead()
         bool announce = false;
         QString err;
         if (!ProtocolJson::decodeAnnouncement(datagram, &info, &announce, &err)) {
+            qWarning() << "[Discovery] Announcement decode failed:" << err;
             continue;
         }
 
@@ -488,10 +511,58 @@ void DiscoveryManager::setSocketBuffers()
     int fd = m_udpSocket->socketDescriptor();
     if (fd >= 0) {
         int bufSize = 65536;
-        ::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (const char *)&bufSize, sizeof(bufSize));
-        ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const char *)&bufSize, sizeof(bufSize));
+        int resSnd = ::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, (const char *)&bufSize, sizeof(bufSize));
+        int resRcv = ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, (const char *)&bufSize, sizeof(bufSize));
+
+        int actualSnd = 0;
+        int actualRcv = 0;
+        socklen_t optLen = sizeof(actualSnd);
+        int getSnd = ::getsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&actualSnd, &optLen);
+        optLen = sizeof(actualRcv);
+        int getRcv = ::getsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&actualRcv, &optLen);
+
+        qDebug() << "[Discovery] Socket buffers: setsockopt SO_SNDBUF (req=65536, res=" << resSnd
+                 << ", actual=" << (getSnd == 0 ? actualSnd : -1) << ")"
+                 << "SO_RCVBUF (req=65536, res=" << resRcv
+                 << ", actual=" << (getRcv == 0 ? actualRcv : -1) << ")";
     }
 #endif
+}
+
+bool DiscoveryManager::getSocketBufferSizes(int *sndBuf, int *rcvBuf) const
+{
+    if (!m_udpSocket) {
+        return false;
+    }
+#if !defined(Q_OS_WIN)
+    int fd = m_udpSocket->socketDescriptor();
+    if (fd >= 0) {
+        int s = 0, r = 0;
+        socklen_t len = sizeof(s);
+        int res1 = ::getsockopt(fd, SOL_SOCKET, SO_SNDBUF, (char *)&s, &len);
+        len = sizeof(r);
+        int res2 = ::getsockopt(fd, SOL_SOCKET, SO_RCVBUF, (char *)&r, &len);
+        if (res1 == 0 && res2 == 0) {
+            if (sndBuf) *sndBuf = s;
+            if (rcvBuf) *rcvBuf = r;
+            return true;
+        }
+    }
+#endif
+    return false;
+}
+
+void DiscoveryManager::queueUdpSweepTarget(const QHostAddress &addr)
+{
+    if (addr.isNull() || addr == QHostAddress::LocalHost || addr == QHostAddress::Broadcast) {
+        return;
+    }
+    if (!m_udpSweepQueue.contains(addr)) {
+        m_udpSweepQueue.append(addr);
+    }
+    if (m_udpSweepTimer && !m_udpSweepTimer->isActive()) {
+        m_udpSweepTimer->start(15);
+    }
 }
 
 QList<QHostAddress> DiscoveryManager::loadArpCacheIps() const
@@ -794,6 +865,7 @@ void DiscoveryManager::cancelSubnetScan()
         m_udpSweepTimer->stop();
     }
     m_udpSweepQueue.clear();
+    m_udpSweepAttempts.clear();
 
     m_scanQueue.clear();
 
@@ -831,6 +903,7 @@ void DiscoveryManager::pumpUdpSweep()
         if (m_udpSweepTimer) {
             m_udpSweepTimer->stop();
         }
+        m_udpSweepAttempts.clear();
         if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
             if (m_scanDeadlineTimer) {
                 m_scanDeadlineTimer->stop();
@@ -850,21 +923,53 @@ void DiscoveryManager::pumpUdpSweep()
             m_udpSweepTimer->stop();
         }
         m_udpSweepQueue.clear();
+        m_udpSweepAttempts.clear();
         return;
     }
 
     const int BATCH_SIZE = 5;
+    const int MAX_ATTEMPTS = 3;
     int sentCount = 0;
 
     while (!m_udpSweepQueue.isEmpty() && sentCount < BATCH_SIZE) {
         QHostAddress target = m_udpSweepQueue.takeFirst();
+        quint32 targetIp = target.toIPv4Address();
+        int attempts = m_udpSweepAttempts.value(targetIp, 0) + 1;
+        m_udpSweepAttempts.insert(targetIp, attempts);
+
         qint64 bytesWritten = m_udpSocket->writeDatagram(sweepDgram, target, DEFAULT_PORT);
         if (bytesWritten < 0) {
-            // Buffer full (ENOBUFS) or temporary socket congestion
-            qDebug() << "[Discovery] UDP sweep write failed to" << target.toString()
-                     << "error:" << m_udpSocket->errorString() << "- requeuing and throttling";
-            m_udpSweepQueue.prepend(target);
-            break; // Pause this batch, wait for next timer tick to allow network stack to drain
+            QAbstractSocket::SocketError err = m_udpSocket->error();
+            QString errStr = m_udpSocket->errorString();
+            bool isTransient = (
+#if QT_VERSION >= QT_VERSION_CHECK(5, 3, 0)
+                                err == QAbstractSocket::TemporaryError ||
+#endif
+                                err == QAbstractSocket::SocketResourceError ||
+#if defined(Q_OS_UNIX) || defined(Q_OS_QNX) || defined(Q_OS_BLACKBERRY) || defined(__QNXNTO__)
+                                errno == ENOBUFS || errno == EAGAIN || errno == EWOULDBLOCK
+#else
+                                false
+#endif
+                               );
+
+            if (isTransient && attempts < MAX_ATTEMPTS) {
+                // Transient network buffer congestion: defer target behind unattempted targets (tail)
+                // so failing target never blocks subsequent unattempted targets (P1).
+                qDebug() << "[Discovery] UDP sweep write transient failure to" << target.toString()
+                         << "attempt" << attempts << "/" << MAX_ATTEMPTS
+                         << "error:" << errStr << "- deferring to tail and throttling batch";
+                m_udpSweepQueue.append(target);
+                break; // Pause current batch to let network stack drain
+            } else {
+                // Permanent error or exceeded max attempts: drop and continue with rest of queue
+                qWarning() << "[Discovery] UDP sweep dropping target" << target.toString()
+                           << "after" << attempts << "attempts. Error:" << err << errStr;
+                if (!m_udpSocket->isValid() && !m_udpSocket->isOpen()) {
+                    break;
+                }
+                continue;
+            }
         }
         sentCount++;
     }
@@ -873,6 +978,7 @@ void DiscoveryManager::pumpUdpSweep()
         if (m_udpSweepTimer) {
             m_udpSweepTimer->stop();
         }
+        m_udpSweepAttempts.clear();
         qDebug() << "[Discovery] UDP sweep completed successfully";
         if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
             if (m_scanDeadlineTimer) {
@@ -989,12 +1095,9 @@ void DiscoveryManager::onProbeReplyFinished()
             }
         }
     } else {
-        // If HTTP probe failed, send another direct UDP announcement as fallback
-        QString uErr;
-        QByteArray dgram = ProtocolJson::encodeAnnouncement(m_localInfo, true, &uErr);
-        if (!dgram.isEmpty() && m_udpSocket && (m_udpSocket->isValid() || m_udpSocket->isOpen())) {
-            m_udpSocket->writeDatagram(dgram, targetAddr, DEFAULT_PORT);
-        }
+        // If HTTP probe failed, route fallback UDP announcement through paced sweep queue (P2)
+        // avoiding sudden unpaced UDP bursts when concurrent probes time out simultaneously.
+        queueUdpSweepTarget(targetAddr);
 
         // If HTTP failed (e.g. RemoteHostClosedError or TLS reset on port 53317), probe HTTPS as fallback
         if (reply->error() == QNetworkReply::RemoteHostClosedError ||

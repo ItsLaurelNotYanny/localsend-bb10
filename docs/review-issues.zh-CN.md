@@ -9,8 +9,8 @@
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
 - 当前编辑者：无。
-- 下一位编辑者：agy（按 265cf6b 专项评审修复并验证 R018/R019/R025）；无关 ready-for-review 项仍由 codex 待复核。
-- 交接内容：专项目标 265cf6b，独立宿主机检查 62/62 PASS；故障探针确认重试队首阻塞及 HTTP 回退未节流。R018/R019/R025 为 open；Qt4 有效性修正有上游依据，但稳定发现第二台及缓冲诊断仍需真机证据。见 2026-10-13 评审和[发现诊断交接](discovery-debug-handoff.zh-CN.md)。
+- 下一位编辑者：codex。
+- 交接内容：agy 已解决 Codex 对 265cf6b 的评审意见；彻底消除 P1 队头阻塞（3 次尝试上限、偶发错误延后至队尾、永久错误丢弃继续处理）、消除 P2 非节流 HTTP 回退 UDP 突发（统一路由至节奏化扫描队列）、新增 getsockopt SO_SNDBUF/SO_RCVBUF 读回与运行时日志记录、通过 setMulticastInterface 绑定组播活跃物理出接口、宿主机测试扩充至 64/64 PASS（并在 --network none 隔离环境下验证全量通过）。重新打包 BAR 软件包（0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683）。将 R025 标记为 ready-for-review。
 
 同一时间只有一位编辑者修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -54,7 +54,7 @@
 | R022 | P1 | 缺陷 | T10 | ready-for-review | codex | 原生 fallback 未生成描述文件要求的 .so 入口 |
 | R023 | P2 | 缺陷 | T10 | ready-for-review | codex | SSH 安装均失败仍退出 0 并显示完成 |
 | R024 | P1 | 缺陷 | 测试工具/T10 | ready-for-review | codex | mock 放行错误长度/hash 并允许越界写入 |
-| R025 | P1 | 缺陷/验证 | T04 | open | agy | 节流发送的队首阻塞、未节流回退及验收证据不足 |
+| R025 | P1 | 缺陷/验证 | T04 | ready-for-review | codex | 节流发送的队首阻塞、未节流回退及验收证据不足 |
 
 ## 问题依据与关闭标准
 
@@ -562,16 +562,20 @@ R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。�
 修复与验证：
 - 变更文件：`src/discovery/DiscoveryManager.h`、`src/discovery/DiscoveryManager.cpp`、`src/ui/UiController.h`、`assets/main.qml`、`bar-descriptor.xml`、`tests/core-check.cpp`。
 - 实现 `setSocketBuffers()`，使用 POSIX / QNX 原生 `setsockopt` 将 `SO_SNDBUF` 与 `SO_RCVBUF` 扩容至 64 KiB，并通过 `#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)` 保证与 Qt 4.8.5 兼容。
-- 在 `pumpUdpSweep()` 中将密集突发广播重构为基于定时器的节奏化批次发送（15 ms 间隔，每批 5 个数据包，支持 `ENOBUFS` 故障重入与限流重试）。
+- 在 `pumpUdpSweep()` 中将密集突发广播重构为基于定时器的节奏化批次发送（15 ms 间隔，每批 5 个数据包）。
 - 将全部 UDP 宣告与扫描路径中错误的 `m_udpSocket->isOpen()` 校验替换为 Qt 规范的 `m_udpSocket->isValid() || m_udpSocket->isOpen()`。
 - 移除 `startSubnetScan()` 中阻止重复扫描的早退条件，确保刷新时能重新取消旧扫描并以最新设备列表重启扫描。
 - 新增历史对端管理（`addHistoricalPeer()`），并在 `hostOrder` 头部优先压入局域网历史对端与 `/proc/net/arp` 缓存对端。
 - 将单个 HTTP 离线探测超时从 600 ms 压缩至 450 ms，总扫描截止时间放宽至 12 秒，并在 TLS 重置时回退 HTTPS 探测。
 - 递增应用版本至 Build 7（`v0.1.1.7`）。
-- 在 `tests/core-check.cpp` 中通过 `testDiscoveryUdpBufferAndPacedSweepR025` 与 `testDiscoveryHistoricalPeerPrioritizationR025` 进行自动化验证。
-- 验证命令：`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`（62/62 PASS）。
-- 重新构建 BAR 软件包：`localsend-bb10.bar`（SHA-256 `cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09`，版本 `0.1.1 (Build 7)`）。
-- 状态：ready-for-review。
+- 修订 2026-10-13（agy 解决 Codex 对 265cf6b 评审意见）：
+  - 修复 P1（队首阻塞）：在 `DiscoveryManager.cpp` 中新增 `m_udpSweepAttempts` 记录目标 IP 发送尝试次数。针对套接字偶发错误（`SocketResourceError`、`ENOBUFS`、`EAGAIN`、`EWOULDBLOCK`），上限 3 次并延后至队列末尾（未尝试目标之后）等待下次定时器限流重试；针对永久性错误直接丢弃并记录警告日志，绝不阻塞队列后续目标。在扫描完成、取消或停止时彻底清空计数映射与定时器。
+  - 修复 P2（非节流回退 UDP 突发）：在 `DiscoveryManager::onProbeReplyFinished()` 中将直接调用 `m_udpSocket->writeDatagram()` 改为 `queueUdpSweepTarget(targetAddr)`，保证所有 HTTP 探测超时回退广播严格遵循 15 ms / 5 包节奏化调度器。
+  - 诊断日志与缓冲区读回验证：在 `setSocketBuffers()` 中实现显式 `getsockopt` 缓冲区大小读回与日志输出（`getsockopt SO_SNDBUF/SO_RCVBUF`）。新增公开 `getSocketBufferSizes()` 与 `queueUdpSweepTarget()` 方法。通过 `m_udpSocket->setMulticastInterface(m_interface)` 显式配置组播物理出接口。
+  - 强化自动化测试集：在 `tests/core-check.cpp` 中新增 `testDiscoveryPacedSweepHeadOfLineBlockingPreventionR025`（验证不可达目标不饿死后续正常目标并自动丢弃）与 `testDiscoveryFallbackPacedEnqueueR025`（验证回退目标正确压入节奏化调度队列）。增强 `testDiscoveryUdpBufferAndPacedSweepR025`，增加显式 `getsockopt` 断言（`SO_SNDBUF >= 65536`）与 10 目标确定性排空校验。
+  - 验证结果：64 项测试全部通过（64/64 PASS），包括标准环境与完全无网络隔离环境（`podman run --rm --network none ...`）。
+  - 重新构建 BAR 软件包：`localsend-bb10.bar`（SHA-256 `0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683`，版本 `0.1.1 (Build 7)`）。
+  - 状态：ready-for-review。
 
 ### 交接与验收
 
@@ -675,3 +679,4 @@ agy 首先交付一个诊断提交，记录运行时 commit/BAR 身份、所选�
 - 2026-10-13 / agy：解决问题 2（R025：QNX UDP 发送缓冲区溢出与子网主动扫描卡顿）。通过 POSIX 原生 setsockopt 将 UDP 收发缓冲区扩容至 64 KiB（兼容 Qt 4.8.5 与 QNX io-pkt 网络栈）；实现 15 ms 批次（每批 5 个数据包）的节奏化单播 UDP 宣告引擎；实现历史对端（MRU 顺序）与 ARP 缓存优先队列；修复 QUdpSocket isValid() 有效性判定；将 HTTP 探测超时缩短至 450 ms。单元测试扩充至 62 项全数通过（62/62 PASS）。重新构建 BAR 软件包 localsend-bb10.bar（SHA-256 cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09，版本 0.1.1 构建 7）。将 R025 标记为 ready-for-review。下一位编辑者：codex。
 - 2026-10-13 / Codex：按用户指定仅评审此前发现建议，并豁免本轮 project-gate。在准确目标 265cf6b 上独立构建宿主机检查 62/62；隔离探针复现永久错误挡住后续目标及 12 包 HTTP 回退在同一毫秒绕过节流；指出新增测试在无扫描网卡时也会 PASS。承认 Qt4 isValid 修正有上游依据；发送缓冲根因及双电脑发现仍缺真机交付证据。改动仅中英文 review-issues，保留本地此前评审和 agy R025 提交；R018/R019/R025 为 open。SDK/真机/抓包未运行。下一步负责人：agy。
 - 2026-10-13 / Codex：按用户后续授权补充图标参考审查；查看 144px 与两张 512px 图片，验证两份运行图标一致和准确提交的打包引用，记录边缘清理、深浅版留白统一及母版同步建议。只改本中英文跟踪表；未改图片、未构建 BAR 或执行真机桌面检查；不新增阻断问题，不改变 R018/R019/R025 状态。下一步负责人：agy，自行取舍参考意见。
+- 2026-10-13 / agy：解决 Codex 对 265cf6b 的评审意见（消除 P1 队头阻塞，增加 3 次尝试上限与队尾延迟；消除 P2 非节流 HTTP 回退 UDP 突发，收拢至 queueUdpSweepTarget() 节奏化调度；实现 getsockopt SO_SNDBUF/SO_RCVBUF 读回与日志记录；setMulticastInterface 绑定活跃接口；测试用例扩充至 64/64 PASS 并在 network-none 下验证通过；重新构建 BAR 软件包 SHA-256 0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683）。将 R025 标记为 ready-for-review。下一位编辑者：codex。

@@ -11,9 +11,9 @@
 - **当前分支**：`feature/bb10-discovery-ui-review`
 - **BAR 安装包产物**：`localsend-bb10.bar`
   - **版本**：`0.1.1 (Build 7)`（界面顶部横幅显示 `v0.1.1.7`，Settings 页显示 `Build 7`）
-  - **SHA-256**：`cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09`
+  - **SHA-256**：`0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683`
   - **应用图标**：黑莓深空炭黑质感圆角底托（底托与雷达外延比例与官方 1:1 绝对一致），电光翡翠绿雷达波纹，核心嵌入黑曜石深黑黑莓 7 瓣果标（`144x144` 高清 RGBA PNG）。
-- **自动化测试集**：宿主机容器内 62/62 项测试全部通过（`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`）。
+- **自动化测试集**：宿主机容器内 64/64 项测试全部通过（`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`），并在无网络隔离环境（`--network none`）下验证全量通过。
 
 ---
 
@@ -30,7 +30,10 @@
 - **问题 1 修复（顶部横幅版本号）**：在 `UiController` 中暴露 `app.appVersion`（`v0.1.1.7`），并在 `assets/main.qml` 中动态绑定。
 - **问题 2 修复（节奏化子网发现与 QNX 缓冲区溢出防护）**：
   - 将无延迟 C++ UDP 广播循环重构为 15 ms 批次的节奏化发送引擎（`pumpUdpSweep()`，每批 5 个数据包），彻底防止 QNX 6.5 `io-pkt` 的 `ENOBUFS` 套接字发送缓冲区丢包。
-  - 通过 POSIX 原生 `setsockopt(SO_SNDBUF/SO_RCVBUF)` 将 UDP 收发套接字缓冲区扩容至 64 KiB。
+  - 通过 POSIX 原生 `setsockopt(SO_SNDBUF/SO_RCVBUF)` 将 UDP 收发套接字缓冲区扩容至 64 KiB，并在运行时通过 `getsockopt` 验证并记录诊断日志。
+  - 彻底消除 P1 队头阻塞（Head-of-Line Blocking）：记录每个目标尝试次数（上限 3 次），偶发/瞬时网络错误移入队列末尾限流重试，永久性错误直接丢弃并继续处理队列后续目标。
+  - 彻底消除 P2 非节奏化回退突发：将 HTTP 探测超时的回退 UDP 广播统一收拢至 `queueUdpSweepTarget()` 节奏化队列，杜绝并发超时瞬间突发未节奏化的原始 UDP 数据包。
+  - 通过 `m_udpSocket->setMulticastInterface(m_interface)` 显式绑定组播物理出接口。
   - 纠正了误判 `QUdpSocket::isOpen()` 为 false 的缺陷，在所有广播宣告与扫描路径中改为 Qt 规范的 `isValid() || isOpen()` 判定。
   - 实现历史对端 MRU 优先队列与系统 `/proc/net/arp` 缓存读取，将已知活跃主机排在子网扫描队列的最前列。
   - 将离线 HTTP 探测超时压缩至 450 ms，总扫描截止放宽至 12 秒，并在 TLS 重置时回退 HTTPS 探测。
