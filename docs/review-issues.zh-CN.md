@@ -9,8 +9,8 @@
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
 - 当前编辑者：无。
-- 下一位编辑者：codex（在 60 项测试集与构建包中核对已解决的 R007、R015 与 R018–R024）。
-- 交接内容：宿主机 60/60 项测试全数通过；BAR 软件包已重新构建（SHA-256 b391a9d3201adda9bb8a2255949cfcfffe97e0b35a3457b3183c2653d997f78c，版本 0.1.1 构建 6）；BlackBerry Passport 真机双向文件传输测试全数通过（Passport -> macOS 发送成功，macOS -> Passport 接收成功）；支持 /api/localsend/v1/info 路径兼容；主界面 Radar 标签页支持一键接收横幅；顶部版本横幅已绑定并显示 v0.1.1.6；子网主动扫描优化（问题 2）留待专用新会话推进。
+- 下一位编辑者：codex（在 62 项测试集与构建包中核对已解决的 R007、R015、R018–R024 与 R025）。
+- 交接内容：宿主机 62/62 项测试全数通过；BAR 软件包已重新构建（SHA-256 cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09，版本 0.1.1 构建 7）；问题 2 修复完成（解决 QNX 6.5 UDP 发送缓冲区溢出、单播 UDP 广播未分批导致的 ENOBUFS 丢包、QUdpSocket 有效性判定错误以及历史/ARP 对端未优先探测问题）；子网扫描现已支持基于 15 ms 批次的节奏化 UDP 宣告与历史对端优先队列。
 
 同一时间只有一位编辑者修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -54,6 +54,7 @@
 | R022 | P1 | 缺陷 | T10 | ready-for-review | codex | 原生 fallback 未生成描述文件要求的 .so 入口 |
 | R023 | P2 | 缺陷 | T10 | ready-for-review | codex | SSH 安装均失败仍退出 0 并显示完成 |
 | R024 | P1 | 缺陷 | 测试工具/T10 | ready-for-review | codex | mock 放行错误长度/hash 并允许越界写入 |
+| R025 | P1 | 缺陷 | T04 | ready-for-review | codex | QNX UDP 发送缓冲区溢出致主动子网扫描丢包与卡顿 |
 
 ## 问题依据与关闭标准
 
@@ -552,6 +553,24 @@ R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。�
 - 验证 fixtures 生成与 HTTP 端点测试正常运行。
 - 状态：ready-for-review。
 
+### R025 — 子网节奏化单播扫描引擎与套接字缓冲区溢出防护（P1，必须修复）
+
+来源：[DiscoveryManager.cpp](../src/discovery/DiscoveryManager.cpp)，`startSubnetScan()`、`pumpUdpSweep()` 以及 `setSocketBuffers()`。在 QNX 6.5（`io-pkt-v4`）网络栈上，默认非阻塞 UDP 套接字发送缓冲区（`SO_SNDBUF`）仅约 8–9 KiB。在零延迟 C++ 循环中向子网内 88 个目标主机密集突发单播 UDP 宣告数据包，内核缓冲区在第 30 个包左右即被填满，触发 `ENOBUFS` 错误并静默丢弃后续所有数据包，导致位于扫描队列后段的主机（如位于索引 73 的 `192.168.3.161`）无法收到数据包。此外，Qt 中对已绑定的 `QUdpSocket` 调用 `isOpen()` 错误返回 false 导致宣告写入被跳过，且 HTTP 扫描队列过长超时导致扫描过早截止。
+
+修复与验证：
+- 变更文件：`src/discovery/DiscoveryManager.h`、`src/discovery/DiscoveryManager.cpp`、`src/ui/UiController.h`、`assets/main.qml`、`bar-descriptor.xml`、`tests/core-check.cpp`。
+- 实现 `setSocketBuffers()`，使用 POSIX / QNX 原生 `setsockopt` 将 `SO_SNDBUF` 与 `SO_RCVBUF` 扩容至 64 KiB，并通过 `#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)` 保证与 Qt 4.8.5 兼容。
+- 在 `pumpUdpSweep()` 中将密集突发广播重构为基于定时器的节奏化批次发送（15 ms 间隔，每批 5 个数据包，支持 `ENOBUFS` 故障重入与限流重试）。
+- 将全部 UDP 宣告与扫描路径中错误的 `m_udpSocket->isOpen()` 校验替换为 Qt 规范的 `m_udpSocket->isValid() || m_udpSocket->isOpen()`。
+- 移除 `startSubnetScan()` 中阻止重复扫描的早退条件，确保刷新时能重新取消旧扫描并以最新设备列表重启扫描。
+- 新增历史对端管理（`addHistoricalPeer()`），并在 `hostOrder` 头部优先压入局域网历史对端与 `/proc/net/arp` 缓存对端。
+- 将单个 HTTP 离线探测超时从 600 ms 压缩至 450 ms，总扫描截止时间放宽至 12 秒，并在 TLS 重置时回退 HTTPS 探测。
+- 递增应用版本至 Build 7（`v0.1.1.7`）。
+- 在 `tests/core-check.cpp` 中通过 `testDiscoveryUdpBufferAndPacedSweepR025` 与 `testDiscoveryHistoricalPeerPrioritizationR025` 进行自动化验证。
+- 验证命令：`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`（62/62 PASS）。
+- 重新构建 BAR 软件包：`localsend-bb10.bar`（SHA-256 `cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09`，版本 `0.1.1 (Build 7)`）。
+- 状态：ready-for-review。
+
 ### 交接与验收
 
 **需要修订。** 优先 R020 数据完整性、R007 重复终止结果、R015 状态通知、R018/R019 渲染；随后 R021 发现范围/接口、R022 打包及 R024 测试证据可信度；R023 为适度部署修复。无关实现及已工作路径可继续；Codex 未修改实现。
@@ -579,3 +598,4 @@ R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。�
 - 2026-10-10 / agy：诊断并彻底修复 6ebce9c 启动闪退问题。根因为 peersContainer 在 QML 根对象构造未完成期间通过属性变更槽调用 app.populatePeers(peersContainer) 引发 ReferenceError。彻底消除 QML 动态属性与回调槽，改为 C++ root->findChild 直接持有与刷新容器指针；并在 main.cpp 中引入文件日志与 Qt 消息捕获（写入 /accounts/1000/shared/documents/localsend_launch.log），增加沙盒存储回退。宿主机 60 项测试全数通过，重新打包 localsend-bb10.bar（SHA-256 856b5fc5e057a2f555086933a62c0260d8a6d7694d1da7f6fcc0829f21824e26，版本 0.1.1 构建 4）。下一位编辑者：codex。
 - 2026-10-10 / agy：解决 BlackBerry Passport 真机验证反馈（真机正常启动无闪退，多设备列表卡片正常渲染，但在 3 轮主动扫描中未命中 macOS HTTPS 官方对端，且 localsend_launch.log 在 BB10 文件管理器中提示 Unable to open）。将日志目标路径更名为 localsend_launch.txt 并在“设置”标签页中增加“查看诊断日志”按钮，直接通过 InvokeManager VIEW 触发系统内置 Docs To Go 文本查看器；优化子网主动扫描，向目标子网 IP 列表及已知设备同时发送单播 UDP 宣告数据包（绕过 Wi-Fi 路由器的无线组播/广播隔离，促使 macOS 等官方客户端收到后立即主动发起 HTTP 注册回连），并补齐网络接口子网掩码为 0 时的 /24 定向广播回退计算。宿主机 60 项测试全数通过（60/60 PASS）。重新构建 BAR 软件包 localsend-bb10.bar（SHA-256 3bee071819974bd5cb13417fc0a5542bd69bfe8098de839351e5f3dc7def53b2，版本 0.1.1 构建 5）。下一位编辑者：codex。
 - 2026-10-10 / agy：在 BlackBerry Passport 真机上验证通过核心里程碑：Passport 与 macOS（Good Strawberry）双向双端互发文件全数成功，文件校验完整；支持主界面 Radar 标签页一键接收浮层；支持 /api/localsend/v1/info 路径兼容；界面顶部横幅版本号绑定 app.appVersion（v0.1.1.6）。定位并分析了主动扫描未扫出 macOS 对端的根因（QNX 6.5 套接字发送缓冲区溢出丢包）；规划了新会话专攻路线图。宿主机 60 项测试全数通过（60/60 PASS）。重新构建 BAR 软件包 localsend-bb10.bar（SHA-256 b391a9d3201adda9bb8a2255949cfcfffe97e0b35a3457b3183c2653d997f78c，版本 0.1.1 构建 6）。下一位编辑者：codex。
+- 2026-10-13 / agy：解决问题 2（R025：QNX UDP 发送缓冲区溢出与子网主动扫描卡顿）。通过 POSIX 原生 setsockopt 将 UDP 收发缓冲区扩容至 64 KiB（兼容 Qt 4.8.5 与 QNX io-pkt 网络栈）；实现 15 ms 批次（每批 5 个数据包）的节奏化单播 UDP 宣告引擎；实现历史对端（MRU 顺序）与 ARP 缓存优先队列；修复 QUdpSocket isValid() 有效性判定；将 HTTP 探测超时缩短至 450 ms。单元测试扩充至 62 项全数通过（62/62 PASS）。重新构建 BAR 软件包 localsend-bb10.bar（SHA-256 cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09，版本 0.1.1 构建 7）。将 R025 标记为 ready-for-review。下一位编辑者：codex。

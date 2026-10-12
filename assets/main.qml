@@ -568,7 +568,7 @@ TabbedPane {
                         textStyle.base: SystemDefaults.TextStyles.TitleText
                     }
                     Label {
-                        text: "Version 0.1.1 (Build 6)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
+                        text: "Version 0.1.1 (Build 7)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
                         textStyle.base: SystemDefaults.TextStyles.BodyText
                         textStyle.color: Color.create("#718096")
                     }

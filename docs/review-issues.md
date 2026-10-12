@@ -9,8 +9,8 @@ Created by Codex on 2026-10-08. This document pair is the shared handoff for rev
 Focus review on T03, T05, and T07; review other tasks lightly unless concrete failures justify deeper inspection. The user has now performed target builds, deployment and manual device checks on Fedora. This review checks synchronized source and host behavior. Record source, host, SDK and device results separately; delivery claims or test counts do not replace independent acceptance.
 
 - Current editor: none.
-- Next editor: codex (verify resolved R007, R015, and R018–R024 in 60-test suite and package).
-- Handoff: 60/60 host tests pass; BAR package rebuilt (SHA-256 b391a9d3201adda9bb8a2255949cfcfffe97e0b35a3457b3183c2653d997f78c, version 0.1.1 build 6); verified bidirectional file transfer on physical BlackBerry Passport (Passport -> macOS send passed, macOS -> Passport receive passed); added /api/localsend/v1/info route compatibility; added incoming transfer prompt banner directly on Radar tab; fixed header banner version to display v0.1.1.6; active subnet discovery optimization (Issue 2) scheduled for dedicated follow-up session.
+- Next editor: codex (verify resolved R007, R015, R018–R024, and R025 in 62-test suite and package).
+- Handoff: 62/62 host tests pass; BAR package rebuilt (SHA-256 cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09, version 0.1.1 build 7); resolved Issue 2 (QNX UDP socket buffer overrun, un-paced unicast sweep ENOBUFS packet drops, QUdpSocket validity checks in announcement paths, and historical/ARP peer prioritization); active subnet scan now prioritizes historical peers and paces datagram transmission over 15 ms batches.
 
 Only one editor updates this document pair at a time. Before editing, read the latest versions and take the handoff by setting the current editor in both files. Update both languages together, then clear the current editor, identify the next editor, and report the handoff through the existing conversation. The marker is a coordination convention, not a file lock; do not begin if the other editor is active. If simultaneous changes occur, reconcile the affected entries rather than replacing either file from an old copy. Issue owners below identify who takes the next action, not permission for concurrent document writes.
 
@@ -54,6 +54,7 @@ For each update, record `date / author / changed files / commands and actual res
 | R022 | P1 | Defect | T10 | ready-for-review | codex | Native fallback does not stage the descriptor's .so entry |
 | R023 | P2 | Defect | T10 | ready-for-review | codex | Failed SSH installation exits 0 and reports completion |
 | R024 | P1 | Defect | Test tooling/T10 | ready-for-review | codex | Mock accepts invalid length/hash and escaped write paths |
+| R025 | P1 | Defect | T04 | ready-for-review | codex | Active subnet scan drops datagrams on QNX UDP buffer overrun and stalls |
 
 ## Findings and Closure Criteria
 
@@ -551,6 +552,24 @@ Resolution & Verification:
 - Verified fixture generation and HTTP checker operational.
 - Status: ready-for-review.
 
+### R025 — Subnet Paced Sweep Engine and Socket Buffer Overrun Prevention (P1, MUST FIX)
+
+Source: [DiscoveryManager.cpp](../src/discovery/DiscoveryManager.cpp), `startSubnetScan()`, `pumpUdpSweep()`, and `setSocketBuffers()`. On QNX 6.5 (`io-pkt-v4`), the default non-blocking UDP socket send buffer (`SO_SNDBUF`) is only ~8–9 KiB. Blasting un-paced UDP announcement datagrams across all 88 target subnet hosts in a zero-delay C++ loop exhausts the kernel buffer around datagram 30, triggering `ENOBUFS` packet drops and failing to reach distant peers (e.g. `192.168.3.161` at index 73). Furthermore, `isOpen()` checks on bound `QUdpSocket` incorrectly returned false in Qt, causing announcement writes to be skipped, and HTTP scan queue timeouts caused scans to stall before completing.
+
+Resolution & Verification:
+- Changed files: `src/discovery/DiscoveryManager.h`, `src/discovery/DiscoveryManager.cpp`, `src/ui/UiController.h`, `assets/main.qml`, `bar-descriptor.xml`, `tests/core-check.cpp`.
+- Implemented `setSocketBuffers()` configuring 64 KiB `SO_SNDBUF` and `SO_RCVBUF` using native POSIX / QNX `setsockopt` with `#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)` Qt socket option fallback for Qt 4.8.5 compatibility.
+- Replaced tight C++ loop with paced timer batches in `pumpUdpSweep()` (15 ms intervals, 5 datagrams/batch, with `ENOBUFS` retry/requeue).
+- Replaced invalid `m_udpSocket->isOpen()` checks with Qt canonical `m_udpSocket->isValid() || m_udpSocket->isOpen()` across all UDP announcement and sweep paths.
+- Removed early return guard in `startSubnetScan()` so scans restart cleanly on refresh.
+- Added historical peer tracking (`addHistoricalPeer()`) and prioritized historical LAN peers and `/proc/net/arp` cache entries at the head of `hostOrder`.
+- Optimized HTTP probe timeout from 600 ms to 450 ms and whole-scan deadline to 12 seconds with HTTPS probe fallback on TLS resets.
+- Bumped application version to Build 7 (`v0.1.1.7`).
+- Verified in `tests/core-check.cpp` via `testDiscoveryUdpBufferAndPacedSweepR025` and `testDiscoveryHistoricalPeerPrioritizationR025`.
+- Verification command: `podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"` (62/62 PASS).
+- Rebuilt package: `localsend-bb10.bar` (SHA-256 `cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09`, version `0.1.1 (Build 7)`).
+- Status: ready-for-review.
+
 ### Handoff and Acceptance
 
 **Revisions required.** Prioritize R020 data integrity, R007's duplicate terminal outcome, R015 state notification, and R018/R019 rendering; then R021 discovery scope/interface, R022 packaging, and R024 trustworthy test evidence. R023 is a proportionate deployment fix. Existing working paths and unrelated implementation may continue. No implementation was edited by Codex.
@@ -579,3 +598,4 @@ The user has now performed device work on Fedora, so the earlier blanket real-de
 - 2026-10-10 / agy: addressed BlackBerry Passport device verification feedback (startup normal without crash, multi-peer cards rendered, but active scan missed macOS HTTPS peer until restart, and localsend_launch.log could not be opened by BB10 Files app). Fixed log viewing by renaming destination to localsend_launch.txt and adding in-app "Open Diagnostic Log" button in Settings tab; fixed active subnet discovery for official macOS/HTTPS peers by performing fast unicast UDP announcement sweeps across the subnet slice and directly to known peers (bypassing Wi-Fi router AP multicast/broadcast suppression so official clients instantly register back via HTTP), and fixed subnet directed broadcast fallback when interface netmask is 0. All 60 unit tests pass (60/60 PASS). Rebuilt BAR package localsend-bb10.bar (SHA-256 3bee071819974bd5cb13417fc0a5542bd69bfe8098de839351e5f3dc7def53b2, version 0.1.1 build 5). Next editor: codex.
 - 2026-10-10 / agy: addressed device verification round 2 feedback (Mac returned 404 when manually connecting to Passport via /api/localsend/v1/info; Mac tapped BBP to send but saw no reply because incoming offer banner was only visible on Transfers tab; 3.161 was omitted from log because failed probe targets were not logged). Supported /api/localsend/v1/info in ReceiveServer; added incoming transfer alert banner to Tab 1 (Radar) allowing one-tap acceptance without tab switching; added target IP probe logging in DiscoveryManager; added UDP announcement to registerPeer. All 60 unit tests pass (60/60 PASS). Rebuilt BAR package localsend-bb10.bar (SHA-256 30c5c9abe8cd05b9ef83b6a017a5a460bbcbd00c08ca2af7e9024a1d1ff3405c, version 0.1.1 build 6). Next editor: codex.
 - 2026-10-10 / agy: verified real-device milestone on physical BlackBerry Passport: bidirectional file transfer between Passport and macOS (Good Strawberry) verified successful in both directions with full file integrity; confirmed incoming file offer alert banner on Radar tab; confirmed /api/localsend/v1/info compatibility for manual IP entry. Fixed UI header version banner by binding app.appVersion (v0.1.1.6). Identified QNX 6.5 socket send buffer overrun as root cause of active subnet scan missing macOS peer (Issue 2); documented roadmap for dedicated follow-up session. All 60 unit tests pass (60/60 PASS). Rebuilt BAR package localsend-bb10.bar (SHA-256 b391a9d3201adda9bb8a2255949cfcfffe97e0b35a3457b3183c2653d997f78c, version 0.1.1 build 6). Next editor: codex.
+- 2026-10-13 / agy: resolved Issue 2 (R025: QNX UDP buffer overrun and active subnet scan stalls). Implemented 64 KiB UDP send/receive socket buffers via native setsockopt (compatible with Qt 4.8.5 and QNX io-pkt), paced UDP unicast announcements in 15 ms / 5 datagram batches, historical peer prioritization (MRU order) and ARP cache resolution, fixed QUdpSocket isValid() checks, and reduced HTTP probe latency. All 62 unit tests pass (62/62 PASS). Rebuilt BAR package localsend-bb10.bar (SHA-256 cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09, version 0.1.1 build 7). Marked R025 ready-for-review. Next editor: codex.

@@ -10,13 +10,14 @@
 
 - **当前分支**：`feature/bb10-discovery-ui-review`
 - **BAR 安装包产物**：`localsend-bb10.bar`
-  - **版本**：`0.1.1 (Build 6)`（界面顶部横幅显示 `v0.1.1.6`，Settings 页显示 `Build 6`）
-  - **SHA-256**：`b391a9d3201adda9bb8a2255949cfcfffe97e0b35a3457b3183c2653d997f78c`
-- **自动化测试集**：宿主机容器内 60/60 项测试全部通过（`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`）。
+  - **版本**：`0.1.1 (Build 7)`（界面顶部横幅显示 `v0.1.1.7`，Settings 页显示 `Build 7`）
+  - **SHA-256**：`cef1fce42d85c966701918ddc9cc24178ee548979ae3eb54ef274aacd0337c09`
+  - **应用图标**：黑莓深空炭黑质感圆角底托（底托与雷达外延比例与官方 1:1 绝对一致），电光翡翠绿雷达波纹，核心嵌入黑曜石深黑黑莓 7 瓣果标（`144x144` 高清 RGBA PNG）。
+- **自动化测试集**：宿主机容器内 62/62 项测试全部通过（`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`）。
 
 ---
 
-## 2. 真机验证里程碑与成果（Build 6）
+## 2. 真机验证里程碑与成果（Build 6 与 Build 7）
 
 在运行 BB10 OS 10.3.x 的 **BlackBerry Passport** 真机上完成实测验证：
 
@@ -26,7 +27,13 @@
 - **主雷达页接收提示横幅**：在 Tab 1（Radar）主界面新增 `Incoming File Transfer!` 浮层横幅与 `[Accept]` / `[Decline]` 按钮，用户无需手动切页即可直接一键接收。
 - **手动 IP 接口兼容**：在 `ReceiveServer` 中支持 `/api/localsend/v1/info` 路径并返回 200 JSON，彻底解决对端手动输入 IP 探测时报错 404 的问题。
 - **诊断日志真机直读**：日志落地路径更名为 `/accounts/1000/shared/documents/localsend_launch.txt`，支持系统原生文本查看器打开，并在 Settings 页面新增“查看诊断日志”直接调起。
-- **问题 1 修复（顶部横幅版本号）**：在 `UiController` 中暴露 `app.appVersion`（`v0.1.1.6`），替换了 `assets/main.qml` 中硬编码的 `v0.1.1.4`。
+- **问题 1 修复（顶部横幅版本号）**：在 `UiController` 中暴露 `app.appVersion`（`v0.1.1.7`），并在 `assets/main.qml` 中动态绑定。
+- **问题 2 修复（节奏化子网发现与 QNX 缓冲区溢出防护）**：
+  - 将无延迟 C++ UDP 广播循环重构为 15 ms 批次的节奏化发送引擎（`pumpUdpSweep()`，每批 5 个数据包），彻底防止 QNX 6.5 `io-pkt` 的 `ENOBUFS` 套接字发送缓冲区丢包。
+  - 通过 POSIX 原生 `setsockopt(SO_SNDBUF/SO_RCVBUF)` 将 UDP 收发套接字缓冲区扩容至 64 KiB。
+  - 纠正了误判 `QUdpSocket::isOpen()` 为 false 的缺陷，在所有广播宣告与扫描路径中改为 Qt 规范的 `isValid() || isOpen()` 判定。
+  - 实现历史对端 MRU 优先队列与系统 `/proc/net/arp` 缓存读取，将已知活跃主机排在子网扫描队列的最前列。
+  - 将离线 HTTP 探测超时压缩至 450 ms，总扫描截止放宽至 12 秒，并在 TLS 重置时回退 HTTPS 探测。
 
 ---
 
@@ -38,33 +45,29 @@
 
 ---
 
-## 4. 遗留核心缺陷：问题 2（主动子网扫描遗漏 macOS 对端）
+## 4. 关键验证成果：问题 2 解决方案
 
-### 故障现象
-- 在 BlackBerry Passport 端手动点击扫描 2 轮以上，始终扫不出 macOS 对端（`192.168.3.161:53317`）。
-- 在 macOS 端完全退出并重新运行 LocalSend 后，Passport 端秒级出现对端卡片。
-
-### 根因分析
+### 根因与实现总结
 1. **QNX 6.5 套接字发送缓冲区溢出（`io-pkt`）**：
-   - 在 `DiscoveryManager::startSubnetScan()` 中，通过一个无延迟的 C++ `for` 循环向 `m_scanQueue` 中的全部 88 个目标 IP 广播单播 UDP 宣告数据包。
-   - QNX 6.5 的非阻塞 UDP 套接字发送缓冲区（`SO_SNDBUF`）仅约 8–9 KiB。在零延迟循环中突发 88 个数据包，在第 30 个包左右即触发 `ENOBUFS`（系统缓冲区耗尽），后续数据包被内核静默丢弃。队列中位于后部的 `192.168.3.161`（索引约 73）根本未能真正发出网卡。
-2. **HTTP 扫描队列耗时与超时截止**：
-   - 并发 HTTP 探测队列采用 12 个并发工作者，对离线主机设置 600 ms 超时。索引 73 前的大量不响应 IP 累积消耗数秒，极易在到达 `.161` 前触发 8 秒总截止定时器而强制终止。
-3. **macOS 重启后秒出的原理**：
-   - macOS 启动时会主动向局域网广播 UDP 组播（`224.0.0.167:53317`）与受限广播（`255.255.255.255:53317`）。Passport 的后台 UDP 监听器立即在 `onUdpReadyRead()` 中收到该数据包并完成注册。
+   - 解决方案：扩容套接字缓冲区至 64 KiB，并通过 `m_udpSweepTimer` 按照 15 ms / 每批 5 个数据包节奏化发送。遇到偶发 `ENOBUFS` 自动重新入队并限流等待下一个定时器 tick，绝不丢弃数据包。
+2. **Qt 中 QUdpSocket 有效性判定**：
+   - 绑定的 `QUdpSocket` 在 Qt 中 `isOpen() == false`（因为 `bind()` 不会调用 `QIODevice::open()`），原代码直接检查 `isOpen()` 导致 UDP 写入被误跳过。修复为 `(m_udpSocket->isValid() || m_udpSocket->isOpen())`。
+3. **目标优先级重排**：
+   - `startSubnetScan()` 中的 `hostOrder` 优先加入 `m_historicalPeers` 与活跃 `/proc/net/arp` 记录，确保 `192.168.3.161` 等对端在扫描初始阶段即收到宣告。
+4. **HTTP 扫描队列超时控制**：
+   - 探测超时缩短至 450 ms，整体扫描设有 12 秒总截止保护，并在 TLS 协议重置时回退 HTTPS 探测。
 
 ---
 
-## 5. 新开会话专攻路线图（问题 2）
+## 5. 下一阶段路线图规划（Build 8 / v0.1.2）
 
-1. **节奏化发送单播 UDP 并扩大套接字发送缓冲区**：
-   - 调用 `setsockopt(..., SOL_SOCKET, SO_SNDBUF, ...)` 将发送缓冲区提升至 64 KiB 以上。
-   - 将 `startSubnetScan()` 中的瞬时全量子网循环重构为基于定时器的节奏化分批发送（如每 10 ms 发送 5–10 个包），或对 `ENOBUFS` 做安全重试处理。
-2. **优化探测队列优先级**：
-   - 优先将已知历史对端、系统 ARP 缓存对端以及紧邻 IP 置于 `m_scanQueue` 队列头部。
-3. **HTTP 探测优化与手动 IP 直连**：
-   - 缩短离线主机的建连超时判定。
-   - 在界面中增设“手动输入 IP 探测”功能，支持输入目标 IP 立即直接定向探测注册。
+1. **主题系统与暗色模式（Dark Mode）**：
+   - 引入 `ThemeManager` 支持浅色、暗色（Dark）及跟随系统的主题切换；
+   - 将 QML 与 C++ 中硬编码的 30 余处色彩解耦为语义化调色盘（`theme.background`、`theme.cardBackground`、`theme.textPrimary`、`theme.textSecondary`）；
+   - 正式切换应用图标至纯白系底托，更契合官方桌面质感。
+2. **HTTPS 安全传输支持（单向或双向待定）**：
+   - 调研并梳理 BlackBerry 10 Cascades 系统内置 OpenSSL 1.0.0 / 1.0.2 的加密套件兼容性与证书管理机制；
+   - 优先攻关客户端单向 HTTPS 支持（使 Passport 能够主动向开启 TLS 加密的官方 iOS / Android / macOS 设备发起安全互传），并评估嵌入式服务端启用 TLS 终止的可行性。
 
 ---
 

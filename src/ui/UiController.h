@@ -68,7 +68,7 @@ public:
     QString deviceAlias() const;
     int devicePort() const;
     QString receiveDirectory() const;
-    QString appVersion() const { return "v0.1.1.6"; }
+    QString appVersion() const { return "v0.1.1.7"; }
     QVariantList peers() const { return m_peers; }
     int peerCount() const { return m_peers.size(); }
     int peersRevision() const { return m_peersRevision; }
