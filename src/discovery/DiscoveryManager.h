@@ -40,6 +40,9 @@ public:
     QList<QHostAddress> historicalPeers() const { return m_historicalPeers; }
     void addHistoricalPeer(const QHostAddress &addr);
     QList<QHostAddress> udpSweepQueue() const { return m_udpSweepQueue; }
+    bool getSocketBufferSizes(int *sndBuf, int *rcvBuf) const;
+    void queueUdpSweepTarget(const QHostAddress &addr);
+    int udpSweepAttempts(const QHostAddress &addr) const { return m_udpSweepAttempts.value(addr.toIPv4Address(), 0); }
 
 signals:
     void peerUpdated(const PeerDevice &peer);
@@ -84,6 +87,7 @@ private:
 
     // Paced UDP sweep across subnet (Issue 2 QNX UDP buffer overrun protection)
     QList<QHostAddress> m_udpSweepQueue;
+    QMap<quint32, int> m_udpSweepAttempts;
 
     // Subnet HTTP sweep (Section 3.2 Legacy / Subnet Scan)
     bool m_isScanning;
