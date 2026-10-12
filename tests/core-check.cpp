@@ -3524,13 +3524,18 @@ void testDiscoveryPacedSweepHeadOfLineBlockingPreventionR025()
     // Queue must drain completely: failing/unroutable targets must not starve subsequent valid targets
     ASSERT_TRUE(dm->udpSweepQueue().isEmpty(), "sweep queue must drain completely and drop permanently failing targets");
 
+    // Assert that each target was actually attempted
+    ASSERT_TRUE(dm->udpSweepAttempts(unroutableHost) >= 1, "unroutable host was attempted and classified");
+    ASSERT_TRUE(dm->udpSweepAttempts(validHost1) >= 1, "validHost1 was attempted despite unroutable predecessor");
+    ASSERT_TRUE(dm->udpSweepAttempts(validHost2) >= 1, "validHost2 was attempted despite unroutable predecessor");
+
     app.stop();
     TEST_PASS();
 }
 
 void testDiscoveryFallbackPacedEnqueueR025()
 {
-    TEST_CASE("R025 - P2 HTTP probe fallback routes through paced sweep queue");
+    TEST_CASE("R025 - P2 HTTP probe failure fallback routes through paced sweep queue via production callback");
 
     localsend::Application app;
     app.setPort(0);
@@ -3540,21 +3545,152 @@ void testDiscoveryFallbackPacedEnqueueR025()
     DiscoveryManager *dm = app.discoveryManager();
     ASSERT_TRUE(dm != 0, "discovery manager must not be null");
 
-    QHostAddress fallbackTarget("127.0.0.100");
-    dm->queueUdpSweepTarget(fallbackTarget);
+    // Inject an HTTP scan probe target on loopback where TCP port 53317 is closed/refused
+    // (ReceiveServer is listening on dynamic port != 53317).
+    // This triggers production pumpScanQueue() -> m_nam->post -> QNetworkReply error
+    // -> onProbeReplyFinished() -> queueUdpSweepTarget().
+    QHostAddress failedHttpTarget("127.0.0.199");
+    dm->injectScanTarget(failedHttpTarget);
 
-    // Verify it was placed into the paced sweep queue
-    ASSERT_TRUE(dm->udpSweepQueue().contains(fallbackTarget), "fallback target must be enqueued in paced sweep queue");
-
-    // Drain queue
+    // Wait for the HTTP reply to fail and trigger onProbeReplyFinished()
     QTime timer;
     timer.start();
-    while (!dm->udpSweepQueue().isEmpty() && timer.elapsed() < 3000) {
+    bool enqueuedInSweep = false;
+    while (timer.elapsed() < 3000) {
         QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        if (dm->udpSweepQueue().contains(failedHttpTarget)) {
+            enqueuedInSweep = true;
+            break;
+        }
         usleep(10000);
     }
 
+    ASSERT_TRUE(enqueuedInSweep, "failed HTTP probe must route fallback UDP announcement into udpSweepQueue via onProbeReplyFinished");
+
+    // Drain the sweep queue
+    while (!dm->udpSweepQueue().isEmpty() && timer.elapsed() < 5000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        usleep(10000);
+    }
     ASSERT_TRUE(dm->udpSweepQueue().isEmpty(), "paced fallback queue must drain completely");
+
+    app.stop();
+    TEST_PASS();
+}
+
+void testDiscoveryWholeScanAttemptCapR025()
+{
+    TEST_CASE("R025 - Whole-scan attempt cap (<= 3 attempts across initial sweep + HTTP fallback)");
+
+    localsend::Application app;
+    app.setPort(0);
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start failed");
+
+    DiscoveryManager *dm = app.discoveryManager();
+    ASSERT_TRUE(dm != 0, "discovery manager must not be null");
+
+    QHostAddress target("127.0.0.220");
+
+    // 1. Enqueue target and drain it (Attempt 1)
+    dm->queueUdpSweepTarget(target);
+    QTime timer;
+    timer.start();
+    while (!dm->udpSweepQueue().isEmpty() && timer.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(dm->udpSweepAttempts(target) == 1, "attempt 1 recorded");
+
+    // 2. Enqueue target and drain it (Attempt 2)
+    dm->queueUdpSweepTarget(target);
+    timer.restart();
+    while (!dm->udpSweepQueue().isEmpty() && timer.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(dm->udpSweepAttempts(target) == 2, "attempt 2 recorded");
+
+    // 3. Enqueue target and drain it (Attempt 3)
+    dm->queueUdpSweepTarget(target);
+    timer.restart();
+    while (!dm->udpSweepQueue().isEmpty() && timer.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(dm->udpSweepAttempts(target) == 3, "attempt 3 recorded");
+
+    // 4. Target has now exhausted its 3 attempts for this scan.
+    // Verify that subsequent fallback enqueue is rejected and not added to the queue!
+    int queueSizeBefore = dm->udpSweepQueue().size();
+    dm->queueUdpSweepTarget(target);
+    ASSERT_TRUE(dm->udpSweepQueue().size() == queueSizeBefore, "exhausted target (>= 3 attempts) must be rejected by queueUdpSweepTarget");
+    ASSERT_TRUE(!dm->udpSweepQueue().contains(target), "exhausted target must not be enqueued");
+    ASSERT_TRUE(dm->udpSweepAttempts(target) == 3, "attempt count must not exceed 3");
+
+    // 5. Verify that injectScanTarget / onProbeReplyFinished cannot re-exhaust target beyond 3 attempts
+    dm->injectScanTarget(target);
+    timer.restart();
+    while (timer.elapsed() < 1500) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    // Attempt count must remain <= 3 across the entire scan, never resetting to 6!
+    ASSERT_TRUE(dm->udpSweepAttempts(target) <= 3, "attempt count across whole scan must be <= 3");
+
+    app.stop();
+    // After stop, attempts must be cleared
+    ASSERT_TRUE(dm->udpSweepAttempts(target) == 0, "attempts cleared after stop");
+
+    TEST_PASS();
+}
+
+void testDiscoveryActiveInterfaceResolutionR025()
+{
+    TEST_CASE("R025 - Active multicast interface resolved during normal Application startup");
+
+    localsend::Application app;
+    app.setPort(0);
+    QString err;
+    ASSERT_TRUE(app.start(&err), "app start failed");
+
+    DiscoveryManager *dm = app.discoveryManager();
+    ASSERT_TRUE(dm != 0, "discovery manager must not be null");
+
+    // Check if host has an up, non-loopback IPv4 candidate interface
+    QNetworkInterface activeIface = dm->activeInterface();
+    QString ifaceAddr = dm->activeInterfaceAddress();
+
+    QList<QNetworkInterface> allIfaces = QNetworkInterface::allInterfaces();
+    bool hasCandidate = false;
+    for (int i = 0; i < allIfaces.size(); ++i) {
+        const QNetworkInterface &it = allIfaces.at(i);
+        if ((it.flags() & QNetworkInterface::IsUp) &&
+            !(it.flags() & QNetworkInterface::IsLoopBack) &&
+            !(it.flags() & QNetworkInterface::IsPointToPoint)) {
+            QList<QNetworkAddressEntry> entries = it.addressEntries();
+            for (int j = 0; j < entries.size(); ++j) {
+                if (entries.at(j).ip().protocol() == QAbstractSocket::IPv4Protocol &&
+                    entries.at(j).ip() != QHostAddress::LocalHost) {
+                    hasCandidate = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (hasCandidate) {
+        ASSERT_TRUE(activeIface.isValid(), "activeInterface must be valid when candidate LAN exists");
+        ASSERT_TRUE(!activeIface.name().isEmpty(), "activeInterface name must not be empty");
+        ASSERT_TRUE(!ifaceAddr.isEmpty(), "activeInterfaceAddress must not be empty");
+        qDebug() << "[Test] Active resolved interface:" << activeIface.name() << "addr:" << ifaceAddr;
+    } else {
+        qDebug() << "[Test] No non-loopback candidate interface on host (e.g. isolated network container)";
+    }
+
+    int snd = 0, rcv = 0;
+    ASSERT_TRUE(dm->getSocketBufferSizes(&snd, &rcv), "socket buffer sizes must be readable");
+    ASSERT_TRUE(snd > 0 && rcv > 0, "socket buffers must be positive");
 
     app.stop();
     TEST_PASS();
@@ -3631,6 +3767,8 @@ int main(int argc, char **argv)
     testDiscoveryHistoricalPeerPrioritizationR025();
     testDiscoveryPacedSweepHeadOfLineBlockingPreventionR025();
     testDiscoveryFallbackPacedEnqueueR025();
+    testDiscoveryWholeScanAttemptCapR025();
+    testDiscoveryActiveInterfaceResolutionR025();
 
     // T09 Cascades UI & Controller Tests
     testUiControllerDevicePropertiesAndAlias();

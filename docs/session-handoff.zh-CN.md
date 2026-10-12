@@ -11,9 +11,9 @@
 - **当前分支**：`feature/bb10-discovery-ui-review`
 - **BAR 安装包产物**：`localsend-bb10.bar`
   - **版本**：`0.1.1 (Build 7)`（界面顶部横幅显示 `v0.1.1.7`，Settings 页显示 `Build 7`）
-  - **SHA-256**：`0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683`
+  - **SHA-256**：`62b5ae4d630c295a998fd098430274f7e8f2759ba8044b03d428a15abdafa44f`
   - **应用图标**：黑莓深空炭黑质感圆角底托（底托与雷达外延比例与官方 1:1 绝对一致），电光翡翠绿雷达波纹，核心嵌入黑曜石深黑黑莓 7 瓣果标（`144x144` 高清 RGBA PNG）。
-- **自动化测试集**：宿主机容器内 64/64 项测试全部通过（`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`），并在无网络隔离环境（`--network none`）下验证全量通过。
+- **自动化测试集**：宿主机容器内 66/66 项测试全部通过（`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`），并在无网络隔离环境（`--network none`）下验证全量通过。
 
 ---
 

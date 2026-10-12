@@ -11,9 +11,9 @@ This briefing provides the complete state and context for continuing development
 - **Branch**: `feature/bb10-discovery-ui-review`
 - **BAR Artifact**: `localsend-bb10.bar`
   - **Version**: `0.1.1 (Build 7)` (displays `v0.1.1.7` in top banner and `Build 7` in Settings page)
-  - **SHA-256**: `0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683`
+  - **SHA-256**: `62b5ae4d630c295a998fd098430274f7e8f2759ba8044b03d428a15abdafa44f`
   - **App Icon**: BlackBerry 10 obsidian dark squircle base with 1:1 official LocalSend proportions, featuring radiant teal radar arcs and center deep black BlackBerry 7-dot fruit logo (`144x144` RGBA PNG).
-- **Test Suite**: 64/64 PASS in host container (`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`), and verified passing under isolated network (`--network none`).
+- **Test Suite**: 66/66 PASS in host container (`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`), and verified passing under isolated network (`--network none`).
 
 ---
 
