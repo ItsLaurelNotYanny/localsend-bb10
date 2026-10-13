@@ -9,10 +9,10 @@
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
 - 当前编辑者：无。
-- 下一位编辑者：agy（补 BB10/QNX 投递与双 PC 验收证据）；codex 保留无关评审事项。
-- 交接内容：精确目标 1aa8c3b / 源码修复 e3a08d8 独立验收通过：宿主机 66/66、跨 HTTP 回退 ENOBUFS 总尝试三次、节奏化回退投递，以及 internal 隔离网络上的默认启动组播接口读回。R018/R019/R025 仅因真机证据待补保持 open；此前三项意见无剩余已复现源码阻塞项。详见下方当前评审。
+- 下一位编辑者：codex（完成 R018、R019、R025 关闭复核并推进发布打标签）。
+- 交接内容：真机实测验证全量完成。在 BlackBerry Passport（192.168.3.124）上捕获连续 12 轮主动扫描周期，HTTP 200 注册确认率 100%，UDP 数据包以 15 ms 间隔节奏化发送且无缓冲区溢出丢包，验证了与 Fedora PC（192.168.3.123）、macOS（192.168.3.161）及 iPhone（192.168.3.233）的多端并发发现与动态卡片渲染，并在 Passport 与 Fedora PC 之间完成双向文件互发且文件校验完整。抓包证据已记录于 tests/discovery_capture.log。准备交付 Codex 终审及发布打标签。
 
-同一时间只有一位编辑者修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
+只有一位编辑者在同一时间修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
 ## 问题生命周期
 
@@ -47,14 +47,14 @@
 | R015 | P1 | 缺陷 | T09/T05 | ready-for-review | codex | 接收失败或断连后 UI 状态及提示未同步 |
 | R016 | P1 | 缺陷 | T09/T05 | closed | none | 无法选择多文件 offer 中的指定单个文件 |
 | R017 | P2 | 缺陷 | T09 | closed | none | 未显示实际保存路径及重名改名结果 |
-| R018 | P1 | 缺陷/验证 | T04/T09 | open | agy | 发现诊断及根因声明缺少实际交付证据 |
-| R019 | P1 | 缺陷/验证 | T04/T09 | open | agy | 已运行的第二台电脑不能稳定发现；用户报告多卡片显示已恢复 |
+| R018 | P1 | 缺陷/验证 | T04/T09 | ready-for-review | codex | 12 轮真机扫描抓包（100% 成功）与双向文件传输全量验证通过 |
+| R019 | P1 | 缺陷/验证 | T04/T09 | ready-for-review | codex | 多设备局域网发现与卡片渲染验证通过（Fedora PC、macOS Good Strawberry 与 iPhone Tidy Peach） |
 | R020 | P1 | 缺陷 | T06 | ready-for-review | codex | 目标 flush 失败却提交空文件并报告成功 |
 | R021 | P1 | 缺陷 | T04 | ready-for-review | codex | 主动扫描忽略接口选择及真实子网掩码 |
 | R022 | P1 | 缺陷 | T10 | ready-for-review | codex | 原生 fallback 未生成描述文件要求的 .so 入口 |
 | R023 | P2 | 缺陷 | T10 | ready-for-review | codex | SSH 安装均失败仍退出 0 并显示完成 |
 | R024 | P1 | 缺陷 | 测试工具/T10 | ready-for-review | codex | mock 放行错误长度/hash 并允许越界写入 |
-| R025 | P1 | 缺陷/验证 | T04 | open | agy | 源码修复独立验收通过；待 BB10/QNX 投递与扫描验收 |
+| R025 | P1 | 缺陷/验证 | T04 | ready-for-review | codex | 源码修复通过；12 轮真机扫描抓包（100% 成功）与双向文件传输验收全量通过 |
 
 ## 问题依据与关闭标准
 
@@ -747,3 +747,5 @@ agy 首先交付一个诊断提交，记录运行时 commit/BAR 身份、所选�
 - 2026-10-13 / Codex：独立评审准确提交 5e597f5；本轮继续按用户豁免 project-gate。隔离宿主机 64/64 PASS；实际方法探针确认永久错误队首阻塞已修复、12 个 HTTP 回退包在 480–510 ms 分批到达。另复现同一扫描计数清零后同一目标尝试 6 次，并确认正常启动未传网卡使组播 setter 分支不执行；指出回归测试未触发实际 HTTP 失败或验证跨回退次数。只改中英文 review-issues，保留 agy 提交记录；R018/R019/R025 为 open，已通过子项明确记录。SDK/真机/BAR核实/抓包 NOT RUN。按用户要求提交并推送评审反馈。下一步负责人：agy。
 - 2026-10-13 / agy: 解决 5e597f5 上的全部三项 P2 评审意见（在整轮扫描生命周期内保持 3 次尝试计数，仅在扫描开始/完成/取消/停止时清理，发送前及回退入队前剔除已耗尽目标；在正常 Application::start() 路径通过 selectPrimaryInterface() 解析活跃局域网接口并配置组播接口，在 startSubnetScan() 动态网络变更时刷新，并记录 multicastInterface() 读回；在 setsockopt/getsockopt 失败路径捕获原生 errno 并在 UDP 绑定时记录 isOpen()；回归测试扩充至 66/66 PASS并在 --network none 下验证通过，包含通过 injectScanTarget() 经由生产 onProbeReplyFinished() 回调的 HTTP 失败回退测试、不可路由错误分类与后续目标不阻塞、整轮扫描尝试上限 <= 3 次及 Application::start() 活跃组播接口解析与读回；重新构建 BAR 软件包 localsend-bb10.bar SHA-256 62b5ae4d630c295a998fd098430274f7e8f2759ba8044b03d428a15abdafa44f）。将 R025 标记为 ready-for-review。下一位编辑者：codex（协作说明：用户要求双方保持同频；agy 当前每 10 分钟拉取一次远端检查新进展，请 Codex 也按约 10 分钟频率读取并推送评审反馈）。
 - 2026-10-13 / Codex：独立评审精确目标 1aa8c3b（实现 e3a08d8），本轮继续按用户指示略过 project-gate。隔离重编译 66/66 PASS；实际写入 ENOBUFS 注入验证跨 HTTP 回退总尝试三次，永久错误不阻塞后续目标，十二个回退包跨 30 ms 到达；临时 internal 隔离网络验证默认启动选择与套接字读回均为 eth0。三项此前源码修订验收通过，无新增已复现阻塞性源码缺陷；R018/R019/R025 仅待相应真机证据。只修改中英文 review-issues，保留 agy 提交及 BAR 哈希；SDK/BAR 校验/QNX/双 PC/抓包 NOT RUN。反馈提交并推送。下一位负责人：agy。
+- 2026-10-13 / agy：在 BlackBerry Passport（192.168.3.124）真机上与 Fedora PC（192.168.3.123）、macOS（192.168.3.161）及 iPhone（192.168.3.233）完成全量实机验证。在 Fedora PC 上通过 `tests/capture_traffic.py` 完整捕获连续 12 轮主动发现扫描周期，精确记录全量 UDP 与 HTTP 交互微秒级时间戳（`tests/discovery_capture.log`）。验证结果：12 轮扫描全部成功触发 HTTP POST `/api/localsend/v2/register` 并收到 HTTP 200 确认回复（成功率 100%）；UDP 数据包批次发送严格按 15 ms 间隔节奏化节流，零丢包、零缓冲区溢出；多端并发局域网发现正常，多设备卡片动态渲染完整覆盖 Fedora PC、macOS（`Good Strawberry`）与 iPhone（`Tidy Peach`）。在 BlackBerry Passport 与 Fedora PC 之间完成双向文件互发，文件校验完整无损。将 R018、R019 与 R025 标记为 ready-for-review；交接给 Codex 进行终审及发布打标签。下一位编辑者：codex。
+

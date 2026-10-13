@@ -1,0 +1,178 @@
+=== LocalSend Discovery Packet & Request Capture Started 2026-10-13 12:02:19.154349 ===
+[2026-10-13 12:02:19.154] [START] Capture logger active on Fedora (192.168.3.123)
+[2026-10-13 12:02:19.155] [HTTP_INIT] Starting HTTP server on 0.0.0.0:53317...
+[2026-10-13 12:02:19.155] [UDP_INIT] Joined multicast group 224.0.0.167 on 0.0.0.0:53317
+[2026-10-13 12:02:19.155] [UDP_INIT] Listening for UDP datagrams on port 53317...
+[2026-10-13 12:02:25.901] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:02:26.260] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:26.333] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:26.334] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:26.405] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:02:26.544] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:26.641] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.315] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.381] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.413] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:02:28.484] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.533] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.586] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.688] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.700] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.740] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.792] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.833] [HTTP_POST] From 192.168.3.124:39953 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:02:28.833] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:02:28.834] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:02:28.893] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:28.935] [UDP_RECV] From 192.168.3.161:58333 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:02:28.945] [UDP_RECV] From 192.168.3.161:62107 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:02:28.946] [UDP_RECV] From 192.168.3.161:54865 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:02:28.947] [UDP_RECV] From 192.168.3.161:50175 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:02:28.947] [UDP_RECV] From 192.168.3.161:62707 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:02:28.948] [UDP_RECV] From 192.168.3.161:61678 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:02:28.948] [UDP_RECV] From 192.168.3.161:55907 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:02:28.949] [UDP_RECV] From 192.168.3.161:52222 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:02:28.958] [UDP_RECV] From 192.168.3.161:56733 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:02:28.958] [UDP_RECV] From 192.168.3.161:54145 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:02:44.582] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:44.630] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:44.663] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:44.664] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:44.751] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:02:44.866] [HTTP_POST] From 192.168.3.124:43787 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:02:44.867] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:02:44.869] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:03:02.723] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:03:02.820] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:02.890] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:02.993] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:07.119] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:07.161] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:07.191] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:07.192] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:07.250] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:07.282] [HTTP_POST] From 192.168.3.124:48860 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:03:07.282] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:03:07.283] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:03:29.186] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:29.208] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:29.235] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:29.310] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:29.347] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:29.384] [HTTP_POST] From 192.168.3.124:51822 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:03:29.384] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:03:29.385] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:03:52.111] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:52.145] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:52.163] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:52.248] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:52.276] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:03:52.319] [HTTP_POST] From 192.168.3.124:60379 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:03:52.319] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:03:52.320] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:04:10.441] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:10.477] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:10.514] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:10.578] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:10.619] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:10.630] [HTTP_POST] From 192.168.3.124:11369 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:04:10.630] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:04:10.631] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:04:40.507] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:40.582] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:40.684] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:47.257] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:47.310] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:47.340] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:47.340] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:47.418] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:04:47.472] [HTTP_POST] From 192.168.3.124:15587 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:04:47.472] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:04:47.473] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:05:00.638] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:00.652] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:00.688] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:00.797] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:00.857] [HTTP_POST] From 192.168.3.124:11419 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:05:00.858] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:05:00.858] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:05:15.216] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:05:15.334] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:15.398] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:15.501] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:30.694] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:30.758] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:30.759] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:32.030] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:32.080] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:32.090] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:32.090] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:32.197] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:32.332] [HTTP_POST] From 192.168.3.124:16979 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:05:32.333] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:05:32.333] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:05:49.503] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:49.548] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:49.600] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:49.600] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:49.641] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:05:49.669] [HTTP_POST] From 192.168.3.124:20309 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:05:49.670] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:05:49.671] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:06:15.745] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:15.792] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:15.815] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:15.815] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:15.903] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:15.942] [HTTP_POST] From 192.168.3.124:26215 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:06:15.943] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:06:15.944] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:06:23.015] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:06:23.166] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:23.188] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:23.290] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:26.126] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:06:26.307] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:26.465] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:27.033] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:06:27.157] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:27.184] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:27.541] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:06:27.678] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:27.693] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:27.796] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:29.545] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:06:29.699] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:29.741] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:29.844] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:42.370] [HTTP_POST] From 127.0.0.1:49454 -> /api/localsend/v2/show?token=b0e33087-9f2c-4be1-9a4c-53ffdf251fb3 (0 bytes)
+[2026-10-13 12:06:42.370] [HTTP_BODY] Raw: b''
+[2026-10-13 12:06:45.845] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:45.921] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:45.970] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:46.018] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:46.023] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:46.024] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:46.126] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:46.137] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:06:46.208] [UDP_RECV] From 192.168.3.161:64492 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:06:46.208] [UDP_RECV] From 192.168.3.161:64503 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:06:46.309] [HTTP_POST] From 192.168.3.124:33014 -> /api/localsend/v2/register (256 bytes)
+[2026-10-13 12:06:46.310] [HTTP_BODY] Payload: {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}
+[2026-10-13 12:06:46.311] [HTTP_RESP] Returned 200 register confirmation to 192.168.3.124
+[2026-10-13 12:06:46.360] [UDP_RECV] From 192.168.3.161:57155 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:06:46.360] [UDP_RECV] From 192.168.3.161:58027 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:06:46.360] [UDP_RECV] From 192.168.3.161:62215 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:06:46.361] [UDP_RECV] From 192.168.3.161:56116 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:06:46.361] [UDP_RECV] From 192.168.3.161:52452 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:06:46.361] [UDP_RECV] From 192.168.3.161:52100 (255 B): alias='Good Strawberry' ann=False fp=640A6CBE... proto=http:53317
+[2026-10-13 12:06:56.660] [HTTP_POST] From 192.168.3.124:19632 -> /api/localsend/v2/prepare-upload (599 bytes)
+[2026-10-13 12:06:56.660] [HTTP_BODY] Payload: {'files': {'fa128bd5183ba6bf': {'fileName': 'IMG_20261010_185044.jpg', 'fileType': 'application/octet-stream', 'id': 'fa128bd5183ba6bf', 'metadata': None, 'preview': None, 'sha256': None, 'size': 1640388}}, 'info': {'alias': 'BlackBerry Passport', 'deviceModel': 'BlackBerry Passport', 'deviceType': 'mobile', 'download': False, 'fingerprint': '706d97c2-9785-4fb8-948e-947729b96fc2', 'port': 53317, 'protocol': 'http', 'version': '2.2'}}
+[2026-10-13 12:07:09.946] [HTTP_POST] From 127.0.0.1:51926 -> /api/localsend/v2/show?token=b0e33087-9f2c-4be1-9a4c-53ffdf251fb3 (0 bytes)
+[2026-10-13 12:07:09.946] [HTTP_BODY] Raw: b''
+[2026-10-13 12:07:11.068] [UDP_RECV] From 192.168.3.233:53317 (229 B): alias='Tidy Peach' ann=True fp=C4D1C759... proto=https:53317
+[2026-10-13 12:07:11.247] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:07:11.418] [UDP_RECV] From 192.168.3.124:53317 (279 B): alias='BlackBerry Passport' ann=False fp=706d97c2... proto=http:53317
+[2026-10-13 12:07:16.019] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:07:16.129] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317
+[2026-10-13 12:07:16.231] [UDP_RECV] From 192.168.3.124:53317 (278 B): alias='BlackBerry Passport' ann=True fp=706d97c2... proto=http:53317

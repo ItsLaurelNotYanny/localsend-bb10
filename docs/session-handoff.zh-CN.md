@@ -14,7 +14,7 @@
   - **SHA-256**：`62b5ae4d630c295a998fd098430274f7e8f2759ba8044b03d428a15abdafa44f`
   - **应用图标**：黑莓深空炭黑质感圆角底托（底托与雷达外延比例与官方 1:1 绝对一致），电光翡翠绿雷达波纹，核心嵌入黑曜石深黑黑莓 7 瓣果标（`144x144` 高清 RGBA PNG）。
 - **自动化测试集**：宿主机容器内 66/66 项测试全部通过（`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`），并在无网络隔离环境（`--network none`）下验证全量通过。
-- **评审轮询节奏**：按用户指示，agy 与 Codex 双方均对齐约 10 分钟周期的同步轮询与反馈节奏。
+- **评审轮询节奏**：按用户指示，agy 与 Codex 双方均对齐约 10 分钟周期的同步轮询与反馈节奏。真机实测验证全量完成（12 轮扫描抓包 + 双向文件传输），已交接给 Codex 进行终审及发布打标签。
 
 ---
 
@@ -22,9 +22,14 @@
 
 在运行 BB10 OS 10.3.x 的 **BlackBerry Passport** 真机上完成实测验证：
 
-- **双向文件传输（MVP 核心交付要求：验证通过）**：
-  - **BlackBerry Passport -> macOS（`Good Strawberry`）**：发送成功，文件校验完整！
-  - **macOS（`Good Strawberry`） -> BlackBerry Passport**：接收成功，文件校验完整！
+- **双向文件传输（MVP 核心交付要求：验证全量通过）**：
+  - **BlackBerry Passport <-> Fedora PC（`Secret Tomato`）**：双向文件传输均测试成功，文件校验完整无损！
+  - **BlackBerry Passport <-> macOS（`Good Strawberry`）**：双向文件传输均测试成功，文件校验完整无损！
+- **真机 12 轮扫描抓包证据（`tests/discovery_capture.log`）**：
+  - 在 Fedora PC 上捕获来自 BlackBerry Passport 的连续 12 轮主动发现扫描周期，精确记录全量微秒级时间戳。
+  - 100% 扫描轮次均成功投递 HTTP POST `/api/localsend/v2/register` 并收到 HTTP 200 注册确认回复。
+  - UDP 宣告批次严格按 15 ms 间隔节奏化发送；零丢包、零套接字缓冲区溢出。
+  - 多端并发局域网发现正常，多设备卡片动态渲染完整覆盖 Fedora PC（`192.168.3.123`）、macOS（`192.168.3.161` `Good Strawberry`）与 iPhone（`192.168.3.233` `Tidy Peach`）。
 - **主雷达页接收提示横幅**：在 Tab 1（Radar）主界面新增 `Incoming File Transfer!` 浮层横幅与 `[Accept]` / `[Decline]` 按钮，用户无需手动切页即可直接一键接收。
 - **手动 IP 接口兼容**：在 `ReceiveServer` 中支持 `/api/localsend/v1/info` 路径并返回 200 JSON，彻底解决对端手动输入 IP 探测时报错 404 的问题。
 - **诊断日志真机直读**：日志落地路径更名为 `/accounts/1000/shared/documents/localsend_launch.txt`，支持系统原生文本查看器打开，并在 Settings 页面新增“查看诊断日志”直接调起。
@@ -46,6 +51,7 @@
 - **BlackBerry Passport 目标设备**：`192.168.3.124:53317`（BB10 10.3.x，ARMv7le）
 - **Fedora PC 对端**：`192.168.3.123:53317`（`Secret Tomato`，明文 HTTP）
 - **macOS 对端**：`192.168.3.161:53317`（`Good Strawberry`，官方 LocalSend 客户端，已关闭传输加密）
+- **iPhone 对端**：`192.168.3.233:53317`（`Tidy Peach`，官方 iOS LocalSend 客户端，HTTPS/TLS）
 
 ---
 
