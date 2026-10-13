@@ -30,12 +30,9 @@
 
 ## 屏幕截图
 
-<p align="center">
-  <img src="docs/screenshots/home-icon.png" width="22%" alt="桌面图标" />
-  <img src="docs/screenshots/radar-peers.png" width="22%" alt="附近设备雷达" />
-  <img src="docs/screenshots/transfers-completed.png" width="22%" alt="传输完成页面" />
-  <img src="docs/screenshots/settings.png" width="22%" alt="设置标签页" />
-</p>
+| 系统桌面图标 | 附近设备雷达 | 文件传输状态 | 偏好设置与诊断 |
+| :---: | :---: | :---: | :---: |
+| <img src="docs/screenshots/home-icon.png" width="220" alt="系统桌面图标" /> | <img src="docs/screenshots/radar-peers.png" width="220" alt="附近设备雷达" /> | <img src="docs/screenshots/transfers-completed.png" width="220" alt="文件传输状态" /> | <img src="docs/screenshots/settings.png" width="220" alt="偏好设置与诊断" /> |
 
 ---
 

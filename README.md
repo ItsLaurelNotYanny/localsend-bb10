@@ -30,12 +30,9 @@ This project is built purely out of passion for retro hardware preservation—gi
 
 ## Screenshots
 
-<p align="center">
-  <img src="docs/screenshots/home-icon.png" width="22%" alt="Home Screen Icon" />
-  <img src="docs/screenshots/radar-peers.png" width="22%" alt="Nearby Peers Radar" />
-  <img src="docs/screenshots/transfers-completed.png" width="22%" alt="Transfer Completed" />
-  <img src="docs/screenshots/settings.png" width="22%" alt="Settings Tab" />
-</p>
+| Home Screen Icon | Nearby Peers Radar | Transfer Activity | Settings & Diagnostics |
+| :---: | :---: | :---: | :---: |
+| <img src="docs/screenshots/home-icon.png" width="220" alt="Home Screen Icon" /> | <img src="docs/screenshots/radar-peers.png" width="220" alt="Nearby Peers Radar" /> | <img src="docs/screenshots/transfers-completed.png" width="220" alt="Transfer Activity" /> | <img src="docs/screenshots/settings.png" width="220" alt="Settings Tab" /> |
 
 ---
 
