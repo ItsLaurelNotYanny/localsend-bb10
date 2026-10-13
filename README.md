@@ -19,4 +19,4 @@ Bidirectional transfers are mandatory for the MVP: BB10 to PC and PC to BB10 mus
 
 Code, identifiers, comments, docstrings, and technical messages use English. 
 
-The project name and description do not imply official LocalSend support. Choose a license before copying or introducing external code; referring to the protocol and copying the official implementation require separate consideration.
+The project name and description do not imply official LocalSend support. Licensed under the [MIT License](LICENSE).
