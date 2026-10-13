@@ -791,7 +791,7 @@ void UiController::populatePeers(QObject *containerObj)
         left->add(aliasLabel);
 
         bb::cascades::Label *subLabel = new bb::cascades::Label();
-        subLabel->setText(model + " • " + addr);
+        subLabel->setText(model + QString::fromUtf8(" • ") + addr);
         subLabel->textStyle()->setBase(bb::cascades::SystemDefaults::TextStyles::smallText());
         subLabel->textStyle()->setColor(bb::cascades::Color::fromARGB(0xFF718096));
         left->add(subLabel);
