@@ -33,7 +33,7 @@
 由于 BlackBerry 官方签名服务器已于 2022 年正式下线，在 BlackBerry 10 上安装未签名的原生应用需要设备具备 Root 权限。
 
 ### 1. 设备 Root 指引
-如果您的设备尚未 Root，可以使用黑莓社区成熟的 **bb10root** / **bb10mt**（BlackBerry 10 MultiTool）工具链。
+如果您的设备尚未 Root，可以使用黑莓社区开源工具链 [**bb10root / bb10mt**](https://github.com/bb10root/bb10mt)（BlackBerry 10 MultiTool）。
 - **安全性说明**：刷机镜像由用户在本地计算机上对官方原版 Autoloader 固件进行解包与打补丁生成，不包含任何来路不明的第三方预装软件，过程透明、安全可靠。
 
 ### 2. 安装 LocalSend BAR 软件包
