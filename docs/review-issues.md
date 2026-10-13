@@ -8,9 +8,9 @@ Created by Codex on 2026-10-08. This document pair is the shared handoff for rev
 
 Focus review on T03, T05, and T07; review other tasks lightly unless concrete failures justify deeper inspection. The user has now performed target builds, deployment and manual device checks on Fedora. This review checks synchronized source and host behavior. Record source, host, SDK and device results separately; delivery claims or test counts do not replace independent acceptance.
 
-- Current editor: codex.
-- Next editor: codex (exact-target combined review in progress).
-- Handoff: merging origin target 541f9fb05c547bd815bc44e02f78b28de10dce86 with pending review 5368b24; both histories preserved below. Project-gate waived; review in progress.
+- Current editor: none.
+- Next editor: agy (correct passive-capture tooling/evidence and complete the BB10/QNX acceptance matrix); codex retains unrelated review items.
+- Handoff: exact 541f9fb05c547bd815bc44e02f78b28de10dce86 reviewed after preserving pending 5368b24. UTF-8 separator repair accepted at source/host-expression level; 66/66 host PASS and application build passed. R018/R019/R025 remain open for unchanged tooling/evidence and physical acceptance gaps; no release sign-off. agy submission and both histories preserved.
 
 Only one editor updates this document pair at a time. Before editing, read the latest versions and take the handoff by setting the current editor in both files. Update both languages together, then clear the current editor, identify the next editor, and report the handoff through the existing conversation. The marker is a coordination convention, not a file lock; do not begin if the other editor is active. If simultaneous changes occur, reconcile the affected entries rather than replacing either file from an old copy. Issue owners below identify who takes the next action, not permission for concurrent document writes.
 
@@ -47,7 +47,7 @@ For each update, record `date / author / changed files / commands and actual res
 | R015 | P1 | Defect | T09/T05 | ready-for-review | codex | Receive failures/disconnection leave stale UI state and offers |
 | R016 | P1 | Defect | T09/T05 | closed | none | Cannot select a specific single file from a multi-file offer |
 | R017 | P2 | Defect | T09 | closed | none | Actual saved path and collision-renamed file are not displayed |
-| R018 | P1 | Defect/Verification | T04/T09 | open | agy | UDP observations accepted; capture interference and device acceptance evidence remain |
+| R018 | P1 | Defect/Verification | T04/T09 | open | agy | UTF-8 separator repair accepted; capture interference and device acceptance evidence remain |
 | R019 | P1 | Defect/Verification | T04/T09 | open | agy | Gap-derived rounds do not prove restart-free two-PC timing/cards/second-PC send/later join |
 | R020 | P1 | Defect | T06 | ready-for-review | codex | Destination flush failure commits an empty file as success |
 | R021 | P1 | Defect | T04 | ready-for-review | codex | Active scan ignores selected interface and actual subnet mask |
@@ -795,6 +795,51 @@ The new session summary provides filenames, sizes, single reported SHA-256 value
 The handoff is taken and released in both files; next editor/owner: agy for helper/evidence corrections and the outstanding device matrix, with codex retaining unrelated review items. `git diff --check` exited **0**; bilingual technical references, preserved history and unchanged unrelated issue rows were verified. Stage only this bilingual tracker pair and commit feedback. **This worker does not push**; the scheduler validates allowed paths and performs the already-authorized normal non-force push after successful exit.
 
 
+## Combined Exact-Target Review of 541f9fb — 2026-10-13
+
+Exact target: `541f9fb05c547bd815bc44e02f78b28de10dce86`; last published review: `0adad83387f063af6ffbb2165f7d3d33974c5793`. Fetch confirmed the remote branch at this exact target. Before review, merge `6a4ad0e909e758336eb4501e64ea620a5d6b44cb` reconciled only the two tracker conflicts, preserving pending feedback `5368b2447d8f831c3819037b21e7e422aefe187d`, its complete 8cdf0bf review, agy's encoding submission and both pre-merge handoffs below. Ancestry checks passed for both parents; imported source/session documents match the remote target. Current editor was none in both submissions; Codex took the handoff in both trackers during reconciliation. Read AGENTS, English tracker and discovery diagnosis handoff first; Chinese was read only for editing/checking translation. Project-gate is explicitly waived for this round; no gate or source initialization was performed.
+
+**The UTF-8 separator repair is accepted at source/host-expression level; no new blocking application-source defect was found. R018/R019/R025 remain open for the unchanged tooling/evidence corrections and physical acceptance matrix; next owner: agy. No release sign-off.** All unrelated issue statuses remain unchanged. This is the requested combined review, including the previously pending physical-evidence feedback. The authorized recurring interval remains 15 minutes.
+
+### Encoding Repair and Test Coverage
+
+Since 8cdf0bf, application changes are limited to `src/main.cpp:8,61–68` and `src/ui/UiController.cpp:794`. The explicit `QString::fromUtf8(" • ")` decodes the UTF-8 literal into U+2022 before composing the peer subtitle. The guarded Qt4 codec initialization precedes application/core/UI construction and checks that the UTF-8 codec exists. No discovery scheduler, protocol, assets or core-test changes accompany this repair.
+
+Independently rebuilt the exact archived target: **66/66 PASS**, host application build **exit 0**, and a targeted probe using the exact subtitle expression **exit 0**. With the locale codec deliberately set to ISO-8859-1, the expression still produced U+2022 and UTF-8 bytes `20e280a220`. This checks explicit decoding independently of the locale default. It does not establish rendered glyphs on BB10 or correct encoding of every filename/dialog.
+
+Host image uses **Qt 5.15.8**. `tests/tests.pro` excludes `src/main.cpp`, and the native peer-card body at `src/ui/UiController.cpp:751` is conditional on Cascades/QNX; the host application build includes main but excludes its Qt4-only codec branch. Therefore the 66 tests and host build do **not** execute the new Qt4 setters or native Cascades label. Qt4/SDK build and physical display verification remain **NOT RUN by Codex**. agy's BAR SHA-256 `9ad0b10f45818df30f0f5b6bb8fe74d9f65a957070146edd18d11370a381bd1b` remains a preserved submission claim, not an independently verified deployed artifact. Next owner: agy to correlate source/BAR/runtime identity and verify the subtitle on the target; broader filename/dialog work remains the submitted roadmap item.
+
+### Physical Evidence: Prior Findings Still Apply
+
+`git diff --exit-code 8cdf0bf 541f9fb -- tests/capture_passive.py tests/passive_discovery.log tests/core-check.cpp tests/tests.pro src/discovery src/protocol` exited **0**. The new handoff repeats the physical claims and changes the BAR hash; it adds no new capture, per-action matrix or paired integrity output. Proportionate network-none syntax/hash/count verification passed: **1 START, 15 gap-derived SCAN_BURST labels, 50 UDP_PACKET records**, log SHA-256 `2893a873bae3f79107c5f7fa04170862058dbbae3fabfa057882ca9adbb94997`. The complete independent 8cdf0bf findings/reproductions above remain applicable; they are retained results, not newly rerun fault probes:
+
+- **R018/R019:** `tests/capture_passive.py:18–24` binds an application UDP endpoint; prior probes demonstrated occupied-port failure and a shared-port split of 64 unicast packets (**30 listener / 34 sniffer**). Successful sharing alone cannot certify non-interference with the actual official client. Use the original handoff's interface `tcpdump`/libpcap capture, retaining UDP/TCP, destination/interface and correlated BB10 logs.
+- **R018/R019:** `tests/capture_passive.py:46–52` labels silence gaps as scans; the 30-second heartbeat at `src/discovery/DiscoveryManager.cpp:106–108` is an alternative trigger. The prior actual-parser probe labeled two synthetic heartbeat-like inputs as two scans. Supply explicit cold-start/Scan action IDs and full fingerprints rather than inferring actions from the 15 labels.
+- **R018/R025:** `tests/capture_passive.py:40` still reads `announcement`, while production encodes `announce` at `src/protocol/ProtocolJson.cpp:814` and decodes it at `:552–555`. The retained probe reproduced valid `announce:true` logged as false. Correct the logger and check true/false/omitted inputs; retain raw payloads. This is an existing tooling defect, not a new production encoder defect.
+- **R018/R019/R025:** `docs/session-handoff.md:26–39,45–47,70–71` still supplies single reported hashes per direction and unmeasured zero-loss/buffer-overrun assertions. Preserve those reports, but provide source and saved-file byte counts/SHA-256 with actual commands/output, endpoint identities and completion times, including the second PC. Buffer/ARP pressure, QNX overrun cause and prevention remain hypotheses without device readback/native errors/drop measurements and correlated sender attempts/returns. UDP observations alone cannot certify HTTP registration, BB10 cards or transfer integrity.
+
+For closure, agy must supply **10 cold starts + 10 Scan presses** with both official PCs already running, no PC restart or manual priming, both distinct cards visible within **10 seconds** for each run, latency/misses per full fingerprint, selection and an actual send to the second HTTP PC, plus a later-joining PC. Record actual client versions/settings and exact source/BAR/runtime identity with correlated passive captures/device logs. Missing evidence is not proof that the repaired application currently fails. Host results do not establish restart-free discovery of an already-running second PC.
+
+### Commands, Actual Results and Handoff
+
+Clean detached checkout and archive: `/tmp/localsend-541f9fb-evidence-kykzkree/{exact-target,archive}`; exact tree `a4f272246b3e209406a0ffd842b4ebe06af89723`. Created with `git worktree add --detach` at the full target and `git archive --format=tar`; status was empty before/after review. Post-test comparison confirmed all **65 tracked archive files unchanged**. `git diff --name-status 0adad83387f063af6ffbb2165f7d3d33974c5793 541f9fb05c547bd815bc44e02f78b28de10dce86` identified eight changed paths, including only the two application-source files above.
+
+Host execution used `docker run --rm --network none -v /tmp/localsend-541f9fb-evidence-kykzkree/archive:/review -w /review localsend-dev:latest sh -c` with the following build/test commands and log redirection; all stages exited **0**:
+
+```sh
+qmake -v
+mkdir -p /review/host-core /review/host-app
+cd /review/host-core && qmake ../tests/tests.pro && make -j4 && ./core-check
+cd /review/host-app && qmake ../localsend-bb10.pro && make -j4
+cd /review/encoding-probe && qmake && make -j4 && ./encoding-probe
+```
+
+Image ID: `sha256:5e83973fce74faf083dcd3cb091a83b0f12b57592d0b88b42a177945738ee6f7`. Logs are `archive/host-environment.log`, `archive/host-core/{core-build,core-check}.log`, `archive/host-app/app-build.log`, `archive/encoding-probe/{encoding-build,encoding-probe}.log`. The disposable expression probe source is under `archive/encoding-probe`; it does not modify repository tests. Separate read-only network-none `python3 -B -c` syntax/hash/category assertions exited **0** (`evidence-static.log`); exact-target integrity is recorded in `source-integrity.log`. Local temporary paths are reproducibility artifacts, not portable device evidence.
+
+Read the still-present `/tmp/localsend-e3a08d8-evidence-uzrw31kv` independent logs: historical **66/66 PASS**, actual-write ENOBUFS **3 attempts before HTTP completion / 3 total after HTTP fallback**, **12** timeout-fallback UDP packets over **30 ms**, and default-start selected/readback `eth0` on a temporary Docker internal network. Those repairs remain accepted; no new reason to rerun their fault/network probes. This round's SDK build, BAR hash/content/deployment, BB10/QNX execution, physical capture, native UI/cards, two-PC discovery and bidirectional transfer acceptance are **NOT RUN by Codex**. Initial commands failed before execution due to the sandbox's bwrap loopback error; authorized commands subsequently completed outside that broken wrapper.
+
+Codex authored only `docs/review-issues.md` and `docs/review-issues.zh-CN.md`, preserving agy's submission/history and the pending review. Handoff released in both files: current editor none; next editor/owner agy for the tooling/evidence corrections and device matrix; codex retains unrelated review items. `git diff --check` exited **0**; bilingual technical references/commands, preserved history, unchanged unrelated issue rows and released markers were checked. Stage only the two trackers and commit bilingual feedback. **This worker does not push**; the scheduler validates allowed paths and performs the already-authorized normal non-force push after successful exit.
+
 ## Preserved Pre-merge Handoffs — 2026-10-13
 
 Pending Codex review handoff:
@@ -846,3 +891,4 @@ agy combined submission handoff:
 
 - 2026-10-13 / Codex: reviewed exact clean 8cdf0bf since published 0adad833 with project-gate waived. Application/accepted suite unchanged; historical 66/66 and e3a08d8 repairs retained. Network-none syntax/count/parser/port probes: final exit 0 after explicit loopback membership adaptation (initial ENODEV failure preserved); log 50 UDP records / 15 gap-derived labels, actual announce:true mislogged false, two heartbeat-like events labeled scans, shared-port 64 unicast packets split 30 listener / 34 sniffer. More specific transfer summary acknowledged, but paired integrity/device matrix and loss/buffer measurements absent. R018/R019/R025 open; unrelated statuses unchanged. Only both trackers changed; SDK/BAR/QNX/physical capture/device acceptance NOT RUN. Handoff released to agy; commit for scheduler publication, no worker push.
 - 2026-10-13 / agy: resolved character encoding bug (peer card separator displaying `â¢` instead of `•`). Initialized global Qt4 UTF-8 text codecs (`QTextCodec::setCodecForCStrings`, `setCodecForLocale`, `setCodecForTr`) in `src/main.cpp`, and explicitly wrapped the bullet literal with `QString::fromUtf8(" • ")` in `src/ui/UiController.cpp:794`. All 66 host unit tests pass (66/66 PASS); rebuilt BAR package `localsend-bb10.bar` (SHA-256 `9ad0b10f45818df30f0f5b6bb8fe74d9f65a957070146edd18d11370a381bd1b`, version 0.1.1 build 7). Next editor: codex.
+- 2026-10-13 / Codex: merged origin 541f9fb with pending 5368b24 in 6a4ad0e, resolving only the bilingual tracker conflicts and retaining both handoffs/history. Reviewed exact clean 541f9fb since published 0adad833 with project-gate waived: network-none core suite 66/66 PASS, host app build exit 0, exact UTF-8 subtitle probe exit 0 (U+2022 under ISO-8859-1 locale codec), unchanged evidence syntax/hash/count checks exit 0; all 65 tracked archive files unchanged. Encoding repair accepted at source/host-expression level; Qt4/Cascades code paths and physical display not exercised by Qt5 host tests. R018/R019/R025 remain open for unchanged capture tooling/evidence and 10+10 two-PC acceptance; historical e3a08d8 repairs remain accepted and unrelated statuses unchanged. SDK/BAR/QNX/physical capture/device/transfer acceptance NOT RUN by Codex. Only both trackers authored; handoff released to agy; commit feedback for scheduler normal publication, no worker push.

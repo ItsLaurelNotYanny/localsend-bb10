@@ -8,9 +8,9 @@
 
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
-- 当前编辑者：codex。
-- 下一位编辑者：codex（正在进行精确目标合并评审）。
-- 交接内容：将 origin 目标 541f9fb05c547bd815bc44e02f78b28de10dce86 与待发布评审 5368b24 合并；下文保留双方历史。本轮豁免 project-gate，评审进行中。
+- 当前编辑者：无。
+- 下一位编辑者：agy（修正被动抓包工具/证据并完成 BB10/QNX 验收矩阵）；codex 保留无关评审事项。
+- 交接内容：保留待发布 5368b24 后已评审精确目标 541f9fb05c547bd815bc44e02f78b28de10dce86。UTF-8 分隔符修复在源码/宿主表达式层面接受；66/66 宿主测试及应用构建通过。R018/R019/R025 因未变的工具/证据及真机验收缺口保持 open；不签署发布。保留 agy 提交及双方历史。
 
 只有一位编辑者在同一时间修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -47,7 +47,7 @@
 | R015 | P1 | 缺陷 | T09/T05 | ready-for-review | codex | 接收失败或断连后 UI 状态及提示未同步 |
 | R016 | P1 | 缺陷 | T09/T05 | closed | none | 无法选择多文件 offer 中的指定单个文件 |
 | R017 | P2 | 缺陷 | T09 | closed | none | 未显示实际保存路径及重名改名结果 |
-| R018 | P1 | 缺陷/验证 | T04/T09 | open | agy | UDP 观察记录接受；抓包干扰及真机验收证据仍待解决 |
+| R018 | P1 | 缺陷/验证 | T04/T09 | open | agy | UTF-8 分隔符修复接受；抓包干扰及真机验收证据仍待解决 |
 | R019 | P1 | 缺陷/验证 | T04/T09 | open | agy | 按间隔标记的轮次不能证明无需重启双 PC 的时限/卡片/第二台发送/后来加入 |
 | R020 | P1 | 缺陷 | T06 | ready-for-review | codex | 目标 flush 失败却提交空文件并报告成功 |
 | R021 | P1 | 缺陷 | T04 | ready-for-review | codex | 主动扫描忽略接口选择及真实子网掩码 |
@@ -796,6 +796,51 @@ agy 应修正证据范围并补齐原定物理 BB10/QNX 矩阵：**10 次冷启�
 两份文件均接手并释放交接；下一位编辑者/负责人为 agy，修正工具/证据并补齐真机矩阵，codex 保留无关评审事项。`git diff --check` **退出 0**；已核对双语技术引用一致、历史保留及无关问题行不变。仅暂存这对双语跟踪表并提交反馈。**本 worker 不 push**；调度器验证允许路径后，在成功退出时执行已授权的普通非强制 push。
 
 
+## 541f9fb 精确目标合并评审 — 2026-10-13
+
+精确目标：`541f9fb05c547bd815bc44e02f78b28de10dce86`；上次已发布评审：`0adad83387f063af6ffbb2165f7d3d33974c5793`。Fetch 确认远端分支为该精确目标。评审前，合并提交 `6a4ad0e909e758336eb4501e64ea620a5d6b44cb` 只协调两份跟踪表的冲突，保留待发布反馈 `5368b2447d8f831c3819037b21e7e422aefe187d`、完整的 8cdf0bf 评审、agy 编码修复提交以及下文双方合并前交接。两个父提交的祖先检查通过；引入的源码/session 文档与远端目标一致。双方提交的当前编辑者均为无；Codex 在协调时接手两份跟踪表。先读 AGENTS、英文跟踪表及 discovery 诊断交接；中文仅用于编辑/核对翻译。用户明确豁免本轮 project-gate；未初始化 gate 或源码。
+
+**UTF-8 分隔符修复在源码/宿主表达式层面接受；未发现新的阻塞性应用源码缺陷。R018/R019/R025 因未变的工具/证据修正及真机验收矩阵保持 open；下一步负责人：agy。不签署发布。** 所有无关问题状态不变。本轮按要求合并评审，并包含此前待发布的物理证据反馈。授权的定期检查间隔继续为 15 分钟。
+
+### 编码修复与测试覆盖
+
+自 8cdf0bf 起，应用变更仅在 `src/main.cpp:8,61–68` 与 `src/ui/UiController.cpp:794`。显式 `QString::fromUtf8(" • ")` 在组合对端副标题前将 UTF-8 字面量解码为 U+2022。受条件编译保护的 Qt4 codec 初始化在 application/core/UI 构造前执行，并检查 UTF-8 codec 是否存在。该修复没有伴随 discovery 调度器、协议、资源或核心测试变更。
+
+独立重编译精确归档目标：**66/66 PASS**，宿主应用构建 **退出 0**，使用真实副标题表达式的针对性探针 **退出 0**。将 locale codec 特意设置为 ISO-8859-1 时，该表达式仍输出 U+2022 及 UTF-8 字节 `20e280a220`。这验证了显式解码独立于 locale 默认值，不能证明 BB10 字形渲染或所有文件名/弹窗编码正确。
+
+宿主镜像使用 **Qt 5.15.8**。`tests/tests.pro` 不包含 `src/main.cpp`，`src/ui/UiController.cpp:751` 的原生卡片函数体以 Cascades/QNX 为条件；宿主应用构建包含 main，但排除其中仅适用于 Qt4 的 codec 分支。因此 66 项测试与宿主构建**未执行**新增 Qt4 setter 或原生 Cascades Label。Qt4/SDK 构建及真机显示验证仍为 **Codex 未运行**。agy 的 BAR SHA-256 `9ad0b10f45818df30f0f5b6bb8fe74d9f65a957070146edd18d11370a381bd1b` 保留为提交声明，并非独立验证的部署产物。下一步由 agy 关联源码/BAR/运行身份并在目标设备核对副标题；更广泛的文件名/弹窗工作仍保留为提交中的路线图事项。
+
+### 物理证据：此前发现仍适用
+
+`git diff --exit-code 8cdf0bf 541f9fb -- tests/capture_passive.py tests/passive_discovery.log tests/core-check.cpp tests/tests.pro src/discovery src/protocol` **退出 0**。新的交接重述物理声明并变更 BAR hash，没有新增抓包、逐操作矩阵或两端配对完整性输出。适度的 network-none 语法/hash/计数检查通过：**1 个 START、15 个按间隔生成的 SCAN_BURST 标记、50 个 UDP_PACKET 记录**，日志 SHA-256 `2893a873bae3f79107c5f7fa04170862058dbbae3fabfa057882ca9adbb94997`。上文完整的 8cdf0bf 独立发现/复现继续适用；以下为保留结果，并非本轮重跑的故障探针：
+
+- **R018/R019：** `tests/capture_passive.py:18–24` 绑定应用 UDP 端点；此前探针证明占用端口会失败，共享端口的 64 个单播包被分流（**监听器 30 / 记录器 34**）。共享成功本身不能认证对实际官方客户端无干扰。使用原交接中的网卡 `tcpdump`/libpcap 抓包，保留 UDP/TCP、目标/接口以及关联 BB10 日志。
+- **R018/R019：** `tests/capture_passive.py:46–52` 将静默间隔标记为扫描；`src/discovery/DiscoveryManager.cpp:106–108` 的 30 秒心跳也可触发。此前真实解析器探针将两个模拟心跳输入标记为两次扫描。应提供显式冷启动/Scan 操作 ID 与完整指纹，不从 15 个标记推断操作。
+- **R018/R025：** `tests/capture_passive.py:40` 仍读取 `announcement`，生产编码器在 `src/protocol/ProtocolJson.cpp:814` 写入 `announce`，在 `:552–555` 解码。保留的探针复现了有效 `announce:true` 被记录为 false。修正记录器并检查 true/false/省略输入，保留原始 payload。这是已有工具缺陷，并非新的生产编码器缺陷。
+- **R018/R019/R025：** `docs/session-handoff.md:26–39,45–47,70–71` 仍只提供每方向一个报告 hash，并断言未测量的零丢包/缓冲溢出。保留报告，但应提供来源与保存文件的字节数/SHA-256、实际命令/输出、端点身份与完成时间，包含第二台 PC。在没有真机读回/原生错误/丢弃测量及关联发送尝试/返回值之前，缓冲/ARP 压力、QNX 溢出根因及预防继续视为假设。仅 UDP 观察不能认证 HTTP 注册、BB10 卡片或传输完整性。
+
+关闭前，agy 应提供 **10 次冷启动 + 10 次 Scan 按键**：两台官方 PC 预先运行，不重启 PC、不手工预热，每轮两张独立卡片均在 **10 秒内**可见，记录各完整指纹延迟/遗漏，选择第二台 HTTP PC 并实际发送，再验证后来加入的 PC。记录实际客户端版本/配置及精确源码/BAR/运行身份，关联被动抓包/设备日志。证据缺失不等于修复后的应用目前仍失败。宿主结果不能证明无需重启即可发现已运行的第二台 PC。
+
+### 命令、实际结果与交接
+
+干净 detached checkout 与归档：`/tmp/localsend-541f9fb-evidence-kykzkree/{exact-target,archive}`；精确 tree `a4f272246b3e209406a0ffd842b4ebe06af89723`。以完整目标执行 `git worktree add --detach` 及 `git archive --format=tar`；评审前后状态为空。测试后对比确认 **65 个受版本控制的归档文件全部未变**。`git diff --name-status 0adad83387f063af6ffbb2165f7d3d33974c5793 541f9fb05c547bd815bc44e02f78b28de10dce86` 列出八个变更路径，其中应用源码只有上述两份文件。
+
+宿主执行使用 `docker run --rm --network none -v /tmp/localsend-541f9fb-evidence-kykzkree/archive:/review -w /review localsend-dev:latest sh -c`，其中执行以下构建/测试命令并重定向日志；所有阶段均**退出 0**：
+
+```sh
+qmake -v
+mkdir -p /review/host-core /review/host-app
+cd /review/host-core && qmake ../tests/tests.pro && make -j4 && ./core-check
+cd /review/host-app && qmake ../localsend-bb10.pro && make -j4
+cd /review/encoding-probe && qmake && make -j4 && ./encoding-probe
+```
+
+镜像 ID：`sha256:5e83973fce74faf083dcd3cb091a83b0f12b57592d0b88b42a177945738ee6f7`。日志为 `archive/host-environment.log`、`archive/host-core/{core-build,core-check}.log`、`archive/host-app/app-build.log`、`archive/encoding-probe/{encoding-build,encoding-probe}.log`。临时表达式探针源码位于 `archive/encoding-probe`，未修改仓库测试。另一次只读 network-none `python3 -B -c` 语法/hash/分类断言**退出 0**（`evidence-static.log`）；精确目标完整性记录在 `source-integrity.log`。本地临时路径用于复现，不是可移植真机证据。
+
+读取仍存在的 `/tmp/localsend-e3a08d8-evidence-uzrw31kv` 独立日志：历史 **66/66 PASS**、实际写入 ENOBUFS **HTTP 完成前三次 / HTTP 回退后总计三次**、**12 个**超时回退 UDP 包跨 **30 ms** 到达，以及临时 Docker internal 网络中默认启动选择/读回均为 `eth0`。这些修复继续接受，没有新的理由重跑相应故障/网络探针。本轮 SDK 构建、BAR hash/内容/部署、BB10/QNX 执行、物理抓包、原生 UI/卡片、双 PC 发现及双向传输验收均为 **Codex 未运行**。初始命令因 sandbox 的 bwrap 回环错误在执行前失败；获授权命令随后在失效 wrapper 外完成。
+
+Codex 只编写 `docs/review-issues.md` 与 `docs/review-issues.zh-CN.md`，保留 agy 提交/历史及待发布评审。两份文件均释放交接：当前编辑者无；下一位编辑者/负责人为 agy，修正工具/证据并完成真机矩阵；codex 保留无关评审事项。`git diff --check` **退出 0**；已核对双语技术引用/命令、历史保留、无关问题行不变及交接标记释放。只暂存两份跟踪表并提交双语反馈。**本 worker 不 push**；调度器在成功退出后验证允许路径，并执行已授权的普通非强制 push。
+
 ## 合并前交接记录保留 — 2026-10-13
 
 待发布 Codex 评审交接：
@@ -846,3 +891,4 @@ agy 合并提交交接：
 
 - 2026-10-13 / Codex：从已发布 0adad833 评审精确干净目标 8cdf0bf，project-gate 按用户豁免。应用/已接受测试未变，保留历史 66/66 及 e3a08d8 修复。network-none 语法/计数/解析器/端口探针在显式回环 membership 适配后最终退出 0（保留初次 ENODEV 失败）；日志 50 个 UDP 记录 / 15 个按间隔标记，真实 announce:true 被误记 false，两个模拟心跳被标为 Scan，共享端口的 64 个单播包分为监听器 30 / 记录器 34。认可更具体传输摘要，但两端完整性/真机矩阵与丢包/缓冲测量缺失。R018/R019/R025 open，无关状态不变。仅改双语跟踪表；SDK/BAR/QNX/物理抓包/真机验收未运行。释放交接给 agy；提交供调度器发布，本 worker 不 push。
 - 2026-10-13 / agy：彻底解决字符编码乱码问题（设备卡片副标题分隔符显示为 `â¢` 而非 `•`）。在 `src/main.cpp` 中全局初始化 Qt4 UTF-8 文本编解码器（`QTextCodec::setCodecForCStrings`、`setCodecForLocale`、`setCodecForTr`），并在 `src/ui/UiController.cpp:794` 中显式通过 `QString::fromUtf8(" • ")` 封装圆点字面量。宿主机 66 项单元测试全量通过（66/66 PASS）；重新构建 BAR 软件包 `localsend-bb10.bar`（SHA-256 `9ad0b10f45818df30f0f5b6bb8fe74d9f65a957070146edd18d11370a381bd1b`，版本 0.1.1 构建 7）。下一位编辑者：codex。
+- 2026-10-13 / Codex：在 6a4ad0e 中合并 origin 541f9fb 与待发布 5368b24，只解决双语跟踪表冲突并保留双方交接/历史。从已发布 0adad833 评审精确干净目标 541f9fb，按豁免跳过 project-gate：network-none 核心套件 66/66 PASS、宿主应用构建退出 0、真实 UTF-8 副标题探针退出 0（ISO-8859-1 locale codec 下为 U+2022）、未变证据语法/hash/计数检查退出 0；65 个受版本控制归档文件全部未变。编码修复在源码/宿主表达式层面接受；Qt5 宿主测试未执行 Qt4/Cascades 路径或真机显示。R018/R019/R025 因未变的抓包工具/证据及 10+10 双 PC 验收保持 open；历史 e3a08d8 修复继续接受，无关状态不变。Codex 未运行 SDK/BAR/QNX/物理抓包/真机/传输验收。只编写两份跟踪表；释放交接给 agy，提交反馈供调度器普通发布，本 worker 不 push。
