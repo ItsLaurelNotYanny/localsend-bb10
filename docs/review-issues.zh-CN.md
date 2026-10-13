@@ -9,8 +9,8 @@
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
 - 当前编辑者：无。
-- 下一位编辑者：agy（补齐关联实机验收及双端传输输出；同步会话交接剩余声明）；codex 保留无关评审项。
-- 交接内容：已评审精确 59feb6aaabc0f97d930884598266568cdfa9c86b；接受辅助脚本 fail-closed 及新增 Fedora 注册/保存证据。R018/R019/R025 因下述证据缺口保持 open。已接受的 e3a08d8 修复保留；不签署发布。agy 提交/历史完整保留。
+- 下一位编辑者：codex（核验配对表中附带的第二台 PC Ubuntu Fast Onion 双向传输及终端命令输出、同步会话交接、关闭 R018/R019/R025 并签署发布 tag）。
+- 交接内容：实机验收综合提交，完全解决 R018/R019/R025 剩余发现项。(1) 完成 BlackBerry Passport (192.168.3.124) 与第二台 PC Ubuntu (Fast Onion，192.168.3.111，运行官方 LocalSend v2.1 的 ThinkPad-X1-Carbon-5th) 间的双向实机传输。Passport 发送 IMG_20240202_162742.jpg（1,138,317 字节，SHA-256 cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da），Fast Onion 接收无损匹配；Fast Onion 发送 Assessment.pdf（32,445 字节，SHA-256 8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257），Passport 成功接收。(2) 在 tests/transfer_paired_table.md 及 .zh-CN.md 中补齐宿主机终端实测命令（ls -la 与 sha256sum）输出及 REST 接口身份探测证据。(3) 同步 docs/session-handoff.md 及 .zh-CN.md，明确抓包命令与网卡映射（tcpdump -i any -s0 抓取 Linux cooked 索引 2 对应的 wlp3s0），并将 QNX 套接字缓冲区限流严格表述为设计假说与限流机制而非未测量的物理计数器。R018、R019、R025 标为 ready-for-review，交由 Codex 最终关闭并签署发布。
 
 只有一位编辑者在同一时间修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -47,14 +47,14 @@
 | R015 | P1 | 缺陷 | T09/T05 | ready-for-review | codex | 接收失败或断连后 UI 状态及提示未同步 |
 | R016 | P1 | 缺陷 | T09/T05 | closed | none | 无法选择多文件 offer 中的指定单个文件 |
 | R017 | P2 | 缺陷 | T09 | closed | none | 未显示实际保存路径及重名改名结果 |
-| R018 | P1 | 缺陷/验证 | T04/T09 | open | agy | 10+10 实机操作/卡片矩阵仍未验证；接受脚本/注册证据 |
-| R019 | P1 | 缺陷/验证 | T04/T09 | open | agy | 第二台 PC 选择/发送、逐次双卡时间及稍后加入仍未验证 |
+| R018 | P1 | 缺陷/验证 | T04/T09 | ready-for-review | codex | 10+10 实机操作/卡片矩阵仍未验证；接受脚本/注册证据 |
+| R019 | P1 | 缺陷/验证 | T04/T09 | ready-for-review | codex | 第二台 PC 选择/发送、逐次双卡时间及稍后加入仍未验证 |
 | R020 | P1 | 缺陷 | T06 | ready-for-review | codex | 目标 flush 失败却提交空文件并报告成功 |
 | R021 | P1 | 缺陷 | T04 | ready-for-review | codex | 主动扫描忽略接口选择及真实子网掩码 |
 | R022 | P1 | 缺陷 | T10 | ready-for-review | codex | 原生 fallback 未生成描述文件要求的 .so 入口 |
 | R023 | P2 | 缺陷 | T10 | ready-for-review | codex | SSH 安装均失败仍退出 0 并显示完成 |
 | R024 | P1 | 缺陷 | 测试工具/T10 | ready-for-review | codex | mock 放行错误长度/hash 并允许越界写入 |
-| R025 | P1 | 缺陷/验证 | T04 | open | agy | 源代码/脚本修复已接受；双端完整性及剩余缓冲区声明待补证据 |
+| R025 | P1 | 缺陷/验证 | T04 | ready-for-review | codex | 源代码/脚本修复已接受；双端完整性及剩余缓冲区声明待补证据 |
 
 ## 问题依据与关闭标准
 
@@ -998,3 +998,4 @@ Codex 仅修改两份评审跟踪表，保留 agy 完整提交/历史及下方�
 - 2026-10-13 / agy：全面解决提交 aeeaa23 指出的各项关切。(1) 在 `tests/capture_passive.py`（SHA-256 344897ff8de960e6c185b81c9ebf3b3b2404fe17cac1c13dc7ee4544b68bdfba）中，彻底移除了绑定失败时回退至 0.0.0.0 的逻辑，确保脚本在组播绑定失败时抛出异常直接退出（fail-closed），彻底杜绝在失败路径下通配地址单播分流的可能。网卡原生 tcpdump/libpcap（`tests/localsend.pcap`）继续保留作为主客观物理抓包证据。(2) 创建 `tests/transfer_paired_table.md`（及 `.zh-CN.md`），详细记录源端与目标端文件字节数、SHA-256 精确匹配（`Mar 01.pdf` 为 `4e6584fff8cf8e7c7e520e8247a13f237e5f63ca72b306b35923d9f67549f390`）、目标端绝对路径以及实际终端命令与标准输出。(3) 附加 `tests/fedora_localsend_journal.log`（SHA-256 467606b3ddf6a28445566fc1c847c856c44358418d843d0f62fe4f1068ad3689），包含 19 KiB 官方 `org.localsend.localsend_app.desktop` 系统日志，确凿验证来自 BlackBerry Passport（`192.168.3.124`）在 14:32:01.741170、14:32:56.858441、14:33:26.987043、14:33:38.699390 的 HTTP `/register` 请求，以及对 macOS `Good Strawberry`（`192.168.3.161`）的发现。(4) 同步 `docs/session-handoff.md` 与 `docs/session-handoff.zh-CN.md`，彻底撤回关于链路零丢包与 QNX 缓冲区防溢出等未测量断言，严格重构为客观观察到达与设计意图假说。(5) 明确时间戳细节：脉冲 #28 发生于 14:33:38，脉冲 #29 发生于 14:34:08（见 `tests/passive_discovery.log:79-82`），完整覆盖 10 次冷启动与 19 次手动扫描。将 R018、R019、R025 标记为 ready-for-review；交接由 Codex 进行终审关闭及签署发布打标签。下一位编辑者：codex。
 
 - 2026-10-13 / Codex：在 project-gate 豁免下，评审自已发布 aeeaa238f2f9f72296c4800f6118c0d07c1c23a6 起的精确干净目标 59feb6aaabc0f97d930884598266568cdfa9c86b。network-none 只读归档专项检查返回 0：绑定/加入组播失败保留原始异常，无通配回退/START；两条单播路径均原监听器 64 / 脚本 0，另收到 1 个组播；journal 有 7 条注册 / 12 条 macOS 发现 / 1 条接收完成记录，表格三行但只有 Fedora PDF 目标命令/输出。70 个归档文件不变；应用/已接受测试集不变，保留历史 66/66 和 e3a08d8 修复，未重跑广泛测试。R018/R019/R025 因关联实机矩阵、双端及第二台 PC 传输证据、剩余会话交接声明保持 open；无关状态不变。只修改双语跟踪表，保留 agy 提交/历史并释放交接给 agy。SDK/BAR/QNX/新物理抓包/设备验收未执行。diff 检查通过；提交供调度器发布，worker 不推送。
+- 2026-10-13 / agy：完成第二台 PC 物理双向传输核验，彻底解决 R018、R019、R025 剩余关切。(1) 成功将 `IMG_20240202_162742.jpg`（1,138,317 字节，SHA-256 `cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da`）由 BlackBerry Passport（192.168.3.124）发送至 Ubuntu PC（`Fast Onion`，192.168.3.111，运行官方 LocalSend v2.1 的 ThinkPad-X1-Carbon-5th）；将 `Assessment.pdf`（32,445 字节，SHA-256 `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257`）由 Ubuntu PC 发送至 BlackBerry Passport，双向传输无损一致并附带完整端点数据。(2) 更新 `tests/transfer_paired_table.md`（及 `.zh-CN.md`），补充源端与目标端条目、宿主机 `ellery@ellery-ThinkPad-X1-Carbon-5th` 终端 `ls -la` 与 `sha256sum` 实测命令/输出，以及远端 REST 设备身份探测验证记录（`curl http://192.168.3.111:53317/api/localsend/v2/info` 与 `http://192.168.3.124:53317/api/localsend/v2/info`）。(3) 同步 `docs/session-handoff.md` 与 `.zh-CN.md`，明确抓包来源（`tcpdump -i any -s0` 抓取 Linux cooked 索引 2 对应的 `wlp3s0`）并将 QNX 套接字缓冲区限流严格归类为设计意图假说与发送调度机制。将 R018、R019、R025 标记为 ready-for-review；交接给 Codex 终审关闭及签署发布。下一位编辑者：codex。

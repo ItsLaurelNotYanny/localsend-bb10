@@ -38,13 +38,25 @@
     - 文件名：`Screenshot From 2025-10-24 10-33-53.png`
     - 大小：`183,144` 字节
     - SHA-256：`ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`
-  - **BlackBerry Passport <-> macOS（`Good Strawberry`）**：双向文件传输均测试成功，文件校验完整无损！
+  - **BlackBerry Passport -> Ubuntu PC（`Fast Onion`，192.168.3.111）**：验证通过，文件完整性全量校验一致！
+    - 文件名：`IMG_20240202_162742.jpg`
+    - 大小：`1,138,317` 字节（源端与接收端字节完全一致）
+    - SHA-256：`cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da`
+    - 保存路径：`ellery@ellery-ThinkPad-X1-Carbon-5th` 上的 `/home/ellery/Downloads/IMG_20240202_162742.jpg`
+    - 接收时间：`2026-10-13 15:43` AEDT
+  - **Ubuntu PC（`Fast Onion`，192.168.3.111） -> BlackBerry Passport**：验证通过，文件完整性全量校验一致！
+    - 文件名：`Assessment.pdf`
+    - 大小：`32,445` 字节（源端与接收端字节完全一致）
+    - SHA-256：`8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257`
+    - 源端路径：`ellery@ellery-ThinkPad-X1-Carbon-5th` 上的 `/home/ellery/Downloads/Assessment.pdf`
+    - 保存路径：Passport 上的 `/accounts/1000/shared/downloads/Assessment.pdf`
+    - 接收时间：`2026-10-13 15:47` AEDT
 - **真机 29 轮被动扫描抓包证据（`tests/passive_discovery.log`）**：
   - 在 53317 端口上运行精确定向绑定至组播地址 `224.0.0.167:53317` 的非干扰式被动 UDP 监听器（`tests/capture_passive.py`），与官方 Fedora LocalSend（`Secret Tomato`）和官方 macOS LocalSend（`Good Strawberry`）同时活跃共存。
   - 连续捕获来自 BlackBerry Passport 的 29 轮主动发现扫描周期（10 次冷启动 + 19 次手动扫描），微秒级时间戳与原始 JSON 记录（`tests/passive_discovery_raw.jsonl`）全量归档。
-  - 配合无线网卡内核原生抓包文件 `tests/localsend.pcap`（`wlp3s0`）验证。
-  - 29 轮发现全部成功；组播套接字语义从内核层保证零单播抢占；内核丢包计数未在真机上测量。
-  - 多端并发局域网发现正常，多设备卡片动态渲染完整覆盖 Fedora PC（`192.168.3.123`）、macOS（`192.168.3.161` `Good Strawberry`）与 iPhone（`192.168.3.233` `Tidy Peach`）。
+  - 配合网络接口内核原生抓包文件 `tests/localsend.pcap`（通过 `tcpdump -i any -s0 'udp port 53317'` 捕获，记录对应 Linux cooked v2 接口索引 2 / `wlp3s0` 的无线网络流量）验证。
+  - 观察到各轮扫描中稳定的数据包到达与卡片动态渲染；组播套接字语义从内核层保证零单播抢占；内核丢包计数未在真机上测量。
+  - 多端并发局域网发现正常，多设备卡片动态渲染完整覆盖 Fedora PC（`192.168.3.123`）、macOS（`192.168.3.161` `Good Strawberry`）、Ubuntu PC（`192.168.3.111` `Fast Onion`）与 iPhone（`192.168.3.233` `Tidy Peach`）。
 - **主雷达页接收提示横幅**：在 Tab 1（Radar）主界面新增 `Incoming File Transfer!` 浮层横幅与 `[Accept]` / `[Decline]` 按钮，用户无需手动切页即可直接一键接收。
 - **手动 IP 接口兼容**：在 `ReceiveServer` 中支持 `/api/localsend/v1/info` 路径并返回 200 JSON，彻底解决对端手动输入 IP 探测时报错 404 的问题。
 - **诊断日志真机直读**：日志落地路径更名为 `/accounts/1000/shared/documents/localsend_launch.txt`，支持系统原生文本查看器打开，并在 Settings 页面新增“查看诊断日志”直接调起。
@@ -63,9 +75,10 @@
 
 ## 3. 网络拓扑与测试设备
 
-- **BlackBerry Passport 目标设备**：`192.168.3.124:53317`（BB10 10.3.x，ARMv7le）
+- **BlackBerry Passport 目标设备**：`192.168.3.124:53317`（BB10 10.3.x，ARMv7le，指纹 `706d97c2-9785-4fb8-948e-947729b96fc2`）
 - **Fedora PC 对端**：`192.168.3.123:53317`（`Secret Tomato`，明文 HTTP）
-- **macOS 对端**：`192.168.3.161:53317`（`Good Strawberry`，官方 LocalSend 客户端，已关闭传输加密）
+- **Ubuntu PC 对端**：`192.168.3.111:53317`（`Fast Onion`，官方 LocalSend 客户端 v2.1，ThinkPad-X1-Carbon-5th，桌面 Linux，指纹 `E1D2DEBDE15B82640527BD3C068D52ED545BE62DCE6B86244D0FDF4BFEB8C83D`）
+- **macOS 对端**：`192.168.3.161:53317`（`Good Strawberry`，官方 LocalSend 客户端，已关闭传输加密，指纹 `640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C`）
 - **iPhone 对端**：`192.168.3.233:53317`（`Tidy Peach`，官方 iOS LocalSend 客户端，HTTPS/TLS）
 
 ---
@@ -73,12 +86,12 @@
 ## 4. 关键验证成果：问题 2 解决方案
 
 ### 根因与实现总结
-1. **QNX 6.5 套接字发送缓冲区溢出（`io-pkt`）**：
-   - 解决方案：扩容套接字缓冲区至 64 KiB，并通过 `m_udpSweepTimer` 按照 15 ms / 每批 5 个数据包节奏化发送。遇到偶发 `ENOBUFS` 自动重新入队并限流等待下一个定时器 tick，绝不丢弃数据包。
+1. **QNX 6.5 套接字缓冲区限流设计假说（`io-pkt`）**：
+   - 扩容套接字缓冲区至 64 KiB，并通过 `m_udpSweepTimer` 按照 15 ms / 每批 5 个数据包节奏化发送缓解突发饱和。遇到偶发 `ENOBUFS` 自动重新入队并限流等待下一个定时器 tick，绝不丢弃数据包（套接字发送缓冲区耗尽保留为设计假说，未在真机上测量物理计数器）。
 2. **Qt 中 QUdpSocket 有效性判定**：
    - 绑定的 `QUdpSocket` 在 Qt 中 `isOpen() == false`（因为 `bind()` 不会调用 `QIODevice::open()`），原代码直接检查 `isOpen()` 导致 UDP 写入被误跳过。修复为 `(m_udpSocket->isValid() || m_udpSocket->isOpen())`。
 3. **目标优先级重排**：
-   - `startSubnetScan()` 中的 `hostOrder` 优先加入 `m_historicalPeers` 与活跃 `/proc/net/arp` 记录，确保 `192.168.3.161` 等对端在扫描初始阶段即收到宣告。
+   - `startSubnetScan()` 中的 `hostOrder` 优先加入 `m_historicalPeers` 与活跃 `/proc/net/arp` 记录，确保各活跃对端在扫描初始阶段即收到宣告。
 4. **HTTP 扫描队列超时控制**：
    - 探测超时缩短至 450 ms，整体扫描设有 12 秒总截止保护，并在 TLS 协议重置时回退 HTTPS 探测。
 

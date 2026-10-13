@@ -38,13 +38,25 @@ Tested and verified on a physical **BlackBerry Passport** running BB10 OS 10.3.x
     - Filename: `Screenshot From 2025-10-24 10-33-53.png`
     - Size: `183,144` bytes
     - SHA-256: `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`
-  - **BlackBerry Passport <-> macOS (`Good Strawberry`)**: Bidirectional file transfer verified completed in both directions with full file integrity!
+  - **BlackBerry Passport -> Ubuntu PC (`Fast Onion`, 192.168.3.111)**: Verified with full file integrity!
+    - Filename: `IMG_20240202_162742.jpg`
+    - Size: `1,138,317` bytes (Source and Destination match exactly)
+    - SHA-256: `cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da`
+    - Destination Path: `/home/ellery/Downloads/IMG_20240202_162742.jpg` on `ellery@ellery-ThinkPad-X1-Carbon-5th`
+    - Timestamp: `2026-10-13 15:43` AEDT
+  - **Ubuntu PC (`Fast Onion`, 192.168.3.111) -> BlackBerry Passport**: Verified with full file integrity!
+    - Filename: `Assessment.pdf`
+    - Size: `32,445` bytes (Source and Destination match exactly)
+    - SHA-256: `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257`
+    - Source Path: `/home/ellery/Downloads/Assessment.pdf` on `ellery@ellery-ThinkPad-X1-Carbon-5th`
+    - Destination Path: Passport `/accounts/1000/shared/downloads/Assessment.pdf`
+    - Timestamp: `2026-10-13 15:47` AEDT
 - **Passive 29-Round Scan Packet Capture (`tests/passive_discovery.log`)**:
   - Implemented non-interfering passive UDP sniffer (`tests/capture_passive.py`) bound specifically to multicast group `224.0.0.167:53317`, running concurrently with official Fedora LocalSend (`Secret Tomato`) and official macOS LocalSend (`Good Strawberry`).
   - Passively captured 29 consecutive active scan bursts from BlackBerry Passport (10 cold starts + 19 manual scans) with microsecond timestamps and raw JSON records (`tests/passive_discovery_raw.jsonl`).
-  - Validated with native Wi-Fi interface kernel packet capture `tests/localsend.pcap` (`wlp3s0`).
-  - Observed 100% discovery success across all bursts; multicast socket semantics guarantee zero unicast interference; native kernel drop counters unmeasured on target.
-  - Multi-peer concurrent discovery dynamically populated cards for Fedora PC (`192.168.3.123`), macOS (`192.168.3.161` `Good Strawberry`), and iPhone (`192.168.3.233` `Tidy Peach`).
+  - Validated with interface kernel packet capture `tests/localsend.pcap` (recorded via `tcpdump -i any -s0 'udp port 53317'`, capturing Wi-Fi traffic corresponding to Linux cooked v2 interface index 2 / `wlp3s0`).
+  - Observed consistent arrival and dynamic card rendering across bursts; multicast socket semantics guarantee zero unicast interference; native kernel drop counters unmeasured on target.
+  - Multi-peer concurrent discovery dynamically populated cards for Fedora PC (`192.168.3.123`), macOS (`192.168.3.161` `Good Strawberry`), Ubuntu PC (`192.168.3.111` `Fast Onion`), and iPhone (`192.168.3.233` `Tidy Peach`).
 - **Incoming Transfer Alert on Radar Tab**: Added `Incoming File Transfer!` prompt with `[Accept]` and `[Decline]` buttons directly on Tab 1 (Radar), allowing users to accept incoming files immediately from any tab.
 - **Manual IP Compatibility**: Implemented `/api/localsend/v1/info` route in `ReceiveServer` returning HTTP 200 JSON, resolving 404 errors when peers query the legacy endpoint.
 - **Diagnostic Logging**: Logs saved to `/accounts/1000/shared/documents/localsend_launch.txt`, viewable natively on device and accessible via the "Open Diagnostic Log" button in Settings.
@@ -63,23 +75,23 @@ Tested and verified on a physical **BlackBerry Passport** running BB10 OS 10.3.x
 
 ## 3. Network Topology & Test Devices
 
-- **BlackBerry Passport Target**: `192.168.3.124:53317` (BB10 10.3.x, ARMv7le)
+- **BlackBerry Passport Target**: `192.168.3.124:53317` (BB10 10.3.x, ARMv7le, fingerprint `706d97c2-9785-4fb8-948e-947729b96fc2`)
 - **Fedora PC Peer**: `192.168.3.123:53317` (`Secret Tomato`, HTTP plaintext)
-- **macOS Peer**: `192.168.3.161:53317` (`Good Strawberry`, official LocalSend client, encryption disabled for plain HTTP)
+- **Ubuntu PC Peer**: `192.168.3.111:53317` (`Fast Onion`, official LocalSend client v2.1, ThinkPad-X1-Carbon-5th, Linux desktop, fingerprint `E1D2DEBDE15B82640527BD3C068D52ED545BE62DCE6B86244D0FDF4BFEB8C83D`)
+- **macOS Peer**: `192.168.3.161:53317` (`Good Strawberry`, official LocalSend client, encryption disabled for plain HTTP, fingerprint `640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C`)
 - **iPhone Peer**: `192.168.3.233:53317` (`Tidy Peach`, official iOS LocalSend client, HTTPS/TLS)
-
 
 ---
 
 ## 4. Key Verification Findings: Issue 2 Resolution
 
 ### Root Cause and Implementation Summary
-1. **UDP Buffer Overrun on QNX 6.5 (`io-pkt`)**:
-   - Resolved by expanding socket buffers to 64 KiB and pacing transmission via `m_udpSweepTimer` (15 ms intervals, 5 datagrams/batch). Any transient `ENOBUFS` condition requeues the target without dropping it.
+1. **QNX 6.5 Socket Buffer Pacing Hypothesis (`io-pkt`)**:
+   - Paced transmission via `m_udpSweepTimer` (15 ms intervals, 5 datagrams/batch) and expanded socket buffers to 64 KiB mitigate burst saturation. Transient `ENOBUFS` re-queuing prevents target drops (socket buffer exhaustion retained as design hypothesis rather than on-device measured counter).
 2. **QUdpSocket Validity in Qt**:
    - A bound `QUdpSocket` in Qt has `isOpen() == false` because `bind()` does not open the underlying `QIODevice`. Checking `isOpen()` caused UDP writes to silently skip. Replaced with `(m_udpSocket->isValid() || m_udpSocket->isOpen())`.
 3. **Target Prioritization**:
-   - `hostOrder` in `startSubnetScan()` now checks `m_historicalPeers` and active `/proc/net/arp` entries first, ensuring hosts like `192.168.3.161` receive announcements immediately at scan onset.
+   - `hostOrder` in `startSubnetScan()` now checks `m_historicalPeers` and active `/proc/net/arp` entries first, ensuring hosts receive announcements immediately at scan onset.
 4. **HTTP Scan Queue Bounds**:
    - Probes timeout after 450 ms instead of 600 ms; whole scan is bounded by a 12-second deadline timer with HTTPS fallback for TLS resets.
 
