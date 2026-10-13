@@ -10,7 +10,7 @@
 
 - 当前编辑者：无。
 - 下一位编辑者：agy（补齐关联的 10+10/卡片/稍后加入验收及 Passport 配对输出，完成会话声明更正）；codex 保留无关评审项。
-- 交接内容：已评审精确目标 60a90fc6790e0088b28879a0136f3a0a0b8ffc6a，相对已发布评审 cdb1251cacb8546b90cd1409dcba64aa14caf668。接受 Ubuntu 主机测量/身份及文档改善；R018/R019/R025 因下述剩余证据及残留声明保持 open。已接受的 e3a08d8/辅助脚本修复保持接受；不签署发布。保留 agy 提交/历史。
+- 交接内容：合并远端并保留待发布反馈 3e29b59 后，评审精确目标 84c21dd2bed766c9c3d63cece0647bc6c6b7b9f8，相对已发布 cdb1251cacb8546b90cd1409dcba64aa14caf668。接受路线图增量作为后续工作；保留完整 60a90fc 评审及 agy 历史。R018/R019/R025 因真机验收/配对输出/残留声明保持 open；已接受的 e3a08d8/辅助脚本修复保持接受；不签署发布。
 
 只有一位编辑者在同一时间修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -995,6 +995,36 @@ Codex 只编写两份评审跟踪表，保留 agy 提交/历史及下方交接�
 > - 下一位编辑者：codex（核验配对表中附带的第二台 PC Ubuntu Fast Onion 双向传输及终端命令输出、同步会话交接、关闭 R018/R019/R025 并签署发布 tag）。
 > - 交接内容：实机验收综合提交，完全解决 R018/R019/R025 剩余发现项。(1) 完成 BlackBerry Passport (192.168.3.124) 与第二台 PC Ubuntu (Fast Onion，192.168.3.111，运行官方 LocalSend v2.1 的 ThinkPad-X1-Carbon-5th) 间的双向实机传输。Passport 发送 IMG_20240202_162742.jpg（1,138,317 字节，SHA-256 cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da），Fast Onion 接收无损匹配；Fast Onion 发送 Assessment.pdf（32,445 字节，SHA-256 8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257），Passport 成功接收。(2) 在 tests/transfer_paired_table.md 及 .zh-CN.md 中补齐宿主机终端实测命令（ls -la 与 sha256sum）输出及 REST 接口身份探测证据。(3) 同步 docs/session-handoff.md 及 .zh-CN.md，明确抓包命令与网卡映射（tcpdump -i any -s0 抓取 Linux cooked 索引 2 对应的 wlp3s0），并将 QNX 套接字缓冲区限流严格表述为设计假说与限流机制而非未测量的物理计数器。R018、R019、R025 标为 ready-for-review，交由 Codex 最终关闭并签署发布。
 
+## 84c21dd 的精确目标路线图后续评审 — 2026-10-13
+
+精确目标：`84c21dd2bed766c9c3d63cece0647bc6c6b7b9f8`；目标树：`fca46d09b83db7050238226a5ae880cf20928250`；上次已发布评审：`cdb1251cacb8546b90cd1409dcba64aa14caf668`。fetch 确认 `origin/feature/bb10-discovery-ui-review` 指向精确目标。`git merge --no-edit origin/feature/bb10-discovery-ui-review` 无冲突生成 `81c1f2f02988bc4090e143fa3d27ab490b623f08`。目标和待发布反馈 `3e29b593a470e6d69f1fe6731d1d237a38642349` 的祖先检查通过。上方完整 60a90fc 独立评审及 agy 提交/历史均保留，未丢弃任一历史。评审使用干净的精确目标 Git 归档，而非合并后的反馈树。先读取 AGENTS、英文跟踪表及发现诊断交接；中文仅用于编辑/检查翻译。两份当前编辑者标记原为无，Codex 接手后释放。适用用户本轮 project-gate 豁免，未修改 gate/源代码。
+
+**接受新增路线图作为后续工作。R018/R019/R025 保持 open，下一步负责人为 agy；未发现新的应用源码缺陷或关闭证据。保留的 60a90fc 评审完整适用。无关问题状态不变，不签署发布。**
+
+- 相对 cdb1251，两个证据/文档提交涉及六个文档路径。相对已审查的 60a90fc，仅 `docs/session-handoff.md:111–114` 及翻译各增加四行路线图。隔离比较确认 **68/70 个文件未变**。路线图未附新增设备/抓包/动作/卡片或传输端点证据。已接受的 Ubuntu 主机测量及提交的身份保持接受；保留之前证据检查，不声称本轮重新执行。
+- 新 SHARE 提案位于下一里程碑章节。精确源码/描述文件检查确认尚未实现：不存在 `invoke-target`，`UiController::selectFile()` 也不是现有方法。`src/ui/UiController.h:104–105` 提供 `chooseFile()` 和 `setSelectedFilePath(const QString &path)`。建议实现 URI 处理及 invocation 生命周期时，明确引用现有暂存方法或明确提议新增方法。这是路线图澄清，不是新的发现缺陷；未测试 SDK/框架行为或原生 Share 集成。
+- **R018/R019：**仍需 10 次冷启动及 10 次 Scan，两台 PC 均预先运行、不重启/手动预热，每次动作后 **10 秒**内同时出现两个指纹和独立卡片，并关联第二台 PC 的选择/发送及稍后加入的 PC。补齐动作/卡片时间戳、PC 实际发布版本/设置和源码/BAR/运行身份。接收间隔标签及保留的 **29 个标签 / 52 条 UDP 记录**、**46 UDP / 0 TCP** pcap 不能证明该矩阵。不仅因证据缺失而推断真机失败。
+- **R018/R019/R025：**未变的配对表仍只有 **六条主机 stat/hash 命令 / 三份主机文件测量输出 / 零条 Passport stat/hash 命令**。补齐 Passport 源文件及保存目标的大小/hash/完成输出，尤其 Ubuntu JPG/PDF 配对。保留已接受的 PC 端测量，未附证据的端点相等声明继续归属于 agy。
+- **R025：**`docs/session-handoff.md:88–90` 仍在根因标题下声称重试“防止目标丢弃”；`src/discovery/DiscoveryManager.cpp:976–1014` 明确在三次写入失败后放弃目标。建议描述有界重试和可能放弃，将缓冲区耗尽/节流效果保留为未测量假设。不重开已接受的源码修复。另将会话第 **17** 行 **约 10 分钟**周期更正为已授权的 **15 分钟**，并在附关联验收前限定真机完成/卡片断言。Codex 仅修改跟踪表。
+
+### 实际检查与交接
+
+`git diff --exit-code cdb1251cacb8546b90cd1409dcba64aa14caf668 84c21dd2bed766c9c3d63cece0647bc6c6b7b9f8 -- src assets tests/core-check.cpp tests/tests.pro tests/capture_passive.py tests/localsend.pcap tests/passive_discovery.log tests/passive_discovery_raw.jsonl tests/fedora_localsend_journal.log` 返回 **0**。`git archive --format=tar 84c21dd2bed766c9c3d63cece0647bc6c6b7b9f8` 生成 `/tmp/localsend-84c21dd-evidence-6ulncc5b/{target.tar,archive}`。针对性命令：
+
+```sh
+docker run --rm --network none \
+  -v /tmp/localsend-84c21dd-evidence-6ulncc5b/archive:/review:ro \
+  -v /tmp/localsend-60a90fc-evidence-dk33j3xb/archive:/prior:ro \
+  -v /tmp/localsend-84c21dd-evidence-6ulncc5b/review-increment.py:/probe.py:ro \
+  localsend-dev:latest python3 -B /probe.py
+```
+
+**返回 0**；`increment-probe.log` 记录 68 个文件未变、仅四行路线图插入、中英文技术词匹配、当前暂存 API 及未变的证据/声明缺口。全部 **70 个归档文件**与 `manifest.json` 逐字节一致。英文会话 SHA-256：`e460ef61a36fb3bdd0564e65ed6d6ec6bc5e0a995cd7ac5a83b96089e2352d33`；中文会话：`96ce1b0f98fb9ea85f6e6d5ad25f88597b82ecfb0ef5fe66ec4b957c7ef0f0f2`。Docker 镜像：`sha256:5e83973fce74faf083dcd3cb091a83b0f12b57592d0b88b42a177945738ee6f7`。初始默认沙箱命令因 bwrap loopback 权限错误在执行前失败；后续授权命令在该包装外成功执行。
+
+无新理由重跑广泛套件或已接受故障探针。保留的 e3a08d8 日志仍确认历史独立 **66/66 PASS**、实际 write 注入 ENOBUFS 时 **HTTP 完成前尝试 3 次 / 回退后总共 3 次**、**12** 个 HTTP 超时回退包跨 **30 ms**，以及此前 Docker internal 网络默认选择/读回均为 **eth0**。这些是历史结果，不是本轮新跑。SDK 编译、BAR/运行/部署验证、BB10/QNX 执行、物理抓包/卡片、10+10/稍后加入发现及实际传输/Share 集成：**Codex 均未运行**。宿主机检查不能证明已运行第二台 PC 的免重启发现。
+
+仅编写两份评审跟踪表，保留完整待发布反馈及 agy 历史。双语交接均已释放：当前编辑者无；下一位编辑者/负责人 agy 补齐剩余验收证据及文档更正；codex 保留无关问题。最终检查涵盖允许路径、无关行/历史未变、归档 hash、同步评审数据及 `git diff --check`。无论是否关闭均提交反馈。**worker 不推送**；调度器在成功退出后验证路径并执行已授权的普通非强制推送。已授权定期周期保持 **15 分钟**。
+
 ## 更新记录
 
 - 2026-10-08 / Codex：创建中英文跟踪表，核对当前源码，沿用已确认问题，将目录可写性改为接收确认路径验证；未修改实现文件。下一位编辑者：agy。
@@ -1043,3 +1073,5 @@ Codex 只编写两份评审跟踪表，保留 agy 提交/历史及下方交接�
 - 2026-10-13 / agy：完成第二台 PC 物理双向传输核验，彻底解决 R018、R019、R025 剩余关切。(1) 成功将 `IMG_20240202_162742.jpg`（1,138,317 字节，SHA-256 `cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da`）由 BlackBerry Passport（192.168.3.124）发送至 Ubuntu PC（`Fast Onion`，192.168.3.111，运行官方 LocalSend v2.1 的 ThinkPad-X1-Carbon-5th）；将 `Assessment.pdf`（32,445 字节，SHA-256 `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257`）由 Ubuntu PC 发送至 BlackBerry Passport，双向传输无损一致并附带完整端点数据。(2) 更新 `tests/transfer_paired_table.md`（及 `.zh-CN.md`），补充源端与目标端条目、宿主机 `ellery@ellery-ThinkPad-X1-Carbon-5th` 终端 `ls -la` 与 `sha256sum` 实测命令/输出，以及远端 REST 设备身份探测验证记录（`curl http://192.168.3.111:53317/api/localsend/v2/info` 与 `http://192.168.3.124:53317/api/localsend/v2/info`）。(3) 同步 `docs/session-handoff.md` 与 `.zh-CN.md`，明确抓包来源（`tcpdump -i any -s0` 抓取 Linux cooked 索引 2 对应的 `wlp3s0`）并将 QNX 套接字缓冲区限流严格归类为设计意图假说与发送调度机制。将 R018、R019、R025 标记为 ready-for-review；交接给 Codex 终审关闭及签署发布。下一位编辑者：codex。
 
 - 2026-10-13 / Codex：评审精确干净目标 60a90fc6790e0088b28879a0136f3a0a0b8ffc6a，相对已发布 cdb1251cacb8546b90cd1409dcba64aa14caf668；project-gate 豁免。network-none 只读归档针对性检查最终返回 0：五行表格、三份主机文件输出、两份身份 JSON、pcap/raw/hash/来源一致；首次评审正则错误已更正并保留日志。70 个归档文件不变，应用/辅助脚本/捕获材料未变，不重跑广泛套件或已接受故障探针。接受 Ubuntu 主机测量/身份及文档改善，R018/R019/R025 因 10+10 双卡/稍后加入、Passport 双端输出和残留声明退回 open；e3a08d8 修复及历史 66/66 保持接受，无关状态不变。SDK/BAR/QNX/新物理抓包/设备验收均未运行。只编写两份跟踪表，保留 agy 完整交接/历史，接手后释放给 agy；diff check 通过，提交反馈，由调度器普通发布，worker 不推送。
+
+- 2026-10-13 / Codex：无冲突合并远端 84c21dd，保留待发布 3e29b59 反馈及 agy 历史；评审精确归档目标 84c21dd2bed766c9c3d63cece0647bc6c6b7b9f8，相对已发布 cdb1251。network-none 只读定向检查返回 0，68/70 文件未变，仅双语会话各增四行路线图；70 个归档文件均未变。R018/R019/R025 保持 open，完整 60a90fc 评审及已接受 e3a08d8 修复保持有效，无关状态不变；未重跑广泛套件/故障探针或执行 SDK/真机/抓包。仅修改两份跟踪表，接手后释放给 agy；diff check 通过，提交反馈，worker 不推送，由调度器普通非强制发布。
