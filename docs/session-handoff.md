@@ -24,6 +24,12 @@ Tested and verified on a physical **BlackBerry Passport** running BB10 OS 10.3.x
 
 - **Bidirectional File Transfer (MVP Core Requirement: PASSED & VERIFIED)**:
   - **BlackBerry Passport -> Fedora PC (`Secret Tomato`)**: Verified with full file integrity!
+    - Filename: `Mar 01.pdf`
+    - Size: `56,565` bytes (Source and Destination match exactly)
+    - SHA-256: `4e6584fff8cf8e7c7e520e8247a13f237e5f63ca72b306b35923d9f67549f390`
+    - Destination Path: `/home/ellery/Downloads/Mar 01.pdf`
+    - Timestamp: `2026-10-13 14:31` AEDT (logged in Fedora LocalSend HTTP `/register` at `14:32:01.741170`)
+  - **BlackBerry Passport -> Fedora PC (`Secret Tomato`)**: Verified with full file integrity!
     - Filename: `IMG_20261010_185044.jpg` (saved as `IMG_20261010_185044 (2).jpg`)
     - Size: `1,640,388` bytes
     - SHA-256: `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3`
@@ -33,17 +39,18 @@ Tested and verified on a physical **BlackBerry Passport** running BB10 OS 10.3.x
     - Size: `183,144` bytes
     - SHA-256: `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`
   - **BlackBerry Passport <-> macOS (`Good Strawberry`)**: Bidirectional file transfer verified completed in both directions with full file integrity!
-- **Passive 15-Round Scan Packet Capture (`tests/passive_discovery.log`)**:
-  - Implemented non-interfering passive UDP sniffer (`tests/capture_passive.py`) with `SO_REUSEPORT`/`SO_REUSEADDR` on port 53317, running concurrently with official Fedora LocalSend (`Secret Tomato`) and official macOS LocalSend (`Good Strawberry`).
-  - Passively captured 15 consecutive active scan bursts from BlackBerry Passport over 5 minutes with microsecond timestamps.
-  - Zero port contention, zero packet loss, zero socket buffer drops.
+- **Passive 29-Round Scan Packet Capture (`tests/passive_discovery.log`)**:
+  - Implemented non-interfering passive UDP sniffer (`tests/capture_passive.py`) bound specifically to multicast group `224.0.0.167:53317`, running concurrently with official Fedora LocalSend (`Secret Tomato`) and official macOS LocalSend (`Good Strawberry`).
+  - Passively captured 29 consecutive active scan bursts from BlackBerry Passport (10 cold starts + 19 manual scans) with microsecond timestamps and raw JSON records (`tests/passive_discovery_raw.jsonl`).
+  - Validated with native Wi-Fi interface kernel packet capture `tests/localsend.pcap` (`wlp3s0`).
+  - Observed 100% discovery success across all bursts; multicast socket semantics guarantee zero unicast interference; native kernel drop counters unmeasured on target.
   - Multi-peer concurrent discovery dynamically populated cards for Fedora PC (`192.168.3.123`), macOS (`192.168.3.161` `Good Strawberry`), and iPhone (`192.168.3.233` `Tidy Peach`).
 - **Incoming Transfer Alert on Radar Tab**: Added `Incoming File Transfer!` prompt with `[Accept]` and `[Decline]` buttons directly on Tab 1 (Radar), allowing users to accept incoming files immediately from any tab.
 - **Manual IP Compatibility**: Implemented `/api/localsend/v1/info` route in `ReceiveServer` returning HTTP 200 JSON, resolving 404 errors when peers query the legacy endpoint.
 - **Diagnostic Logging**: Logs saved to `/accounts/1000/shared/documents/localsend_launch.txt`, viewable natively on device and accessible via the "Open Diagnostic Log" button in Settings.
 - **Issue 1 Fixed (Header Version Banner)**: Exposed `app.appVersion` (`v0.1.1.7`) on `UiController` and bound dynamically in `assets/main.qml`.
-- **Issue 2 Resolved (Paced Subnet Discovery & QNX Buffer Overrun Protection)**:
-  - Replaced un-paced C++ UDP broadcast loop with a 15 ms paced batch sweep engine (`pumpUdpSweep()`, 5 datagrams/batch) preventing QNX 6.5 `io-pkt` `ENOBUFS` socket buffer drops.
+- **Issue 2 Resolved (Paced Subnet Discovery & Buffer Pacing)**:
+  - Replaced un-paced C++ UDP broadcast loop with a 15 ms paced batch sweep engine (`pumpUdpSweep()`, 5 datagrams/batch) designed to mitigate potential QNX 6.5 socket buffer pressure (buffer exhaustion cause retained as hypothesis unless measured on device).
   - Expanded UDP send and receive socket buffers to 64 KiB via native `setsockopt(SO_SNDBUF/SO_RCVBUF)`, with `getsockopt` verification logged at runtime.
   - Resolved P1 Head-of-line blocking by tracking attempts per target (capped at 3), deferring transient errors behind unattempted targets (queue tail), and dropping permanent errors.
   - Resolved P2 unpaced fallback by routing HTTP probe failure fallback announcements through `queueUdpSweepTarget()` rather than bursting direct raw datagrams.

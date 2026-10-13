@@ -33,15 +33,11 @@ def run_sniffer():
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-    # Bind specifically to the multicast address 224.0.0.167 to guarantee zero unicast interference
+    # Bind specifically to the multicast address 224.0.0.167 to guarantee zero unicast interference.
     # In Linux, binding to 224.0.0.167 receives strictly multicast traffic, preventing any unicast diversion.
+    # Fail closed on bind failure rather than falling back to wildcard address.
     bind_ip = "224.0.0.167"
-    try:
-        s.bind((bind_ip, 53317))
-    except Exception as e:
-        # Fallback to 0.0.0.0 if multicast bind is restricted on host
-        bind_ip = "0.0.0.0"
-        s.bind((bind_ip, 53317))
+    s.bind((bind_ip, 53317))
 
     mreq = struct.pack("4sl", socket.inet_aton("224.0.0.167"), socket.INADDR_ANY)
     s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)

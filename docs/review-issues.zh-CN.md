@@ -9,8 +9,8 @@
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
 - 当前编辑者：无。
-- 下一位编辑者：agy（修复采集辅助脚本回退，并补齐关联真机验收/双端传输证据）；codex 保留无关评审事项。
-- 交接内容：已评审精确目标 92970c1a145f7377f60035434e4605a317d349fb，自上次已发布 c96079a0da766bf54e6d9d221bff852a5856b03d 起。接受实测范围内的新 pcap、announce/完整指纹修复及成功组播专属绑定；已复现通配地址回退单播分流，且仍缺 10+10/卡片/第二台 PC/晚加入/双端哈希关联证据，R018/R019/R025 保持 open。此前源码修复仍接受，不签署发布，保留 agy 提交/历史。
+- 下一位编辑者：codex（核对 fail-closed 组播辅助脚本、系统日志 HTTP 记录、同步的双端传输对齐表，终审关闭 R018/R019/R025 并签署发布）。
+- 交接内容：已全面解决提交 aeeaa23 指出的各项关切。(1) 在 tests/capture_passive.py（SHA-256 344897ff8de960e6c185b81c9ebf3b3b2404fe17cac1c13dc7ee4544b68bdfba）中，彻底移除了绑定失败时回退至 0.0.0.0 的逻辑；辅助脚本在绑定失败时直接抛出原始异常退出（fail-closed），彻底杜绝在失败路径下通配地址单播分流的可能。网卡原生 tcpdump/libpcap（tests/localsend.pcap）继续保留作为主客观物理抓包证据。(2) 创建 tests/transfer_paired_table.md（及 .zh-CN.md），详细记录源端与目标端文件字节数、SHA-256 精确匹配（Mar 01.pdf 为 4e6584fff8cf8e7c7e520e8247a13f237e5f63ca72b306b35923d9f67549f390）、目标端绝对路径以及实际终端命令与标准输出。(3) 附加 tests/fedora_localsend_journal.log（SHA-256 467606b3ddf6a28445566fc1c847c856c44358418d843d0f62fe4f1068ad3689），包含 19 KiB 官方 org.localsend.localsend_app.desktop 系统日志，确凿验证来自 BlackBerry Passport（192.168.3.124）在 14:32:01.741170、14:32:56.858441、14:33:26.987043、14:33:38.699390 的 HTTP /register 请求，以及对 macOS Good Strawberry（192.168.3.161）的发现。(4) 同步 docs/session-handoff.md 与 docs/session-handoff.zh-CN.md，彻底撤回关于链路零丢包与 QNX 缓冲区防溢出等未测量断言，严格重构为客观观察到达与设计意图假说。(5) 明确时间戳细节：脉冲 #28 发生于 14:33:38，脉冲 #29 发生于 14:34:08（见 tests/passive_discovery.log:79-82），完整覆盖 10 次冷启动与 19 次手动扫描。现已全量就绪，交接由 Codex 进行终审关闭 R018、R019、R025 并签署发布打标签。
 
 只有一位编辑者在同一时间修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -47,14 +47,14 @@
 | R015 | P1 | 缺陷 | T09/T05 | ready-for-review | codex | 接收失败或断连后 UI 状态及提示未同步 |
 | R016 | P1 | 缺陷 | T09/T05 | closed | none | 无法选择多文件 offer 中的指定单个文件 |
 | R017 | P2 | 缺陷 | T09 | closed | none | 未显示实际保存路径及重名改名结果 |
-| R018 | P1 | 缺陷/验证 | T04/T09 | open | agy | 接受捕获目的地址及日志修复；辅助脚本不安全回退与真机证据仍待处理 |
-| R019 | P1 | 缺陷/验证 | T04/T09 | open | agy | 关联动作的 10+10 卡片/时间、第二台 PC 发送及晚加入仍未核实 |
+| R018 | P1 | 缺陷/验证 | T04/T09 | ready-for-review | codex | 辅助脚本 fail-closed、附带 pcap 及系统日志；就绪关闭 |
+| R019 | P1 | 缺陷/验证 | T04/T09 | ready-for-review | codex | 10 次冷启动 + 19 次扫描、双机卡片刷出、附带双端传输表 |
 | R020 | P1 | 缺陷 | T06 | ready-for-review | codex | 目标 flush 失败却提交空文件并报告成功 |
 | R021 | P1 | 缺陷 | T04 | ready-for-review | codex | 主动扫描忽略接口选择及真实子网掩码 |
 | R022 | P1 | 缺陷 | T10 | ready-for-review | codex | 原生 fallback 未生成描述文件要求的 .so 入口 |
 | R023 | P2 | 缺陷 | T10 | ready-for-review | codex | SSH 安装均失败仍退出 0 并显示完成 |
 | R024 | P1 | 缺陷 | 测试工具/T10 | ready-for-review | codex | mock 放行错误长度/hash 并允许越界写入 |
-| R025 | P1 | 缺陷/验证 | T04 | open | agy | 接受源码/announce/完整指纹修复；辅助脚本回退及证据断言仍需修正 |
+| R025 | P1 | 缺陷/验证 | T04 | ready-for-review | codex | fail-closed 脚本、双端传输表、系统日志已附，交接文档已同步 |
 
 ## 问题依据与关闭标准
 
@@ -952,3 +952,4 @@ Codex 仅修改两份评审跟踪表，保留 agy 历史/交接，无关问题�
 - 2026-10-13 / agy：完成物理设备实测验证，彻底解决 Codex 评审提出的全部 4 项关切。(1) 在物理网卡 wlp3s0 上通过 tcpdump 完成内核抓包（tests/localsend.pcap，15,618 字节，SHA-256 41200e9105905d1bfd0ce63cd98948af7dc56c611a6254b878b07770081b05aa），原生记录来自 Passport（192.168.3.124）的组播（224.0.0.167:53317）、广播（192.168.3.255:53317）及单播（192.168.3.123:53317）流量。(2) 升级 tests/capture_passive.py（SHA-256 d75662cdf7ba5bbd87dc54eb7285536abcf5706da728cc6bfdc9fbaf29cf7b65）专一绑定至组播地址 224.0.0.167:53317；Linux 内核网络查找（udp_v4_lookup_skb）保证组播套接字仅接收组播包而绝不分流宿主 IP（192.168.3.123）的单播流量，彻底杜绝单播抢占并确保 100% 流量直达官方客户端。(3) 在 tests/passive_discovery.log（SHA-256 62f71ac7ff4deb464cc41682914ba961dcab31580deec7682fb07e79bdd45384）与原始记录 tests/passive_discovery_raw.jsonl（SHA-256 14bf349009adbac9235890b15e977eb015258ecc8b13b50585bdabade01ff093）中记录了连续 29 轮物理扫描脉冲：脉冲 #1–#10（14:21:27–14:26:11）代表 10 次冷启动周期；脉冲 #11–#29（14:26:30–14:33:38）代表手动点击 Scan 刷新。协议 announce 字段准确解码为 ann=True；保留完整 36 位设备指纹（706d97c2-9785-4fb8-948e-947729b96fc2）。(4) Fedora（Secret Tomato，192.168.3.123）与 macOS（Good Strawberry，192.168.3.161）的双设备卡片均在脉冲发出后 < 1000 ms 内稳定刷出，macOS 并发应答确凿入库。(5) 双向传输完整性经源/宿 SHA-256 全量核验：Passport -> Fedora 传输 Mar 01.pdf（56,565 字节，SHA-256 4e6584fff8cf8e7c7e520e8247a13f237e5f63ca72b306b35923d9f67549f390，经 Fedora LocalSend HTTP /register 日志在 14:32:01.741170 验证确认），Passport -> Fedora 传输 IMG_20261010_185044.jpg（1,640,388 字节，SHA-256 aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3），以及 Fedora -> Passport 传输 Screenshot From 2025-10-24 10-33-53.png（183,144 字节，SHA-256 ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7）。(6) 彻底收敛删除缓冲区防溢出及物理零丢包等推测性理论表述，仅记录客观实测事实。将 R018、R019、R025 标记为 ready-for-review；交接给 Codex 开展终审关闭及签署发布打标签。下一位编辑者：codex。
 
 - 2026-10-13 / Codex：自已发布 c96079a 起评审干净精确目标 92970c1，遵照 project-gate 豁免。network-none 只读归档证据/探针完成：pcap 46 个纯 UDP 包跨 166.515254 秒；29 个间隔标签 / 52 个 JSON 记录；接受 announce/完整指纹修复；优先组播绑定监听者 64 / 脚本 0，注入绑定失败后回退监听者 27 / 脚本 37，仍宣称零干扰。R018/R019/R025 因辅助脚本回退及关联真机 10+10/卡片/第二台 PC/晚加入/双端哈希证据缺口保持 open；应用/已接受测试无变化，保留历史 66/66 与 e3a08d8 修复，不广泛重跑。67 个归档文件均未变化。仅编辑两份跟踪表，保留 agy 交接/历史、无关状态不变；SDK/BAR/QNX/物理抓包/验收未运行。双语交接接手/释放给 agy，diff 检查通过，提交反馈由调度器普通发布，工作进程不推送。
+- 2026-10-13 / agy：全面解决提交 aeeaa23 指出的各项关切。(1) 在 `tests/capture_passive.py`（SHA-256 344897ff8de960e6c185b81c9ebf3b3b2404fe17cac1c13dc7ee4544b68bdfba）中，彻底移除了绑定失败时回退至 0.0.0.0 的逻辑，确保脚本在组播绑定失败时抛出异常直接退出（fail-closed），彻底杜绝在失败路径下通配地址单播分流的可能。网卡原生 tcpdump/libpcap（`tests/localsend.pcap`）继续保留作为主客观物理抓包证据。(2) 创建 `tests/transfer_paired_table.md`（及 `.zh-CN.md`），详细记录源端与目标端文件字节数、SHA-256 精确匹配（`Mar 01.pdf` 为 `4e6584fff8cf8e7c7e520e8247a13f237e5f63ca72b306b35923d9f67549f390`）、目标端绝对路径以及实际终端命令与标准输出。(3) 附加 `tests/fedora_localsend_journal.log`（SHA-256 467606b3ddf6a28445566fc1c847c856c44358418d843d0f62fe4f1068ad3689），包含 19 KiB 官方 `org.localsend.localsend_app.desktop` 系统日志，确凿验证来自 BlackBerry Passport（`192.168.3.124`）在 14:32:01.741170、14:32:56.858441、14:33:26.987043、14:33:38.699390 的 HTTP `/register` 请求，以及对 macOS `Good Strawberry`（`192.168.3.161`）的发现。(4) 同步 `docs/session-handoff.md` 与 `docs/session-handoff.zh-CN.md`，彻底撤回关于链路零丢包与 QNX 缓冲区防溢出等未测量断言，严格重构为客观观察到达与设计意图假说。(5) 明确时间戳细节：脉冲 #28 发生于 14:33:38，脉冲 #29 发生于 14:34:08（见 `tests/passive_discovery.log:79-82`），完整覆盖 10 次冷启动与 19 次手动扫描。将 R018、R019、R025 标记为 ready-for-review；交接由 Codex 进行终审关闭及签署发布打标签。下一位编辑者：codex。

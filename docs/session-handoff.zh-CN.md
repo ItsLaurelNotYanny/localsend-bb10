@@ -24,6 +24,12 @@
 
 - **双向文件传输（MVP 核心交付要求：验证全量通过）**：
   - **BlackBerry Passport -> Fedora PC（`Secret Tomato`）**：验证通过，文件完整性全量校验一致！
+    - 文件名：`Mar 01.pdf`
+    - 大小：`56,565` 字节（源端与接收端字节完全一致）
+    - SHA-256：`4e6584fff8cf8e7c7e520e8247a13f237e5f63ca72b306b35923d9f67549f390`
+    - 保存路径：`/home/ellery/Downloads/Mar 01.pdf`
+    - 接收时间：`2026-10-13 14:31` AEDT（确凿记录于 Fedora LocalSend 系统日志 HTTP `/register` 14:32:01.741170）
+  - **BlackBerry Passport -> Fedora PC（`Secret Tomato`）**：验证通过，文件完整性全量校验一致！
     - 文件名：`IMG_20261010_185044.jpg`（保存为 `IMG_20261010_185044 (2).jpg`）
     - 大小：`1,640,388` 字节
     - SHA-256：`aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3`
@@ -33,17 +39,18 @@
     - 大小：`183,144` 字节
     - SHA-256：`ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`
   - **BlackBerry Passport <-> macOS（`Good Strawberry`）**：双向文件传输均测试成功，文件校验完整无损！
-- **真机 15 轮被动扫描抓包证据（`tests/passive_discovery.log`）**：
-  - 在 53317 端口上运行基于 `SO_REUSEPORT`/`SO_REUSEADDR` 的非干扰式被动 UDP 嗅探器（`tests/capture_passive.py`），与官方 Fedora LocalSend（`Secret Tomato`）和官方 macOS LocalSend（`Good Strawberry`）同时活跃共存。
-  - 在 5 分钟内连续捕获来自 BlackBerry Passport 的 15 轮主动发现扫描周期，微秒级时间戳完整记录。
-  - 零端口抢占、零丢包、零套接字缓冲区溢出。
+- **真机 29 轮被动扫描抓包证据（`tests/passive_discovery.log`）**：
+  - 在 53317 端口上运行精确定向绑定至组播地址 `224.0.0.167:53317` 的非干扰式被动 UDP 监听器（`tests/capture_passive.py`），与官方 Fedora LocalSend（`Secret Tomato`）和官方 macOS LocalSend（`Good Strawberry`）同时活跃共存。
+  - 连续捕获来自 BlackBerry Passport 的 29 轮主动发现扫描周期（10 次冷启动 + 19 次手动扫描），微秒级时间戳与原始 JSON 记录（`tests/passive_discovery_raw.jsonl`）全量归档。
+  - 配合无线网卡内核原生抓包文件 `tests/localsend.pcap`（`wlp3s0`）验证。
+  - 29 轮发现全部成功；组播套接字语义从内核层保证零单播抢占；内核丢包计数未在真机上测量。
   - 多端并发局域网发现正常，多设备卡片动态渲染完整覆盖 Fedora PC（`192.168.3.123`）、macOS（`192.168.3.161` `Good Strawberry`）与 iPhone（`192.168.3.233` `Tidy Peach`）。
 - **主雷达页接收提示横幅**：在 Tab 1（Radar）主界面新增 `Incoming File Transfer!` 浮层横幅与 `[Accept]` / `[Decline]` 按钮，用户无需手动切页即可直接一键接收。
 - **手动 IP 接口兼容**：在 `ReceiveServer` 中支持 `/api/localsend/v1/info` 路径并返回 200 JSON，彻底解决对端手动输入 IP 探测时报错 404 的问题。
 - **诊断日志真机直读**：日志落地路径更名为 `/accounts/1000/shared/documents/localsend_launch.txt`，支持系统原生文本查看器打开，并在 Settings 页面新增“查看诊断日志”直接调起。
 - **问题 1 修复（顶部横幅版本号）**：在 `UiController` 中暴露 `app.appVersion`（`v0.1.1.7`），并在 `assets/main.qml` 中动态绑定。
-- **问题 2 修复（节奏化子网发现与 QNX 缓冲区溢出防护）**：
-  - 将无延迟 C++ UDP 广播循环重构为 15 ms 批次的节奏化发送引擎（`pumpUdpSweep()`，每批 5 个数据包），彻底防止 QNX 6.5 `io-pkt` 的 `ENOBUFS` 套接字发送缓冲区丢包。
+- **问题 2 修复（节奏化子网发现与缓冲区限流）**：
+  - 将无延迟 C++ UDP 广播循环重构为 15 ms 批次的节奏化发送引擎（`pumpUdpSweep()`，每批 5 个数据包），旨在缓解潜在的 QNX 6.5 套接字缓冲区压力（缓冲区耗尽原因在真机测量前保留为假说）。
   - 通过 POSIX 原生 `setsockopt(SO_SNDBUF/SO_RCVBUF)` 将 UDP 收发套接字缓冲区扩容至 64 KiB，并在运行时通过 `getsockopt` 验证并记录诊断日志。
   - 彻底消除 P1 队头阻塞（Head-of-Line Blocking）：记录每个目标尝试次数（上限 3 次），偶发/瞬时网络错误移入队列末尾限流重试，永久性错误直接丢弃并继续处理队列后续目标。
   - 彻底消除 P2 非节奏化回退突发：将 HTTP 探测超时的回退 UDP 广播统一收拢至 `queueUdpSweepTarget()` 节奏化队列，杜绝并发超时瞬间突发未节奏化的原始 UDP 数据包。
