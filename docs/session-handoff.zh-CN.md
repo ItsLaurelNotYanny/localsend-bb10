@@ -108,6 +108,10 @@
    - 优先攻关客户端单向 HTTPS 支持（使 Passport 能够主动向开启 TLS 加密的官方 iOS / Android / macOS 设备发起安全互传），并评估嵌入式服务端启用 TLS 终止的可行性。
 3. **字符编码与非 ASCII / 特殊字符文件名支持**：
    - 全面审查 HTTP JSON 负载、QML 字符串绑定及 Cascades UI 文件提示弹窗的 UTF-8 编解码链路，彻底收敛传输提示中的文字乱码现象。
+4. **系统级文件“分享”菜单集成（BB10 Invocation Framework）**：
+   - 在 `bar-descriptor.xml` 中注册 `bb.action.SHARE` 动作与 `*/*` MIME 类型（绑定 `file://` URI scheme）的 `invoke-target`；
+   - 支持在 BlackBerry 10 系统原生文件管理器、图库（Pictures）及下载目录中选中文件点击“Share（分享）”时直接出现 LocalSend 选项；
+   - 在 C++ 中监听 `bb::system::InvokeManager::invoked` 信号，解析传入的文件 URI 并自动装载到 `UiController::selectFile()`，无缝拉起主界面 Radar 标签页以便一键选取对端设备发送。
 
 ---
 

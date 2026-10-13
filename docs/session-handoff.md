@@ -108,6 +108,10 @@ Tested and verified on a physical **BlackBerry Passport** running BB10 OS 10.3.x
    - Prioritize unidirectional HTTPS client support (connecting securely to official iOS/Android/macOS peers running TLS mode), evaluating feasibility of embedded server TLS termination.
 3. **Character Encoding & Non-ASCII / Special Filename Handling**:
    - Audit UTF-8 string encoding across HTTP JSON payloads, QML string bindings, and Cascades UI file offer dialogs to eliminate character garbling observed during file transfers.
+4. **System-wide Share Menu Integration (BB10 Invocation Framework)**:
+   - Register an `invoke-target` with `bb.action.SHARE` action and MIME filter `*/*` (with `file://` URI scheme) in `bar-descriptor.xml`.
+   - Enable LocalSend to appear in the BlackBerry 10 native File Manager, Picture Gallery, and system "Share" menus when users select files.
+   - Listen to `bb::system::InvokeManager::invoked` in C++, automatically staging the shared file URI into `UiController::selectFile()` and transitioning to the Radar/Send tab for instant peer selection.
 
 ---
 
