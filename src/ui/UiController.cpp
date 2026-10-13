@@ -7,13 +7,31 @@
 #include <bb/cascades/pickers/FilePicker.hpp>
 #include <bb/cascades/pickers/FilePickerMode.hpp>
 #include <bb/cascades/pickers/FilePickerSortFlag.hpp>
+#include <bb/cascades/Container>
+#include <bb/cascades/Label>
+#include <bb/cascades/Button>
+#include <bb/cascades/StackLayout>
+#include <bb/cascades/StackLayoutProperties>
+#include <bb/cascades/SystemDefaults>
+#include <bb/cascades/TextStyleDefinition>
+#include <bb/cascades/Color>
+#include <bb/cascades/VerticalAlignment>
+#include <bb/cascades/LayoutOrientation>
+#include <bb/system/InvokeManager.hpp>
+#include <bb/system/InvokeRequest.hpp>
+#else
+#include <QDesktopServices>
 #endif
+#include <QUrl>
+#include <QFile>
+#include <QDir>
 
 namespace localsend {
 
 UiController::UiController(Application *app, QObject *parent)
     : QObject(parent)
     , m_app(app)
+    , m_peersRevision(0)
     , m_transferState("Idle")
     , m_transferProgress(0)
     , m_transferStatusText("Ready")
@@ -26,6 +44,8 @@ UiController::UiController(Application *app, QObject *parent)
             this, SIGNAL(deviceAliasChanged()));
     connect(m_app, SIGNAL(localInfoChanged(DeviceInfo)),
             this, SIGNAL(devicePortChanged()));
+    connect(m_app, SIGNAL(transferSlotChanged(bool,QString)),
+            this, SLOT(onTransferSlotChanged(bool,QString)));
 
     // Connect DiscoveryManager signals
     if (m_app->discoveryManager()) {
@@ -35,6 +55,8 @@ UiController::UiController(Application *app, QObject *parent)
                 this, SLOT(onPeerRemoved(QString)));
         connect(m_app->discoveryManager(), SIGNAL(discoveryError(QString)),
                 this, SLOT(onDiscoveryError(QString)));
+        connect(m_app->discoveryManager(), SIGNAL(scanningChanged(bool)),
+                this, SLOT(onScanningChanged(bool)));
     }
 
     // Connect SendManager signals
@@ -59,6 +81,10 @@ UiController::UiController(Application *app, QObject *parent)
                 this, SLOT(onReceiveFinished(QString,QString)));
         connect(m_app->receiveServer(), SIGNAL(receiveCancelled(QString,QString)),
                 this, SLOT(onReceiveCancelled(QString,QString)));
+        connect(m_app->receiveServer(), SIGNAL(offerCancelled(QString,QString)),
+                this, SLOT(onReceiveOfferCancelled(QString,QString)));
+        connect(m_app->receiveServer(), SIGNAL(receiveFailed(QString,QString)),
+                this, SLOT(onReceiveFailed(QString,QString)));
     }
 
     updatePeersModel();
@@ -66,6 +92,12 @@ UiController::UiController(Application *app, QObject *parent)
 
 UiController::~UiController()
 {
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    if (m_activeFilePicker) {
+        delete m_activeFilePicker.data();
+        m_activeFilePicker = 0;
+    }
+#endif
 }
 
 QString UiController::deviceAlias() const
@@ -95,6 +127,24 @@ QString UiController::receiveDirectory() const
 bool UiController::transferActive() const
 {
     return m_app->isTransferActive();
+}
+
+bool UiController::isScanning() const
+{
+    return m_app->discoveryManager() ? m_app->discoveryManager()->isScanning() : false;
+}
+
+QString UiController::networkStatus() const
+{
+    if (!m_app->discoveryManager()) {
+        return "Network: Offline";
+    }
+    QString ip = m_app->discoveryManager()->activeInterfaceAddress();
+    if (ip.isEmpty()) {
+        return "Wi-Fi: Disconnected";
+    }
+    QString subnet = m_app->discoveryManager()->activeInterfaceSubnet();
+    return QString("Wi-Fi: %1 (%2)").arg(ip).arg(subnet);
 }
 
 void UiController::refreshDevices()
@@ -127,11 +177,18 @@ void UiController::addManualPeer(const QString &ipv4, int port)
 void UiController::chooseFile()
 {
 #if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    if (m_activeFilePicker) {
+        // Picker dialog already active; prevent duplicate allocations
+        return;
+    }
+
     bb::cascades::pickers::FilePicker *picker = new bb::cascades::pickers::FilePicker(this);
+    m_activeFilePicker = picker;
     picker->setType(bb::cascades::pickers::FileType::Other);
     picker->setTitle(tr("Select File to Send"));
     picker->setMode(bb::cascades::pickers::FilePickerMode::Picker);
     connect(picker, SIGNAL(fileSelected(QStringList)), this, SLOT(onFilePicked(QStringList)));
+    connect(picker, SIGNAL(canceled()), this, SLOT(onFilePickerCanceled()));
     picker->open();
 #else
     qDebug() << "[UiController] chooseFile called in non-Cascades environment";
@@ -140,9 +197,25 @@ void UiController::chooseFile()
 
 void UiController::onFilePicked(const QStringList &selectedFiles)
 {
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    if (m_activeFilePicker) {
+        m_activeFilePicker->deleteLater();
+        m_activeFilePicker = 0;
+    }
+#endif
     if (!selectedFiles.isEmpty()) {
         setSelectedFilePath(selectedFiles.first());
     }
+}
+
+void UiController::onFilePickerCanceled()
+{
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    if (m_activeFilePicker) {
+        m_activeFilePicker->deleteLater();
+        m_activeFilePicker = 0;
+    }
+#endif
 }
 
 void UiController::setSelectedFilePath(const QString &path)
@@ -159,6 +232,7 @@ void UiController::setSelectedFilePath(const QString &path)
     m_selectedFileSize = formatBytes(fi.size());
 
     emit selectedFileChanged();
+    populatePeers();
 }
 
 void UiController::clearSelectedFile()
@@ -168,6 +242,7 @@ void UiController::clearSelectedFile()
     m_selectedFileSize.clear();
 
     emit selectedFileChanged();
+    populatePeers();
 }
 
 bool UiController::sendSelectedFile(const QString &fingerprint)
@@ -219,10 +294,54 @@ bool UiController::sendSelectedFile(const QString &fingerprint)
     return true;
 }
 
+void UiController::setSelectedIncomingFileId(const QString &fileId)
+{
+    selectIncomingFile(fileId);
+}
+
+void UiController::selectIncomingFile(const QString &fileId)
+{
+    if (fileId.isEmpty() || m_selectedIncomingFileId == fileId) {
+        return;
+    }
+
+    for (int i = 0; i < m_incomingFiles.size(); ++i) {
+        QVariantMap map = m_incomingFiles.at(i).toMap();
+        if (map.value("id").toString() == fileId) {
+            m_selectedIncomingFileId = fileId;
+            m_incomingFileId = fileId;
+            m_incomingFileName = map.value("fileName").toString();
+            m_incomingFileSize = map.value("formattedSize").toString();
+            emit selectedIncomingFileIdChanged();
+            emit incomingOfferChanged();
+            return;
+        }
+    }
+}
+
 void UiController::acceptIncoming(const QString &requestId, const QString &fileId)
 {
+    if (!m_hasIncomingOffer || m_incomingRequestId != requestId) {
+        return;
+    }
+
+    QString targetFileId = fileId.trimmed().isEmpty() ? m_selectedIncomingFileId : fileId.trimmed();
+    bool ok = false;
     if (m_app->receiveServer()) {
-        m_app->receiveServer()->accept(requestId, fileId);
+        ok = m_app->receiveServer()->accept(requestId, targetFileId);
+    }
+
+    if (!ok) {
+        m_hasIncomingOffer = false;
+        m_transferState = "Failed";
+        m_lastError = "Failed to accept file (destination directory or storage error)";
+        m_transferStatusText = m_lastError;
+
+        emit incomingOfferChanged();
+        emit transferStateChanged();
+        emit transferStatusTextChanged();
+        emit lastErrorChanged();
+        return;
     }
 
     m_hasIncomingOffer = false;
@@ -238,6 +357,10 @@ void UiController::acceptIncoming(const QString &requestId, const QString &fileI
 
 void UiController::rejectIncoming(const QString &requestId)
 {
+    if (!m_hasIncomingOffer || m_incomingRequestId != requestId) {
+        return;
+    }
+
     if (m_app->receiveServer()) {
         m_app->receiveServer()->reject(requestId);
     }
@@ -253,14 +376,26 @@ void UiController::rejectIncoming(const QString &requestId)
 
 void UiController::cancelTransfer()
 {
-    if (m_app->sendManager() && m_app->sendManager()->state() != SendManager::State_Idle) {
+    bool sendActive = m_app->sendManager() &&
+                      (m_app->sendManager()->state() == SendManager::State_Preparing ||
+                       m_app->sendManager()->state() == SendManager::State_Uploading);
+
+    if (sendActive) {
         m_app->sendManager()->cancel();
-    } else if (m_app->receiveServer()) {
-        if (m_app->receiveServer()->hasPendingOffer()) {
-            m_app->receiveServer()->reject(m_app->receiveServer()->pendingRequestId());
-        } else if (m_app->receiveServer()->hasActiveSession()) {
-            m_app->receiveServer()->cancelLocal(m_app->receiveServer()->pendingRequestId());
+    } else if (m_app->receiveServer() && m_app->receiveServer()->hasPendingOffer()) {
+        m_app->receiveServer()->reject(m_app->receiveServer()->pendingRequestId());
+    } else if (m_app->receiveServer() && m_app->receiveServer()->hasActiveSession()) {
+        m_app->receiveServer()->cancelLocal(m_app->receiveServer()->activeRequestId());
+    } else if (m_app->isTransferActive()) {
+        QString activeId = m_app->activeTransferId();
+        if (m_app->sendManager() && m_app->sendManager()->activeRequestId() == activeId) {
+            m_app->sendManager()->cancel();
+        } else if (m_app->receiveServer()) {
+            m_app->receiveServer()->cancelLocal(activeId);
         }
+    } else {
+        // Nothing active to cancel
+        return;
     }
 
     m_transferState = "Cancelled";
@@ -274,6 +409,75 @@ void UiController::clearError()
 {
     m_lastError.clear();
     emit lastErrorChanged();
+}
+
+void UiController::openFile(const QString &filePath)
+{
+    QString target = filePath.trimmed().isEmpty() ? m_lastSavedFilePath : filePath.trimmed();
+    if (target.isEmpty() || !QFile::exists(target)) {
+        m_lastError = "File does not exist: " + target;
+        emit lastErrorChanged();
+        return;
+    }
+
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    bb::system::InvokeManager mgr;
+    bb::system::InvokeRequest request;
+    request.setAction("bb.action.VIEW");
+    request.setUri(QUrl::fromLocalFile(target));
+    if (target.endsWith(".txt", Qt::CaseInsensitive)) {
+        request.setMimeType("text/plain");
+    }
+    mgr.invoke(request);
+#else
+    QDesktopServices::openUrl(QUrl::fromLocalFile(target));
+#endif
+}
+
+void UiController::openReceiveDirectory()
+{
+    QString dirPath = m_app->receiveDirectory();
+    QDir dir(dirPath);
+    if (!dir.exists()) {
+        dir.mkpath(".");
+    }
+
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    bb::system::InvokeManager mgr;
+    bb::system::InvokeRequest request;
+    request.setAction("bb.action.OPEN");
+    request.setUri(QUrl::fromLocalFile(dirPath));
+    mgr.invoke(request);
+#else
+    QDesktopServices::openUrl(QUrl::fromLocalFile(dirPath));
+#endif
+}
+
+QString UiController::diagnosticLogPath() const
+{
+    QString docPath = "/accounts/1000/shared/documents/localsend_launch.txt";
+    if (QFile::exists(docPath)) {
+        return docPath;
+    }
+    QString dataPath = "data/localsend_launch.txt";
+    if (QFile::exists(dataPath)) {
+        return dataPath;
+    }
+    return docPath;
+}
+
+void UiController::openDiagnosticLog()
+{
+    QString path = diagnosticLogPath();
+    if (!QFile::exists(path)) {
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream out(&f);
+            out << "LocalSend diagnostic log initialized.\n";
+            f.close();
+        }
+    }
+    openFile(path);
 }
 
 void UiController::onPeerUpdated(const PeerDevice &peer)
@@ -294,6 +498,13 @@ void UiController::onDiscoveryError(const QString &error)
     emit lastErrorChanged();
 }
 
+void UiController::onScanningChanged(bool isScanning)
+{
+    Q_UNUSED(isScanning);
+    emit isScanningChanged();
+    emit networkStatusChanged();
+}
+
 void UiController::updatePeersModel()
 {
     if (!m_app->discoveryManager()) {
@@ -305,6 +516,9 @@ void UiController::updatePeersModel()
 
     for (int i = 0; i < peerList.size(); ++i) {
         const PeerDevice &p = peerList.at(i);
+        if (p.info.fingerprint == m_app->localInfo().fingerprint) {
+            continue;
+        }
         QVariantMap map;
         map["alias"] = p.info.alias.isEmpty() ? "Unknown Device" : p.info.alias;
         map["deviceModel"] = p.info.deviceModel.isEmpty() ? "LocalSend Peer" : p.info.deviceModel;
@@ -319,7 +533,10 @@ void UiController::updatePeersModel()
     }
 
     m_peers = list;
+    m_peersRevision++;
     emit peersChanged();
+    emit networkStatusChanged();
+    populatePeers();
 }
 
 void UiController::onSendStateChanged(const QString &requestId, const QString &state)
@@ -387,12 +604,26 @@ void UiController::onIncomingOffer(const QString &requestId, const PeerDevice &p
     m_incomingRequestId = requestId;
     m_incomingPeerAlias = peer.info.alias.isEmpty() ? peer.address.toString() : peer.info.alias;
 
+    m_incomingFiles.clear();
+    for (int i = 0; i < files.size(); ++i) {
+        const FileMeta &meta = files.at(i);
+        QVariantMap map;
+        map["id"] = meta.id;
+        map["fileName"] = meta.fileName;
+        map["size"] = meta.size;
+        map["formattedSize"] = formatBytes(meta.size);
+        map["fileType"] = meta.fileType;
+        m_incomingFiles.append(map);
+    }
+
     if (!files.isEmpty()) {
         const FileMeta &meta = files.first();
+        m_selectedIncomingFileId = meta.id;
         m_incomingFileName = meta.fileName;
         m_incomingFileSize = formatBytes(meta.size);
         m_incomingFileId = meta.id;
     } else {
+        m_selectedIncomingFileId.clear();
         m_incomingFileName = "Unknown";
         m_incomingFileSize = "0 B";
         m_incomingFileId.clear();
@@ -402,6 +633,7 @@ void UiController::onIncomingOffer(const QString &requestId, const PeerDevice &p
     m_transferStatusText = QString("Incoming transfer request from %1").arg(m_incomingPeerAlias);
 
     emit incomingOfferChanged();
+    emit selectedIncomingFileIdChanged();
     emit transferStateChanged();
     emit transferStatusTextChanged();
 }
@@ -427,11 +659,13 @@ void UiController::onReceiveFinished(const QString &sessionId, const QString &sa
     m_transferState = "Completed";
     m_transferProgress = 100;
     m_hasIncomingOffer = false;
+    m_lastSavedFilePath = savedPath;
 
     QString baseName = QFileInfo(savedPath).fileName();
-    m_transferStatusText = QString("Received %1 successfully!").arg(baseName);
+    m_transferStatusText = QString("Received %1 successfully! Saved to: %2").arg(baseName).arg(savedPath);
 
     emit incomingOfferChanged();
+    emit lastSavedFilePathChanged();
     emit transferStateChanged();
     emit transferProgressChanged();
     emit transferStatusTextChanged();
@@ -450,6 +684,46 @@ void UiController::onReceiveCancelled(const QString &sessionId, const QString &r
     emit transferStatusTextChanged();
 }
 
+void UiController::onReceiveOfferCancelled(const QString &requestId, const QString &reason)
+{
+    if (m_hasIncomingOffer && m_incomingRequestId == requestId) {
+        m_hasIncomingOffer = false;
+        m_transferState = "Idle";
+        m_transferStatusText = QString("Offer cancelled: %1").arg(reason);
+
+        emit incomingOfferChanged();
+        emit transferStateChanged();
+        emit transferStatusTextChanged();
+    }
+}
+
+void UiController::onReceiveFailed(const QString &id, const QString &reason)
+{
+    Q_UNUSED(id);
+    m_hasIncomingOffer = false;
+    m_transferState = "Failed";
+    m_lastError = QString("Receive failed: %1").arg(reason);
+    m_transferStatusText = m_lastError;
+
+    emit incomingOfferChanged();
+    emit transferStateChanged();
+    emit transferStatusTextChanged();
+    emit lastErrorChanged();
+}
+
+void UiController::onTransferSlotChanged(bool busy, const QString &activeRequestId)
+{
+    Q_UNUSED(activeRequestId);
+    if (!busy) {
+        if (m_hasIncomingOffer && m_app->receiveServer() && !m_app->receiveServer()->hasPendingOffer()) {
+            m_hasIncomingOffer = false;
+            emit incomingOfferChanged();
+        }
+    }
+    emit transferStateChanged();
+    populatePeers();
+}
+
 QString UiController::formatBytes(qint64 bytes)
 {
     if (bytes < 1024) {
@@ -464,6 +738,105 @@ QString UiController::formatBytes(qint64 bytes)
         double gb = (double)bytes / (1024.0 * 1024.0 * 1024.0);
         return QString("%1 GB").arg(QString::number(gb, 'f', 2));
     }
+}
+
+void UiController::setPeersContainer(QObject *containerObj)
+{
+    m_peersContainer = containerObj;
+    populatePeers();
+}
+
+void UiController::populatePeers(QObject *containerObj)
+{
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    QObject *target = containerObj ? containerObj : m_peersContainer.data();
+    bb::cascades::Container *container = qobject_cast<bb::cascades::Container*>(target);
+    if (!container) {
+        return;
+    }
+
+    container->removeAll();
+
+    for (int i = 0; i < m_peers.size(); ++i) {
+        QVariantMap p = m_peers.at(i).toMap();
+        QString alias = p.value("alias").toString();
+        QString model = p.value("deviceModel").toString();
+        QString addr = p.value("displayAddress").toString();
+        QString fp = p.value("fingerprint").toString();
+        bool isHttps = p.value("isHttps").toBool();
+
+        bb::cascades::Container *card = new bb::cascades::Container();
+        card->setTopPadding(16.0f);
+        card->setBottomPadding(16.0f);
+        card->setLeftPadding(16.0f);
+        card->setRightPadding(16.0f);
+        card->setBottomMargin(12.0f);
+        card->setBackground(bb::cascades::Color::fromARGB(0xFFF7FAFC));
+
+        bb::cascades::Container *row = new bb::cascades::Container();
+        bb::cascades::StackLayout *layout = new bb::cascades::StackLayout();
+        layout->setOrientation(bb::cascades::LayoutOrientation::LeftToRight);
+        row->setLayout(layout);
+
+        // Left column: Device details
+        bb::cascades::Container *left = new bb::cascades::Container();
+        bb::cascades::StackLayoutProperties *leftProps = new bb::cascades::StackLayoutProperties();
+        leftProps->setSpaceQuota(3.0f);
+        left->setLayoutProperties(leftProps);
+
+        bb::cascades::Label *aliasLabel = new bb::cascades::Label();
+        aliasLabel->setText(alias);
+        aliasLabel->textStyle()->setBase(bb::cascades::SystemDefaults::TextStyles::titleText());
+        aliasLabel->textStyle()->setColor(bb::cascades::Color::fromARGB(0xFF2D3748));
+        left->add(aliasLabel);
+
+        bb::cascades::Label *subLabel = new bb::cascades::Label();
+        subLabel->setText(model + QString::fromUtf8(" • ") + addr);
+        subLabel->textStyle()->setBase(bb::cascades::SystemDefaults::TextStyles::smallText());
+        subLabel->textStyle()->setColor(bb::cascades::Color::fromARGB(0xFF718096));
+        left->add(subLabel);
+
+        if (isHttps) {
+            bb::cascades::Label *httpsLabel = new bb::cascades::Label();
+            httpsLabel->setText("HTTPS not supported in MVP");
+            httpsLabel->textStyle()->setBase(bb::cascades::SystemDefaults::TextStyles::smallText());
+            httpsLabel->textStyle()->setColor(bb::cascades::Color::fromARGB(0xFFE53E3E));
+            left->add(httpsLabel);
+        }
+        row->add(left);
+
+        // Right column: Send button
+        bb::cascades::Button *sendBtn = new bb::cascades::Button();
+        sendBtn->setText("Send");
+        sendBtn->setEnabled(hasSelectedFile() && !transferActive() && !isHttps);
+        sendBtn->setProperty("peerFingerprint", fp);
+        sendBtn->setVerticalAlignment(bb::cascades::VerticalAlignment::Center);
+        bb::cascades::StackLayoutProperties *btnProps = new bb::cascades::StackLayoutProperties();
+        btnProps->setSpaceQuota(1.0f);
+        sendBtn->setLayoutProperties(btnProps);
+
+        connect(sendBtn, SIGNAL(clicked()), this, SLOT(onSendCardButtonClicked()));
+        row->add(sendBtn);
+
+        card->add(row);
+        container->add(card);
+    }
+#else
+    Q_UNUSED(containerObj);
+#endif
+}
+
+void UiController::onSendCardButtonClicked()
+{
+#if defined(BB_CASCADES) || defined(Q_OS_QNX)
+    bb::cascades::Button *btn = qobject_cast<bb::cascades::Button*>(sender());
+    if (btn) {
+        QString fp = btn->property("peerFingerprint").toString();
+        if (!fp.isEmpty()) {
+            sendSelectedFile(fp);
+        }
+    }
+#endif
 }
 
 } // namespace localsend

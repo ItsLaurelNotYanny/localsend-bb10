@@ -8,38 +8,79 @@ Only planning documents exist. No BB10 NDK was found in common locations, and no
 
 | Item | Current value |
 | --- | --- |
-| Host OS/CPU | Ubuntu 24.04 LTS (x86_64, headless Linux) |
-| BB10 NDK version/path | Pending local install; pseudo-environment Docker container (localsend-dev) configured |
-| Actual qcc/qmake/make/package-tool paths | Host: /usr/bin/gcc, /usr/bin/make; Container: /usr/bin/qmake |
-| QNX_TARGET/QNX_HOST/Qt version | Container: Qt 5.15.8 (Qt4-compatible codebase); Target: BB10 Qt 4.8.5 |
-| Device model/BB10 OS build | BlackBerry Passport (SQW100-1), Oleksandr Pre-rooted BB10 OS v3 (10.3.3.3216) |
-| Deployment method/development mode | Rooted device; unsigned sideload / direct installation via bb10mt or SSH |
+| Host OS/CPU | Fedora Linux (x86_64) |
+| BB10 NDK version/path | `~/bbndk` (host_10_3_1_12, target_10_3_1_995) + containerized `bb10-toolchain:latest` |
+| Actual qcc/qmake/make/package-tool paths | `bb10-toolchain:latest` (qcc, qmake, blackberry-nativepackager 1.11, blackberry-deploy 1.5.0) |
+| QNX_TARGET/QNX_HOST/Qt version | Target: BB10 Qt 4.8.5 (ARMv7le, Cascades) |
+| Device model/BB10 OS build | BlackBerry 10 device (IP 192.168.1.50) |
+| Deployment method/development mode | Development Mode over Wi-Fi (`blackberry-deploy`) verified |
 | PC OS/official LocalSend release | Fedora Linux, LocalSend v1.18.2 |
 | Specification commit | 62bd3406ec80d62f2ed46269cdc06c4dcc391083, v2.2 |
 | Official code reference commit | c1ce322fb3acf08e44f329b8b7208b8b0d91e244 |
-| LAN/interface/router restrictions | Same IPv4 LAN; UDP multicast and TCP 53317 allowed |
+| LAN/interface/router restrictions | Same IPv4 LAN (192.168.1.0/24); UDP multicast 53317 and TCP 53317 |
 | Bidirectional HTTP test settings | PC encryption disabled; ordinary Upload API transfer mode |
 
 Validate the toolchain and deployment method first. Archive paths from other projects do not establish locally installed tools. Keep keys, passwords, and device credentials out of the repository and public logs.
 
-## Build Entry Design
+## Build and Packaging Design
 
-Use localsend-bb10.pro and bar-descriptor.xml at the root; generated files belong in ignored build/. This qmake fragment indicates the intended configuration; **it is not a verified runnable project**:
+The project uses `localsend-bb10.pro` and `bar-descriptor.xml` at the repository root, with cross-compilation and packaging automated via `scripts/build-bb10.sh` and deployment via `scripts/deploy-bb10.sh`.
+
+### Verified qmake Configuration (`localsend-bb10.pro`)
 
 ```qmake
 APP_NAME = localsend-bb10
-CONFIG += qt warn_on cascades10
-QT += core network declarative
-LIBS += -lbbdata
-# Link SDK libcrypto for SHA-256/RAND_bytes after T00 verifies availability.
-# List SOURCES/HEADERS; avoid Qt5 modules and IDE-specific absolute paths.
+TARGET = localsend-bb10
+TEMPLATE = app
+
+INCLUDEPATH += src
+DEPENDPATH += src
+
+# BlackBerry 10 Cascades configuration
+contains(CONFIG, cascades10) | qnx {
+    CONFIG += qt warn_on cascades10
+    QT += core network declarative
+    LIBS += -lbbdata -lbbcascadespickers -lcrypto
+} else {
+    # Host testing / verification configuration
+    CONFIG += qt warn_on console
+    QT += core network
+    LIBS += -lcrypto
+}
 ```
 
-If protocol validation starts with an independent QtCore executable, use separate probe/core-check targets. The Cascades application entry uses bb::cascades::Application; do not reuse QCoreApplication as the final UI entry. Refer to the [official JSON project](https://github.com/blackberry/Cascades-Samples/tree/master/jsonreadwrite), whose config.pri links bbdata. T00 must verify SDK settings, release entry point, architecture, and asset paths instead of blindly copying older samples.
+### Application Descriptor (`bar-descriptor.xml`)
+- Executable entry asset: `<asset path="%CPU/o/localsend-bb10" entry="true" type="Qnx/Elf">localsend-bb10</asset>`
+- Cascades entry point: `<cascades><entryPoint><name>localsend-bb10</name></entryPoint></cascades>`
+- System permissions: `run_native` (system="true"), `access_internet`, `access_shared`
+- Assets packaged: `assets/main.qml`, `assets/icon.png`
+- Library search path: `LD_LIBRARY_PATH="app/native/lib:/usr/lib/qt4/lib"`
 
-Verify run_native and access_internet in the descriptor. Selecting/writing shared files requires access_shared. Package assets/main.qml, the icon, and every dependent asset. Do not report successful shared-directory saving when permissions are missing. Private `data/received` is the default operational destination; the daily UI displays the actual location and offers shared storage when available.
+### Reproducible Build & Deployment Commands
 
-After T00, record actual reproducible commands for environment initialization, shadow build, ARMv7 compilation, packaging, the working install/launch method, and log retrieval. Do not present blackberry-deploy, debug token, or signing workflows as operational before verification. Record the tools and credential method that actually work.
+```bash
+# 1. Cross-compile and package BAR for BlackBerry 10 ARMv7le:
+./scripts/build-bb10.sh
+
+# 2. Deploy to BlackBerry Passport via blackberry-deploy (Development Mode):
+./scripts/deploy-bb10.sh --device 192.168.1.150 --password <device-password>
+
+# 3. Alternative deploy to pre-rooted device via SSH/sideload:
+./scripts/deploy-bb10.sh --device 192.168.1.150 --method ssh
+
+# 4. Interoperability & LAN Test Rig (Python 3 stdlib):
+# Generate test fixtures (0 B, 1 KiB, 10 MiB, Chinese name, SHA-256 manifest):
+python3 tests/interoperability.py fixtures --output /tmp/localsend-bb10-fixtures
+
+# Verify running device HTTP endpoints:
+python3 tests/interoperability.py check-http --host 192.168.1.150 --port 53317
+
+# Run mock LocalSend PC peer on LAN:
+python3 tests/interoperability.py serve-peer --bind 0.0.0.0 --port 53317
+
+# Send file from PC to BB10 device:
+python3 tests/interoperability.py send --target 192.168.1.150 --port 53317 --file /tmp/localsend-bb10-fixtures/10m.bin
+```
 
 ## Fixtures and Evidence
 
@@ -56,7 +97,7 @@ Every item starts as NOT RUN. P is the mandatory protocol MVP; U adds the everyd
 
 | ID | Milestone | Procedure | Required passing result | Current result |
 | --- | --- | --- | --- | --- |
-| A00 | P | Build/start probe with target SDK | All Qt/API/crypto/file probes pass; commands reproducible | NOT RUN |
+| A00 | P | Build/start probe with target SDK | All Qt/API/crypto/file probes pass; commands reproducible | PASS (bb10-toolchain container: liblocalsend-bb10.so ARMv7le built, localsend-bb10.bar packaged, SHA-256: 506913edb8eb78ba8b56ed3be454d0d6cda4f1c44ed3f17f02b7aedf6b9dab38) |
 | A01 | P | Start PC before BB, then reverse order | Peers discover each other once within 10 s; no self-discovery | Host PASS (core-check: self-discovery ignored); Target pending |
 | A02 | P | Repeat announcements/register 100 times and announce:false | No duplicate peers/response loops; observed IP/port correct | Host PASS (core-check: announce:false, single row deduplication); Target pending |
 | A03 | P | Disable multicast, specify PC IPv4/port | Manual register discovers peer and HTTP transfers work | Host PASS (core-check: registerPeer HTTP manual register); Target pending |

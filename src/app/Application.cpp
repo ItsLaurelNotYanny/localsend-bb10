@@ -68,9 +68,15 @@ void Application::initSettings()
     m_localInfo.download = false;
 
     // 4. Storage directory
+#if defined(Q_OS_BLACKBERRY) || defined(__QNX__) || defined(BB_CASCADES)
+    QString defaultRxDir = "/accounts/1000/shared/downloads/LocalSend";
+#else
+    QString defaultRxDir = "data/received";
+#endif
+
     QString rxDir = m_settings->value("storage/receiveDirectory").toString();
-    if (rxDir.trimmed().isEmpty()) {
-        rxDir = "data/received";
+    if (rxDir.trimmed().isEmpty() || rxDir == "data/received") {
+        rxDir = defaultRxDir;
         m_settings->setValue("storage/receiveDirectory", rxDir);
     }
     m_receiveDirectory = rxDir;
@@ -93,10 +99,17 @@ bool Application::start(QString *error)
     QDir dir(m_receiveDirectory);
     if (!dir.exists()) {
         if (!dir.mkpath(".")) {
-            if (error) {
-                *error = QString("Failed to create receive directory: %1").arg(m_receiveDirectory);
+            QString fallbackDir = "data/received";
+            QDir fallback(fallbackDir);
+            if (fallback.mkpath(".")) {
+                m_receiveDirectory = fallbackDir;
+            } else {
+                if (error) {
+                    *error = QString("Failed to create receive directory: %1 (fallback %2 also failed)")
+                                 .arg(m_receiveDirectory).arg(fallbackDir);
+                }
+                return false;
             }
-            return false;
         }
     }
 

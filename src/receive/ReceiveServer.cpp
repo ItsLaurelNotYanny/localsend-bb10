@@ -87,7 +87,7 @@ void ReceiveServer::onHeadersReady(const HttpRequestHead &head)
     m_connStates[conn].head = head;
     QString path = head.target.path();
 
-    if (head.method == "GET" && path == "/api/localsend/v2/info") {
+    if (head.method == "GET" && (path == "/api/localsend/v2/info" || path == "/api/localsend/v1/info")) {
         handleInfoRoute(conn);
     } else if (head.method == "POST" && path == "/api/localsend/v2/register") {
         if (head.contentLength > ProtocolJson::MAX_JSON_SIZE) {
@@ -177,15 +177,19 @@ void ReceiveServer::onConnectionDisconnected()
     }
 
     if (m_pendingOffer.connection == conn) {
+        QString reqId = m_pendingOffer.requestId;
         if (m_app) {
             m_app->endTransfer(m_pendingOffer.requestId);
         }
         clearPendingOffer();
+        emit offerCancelled(reqId, "Remote peer disconnected before consent");
     }
 
     if (m_activeSession.connection == conn && m_activeSession.isUploading) {
         // Disconnected mid-upload
+        QString sessId = m_activeSession.sessionId;
         cleanupActiveSession(false);
+        emit receiveFailed(sessId, "Remote peer disconnected during upload");
     }
 
     m_connStates.remove(conn);
@@ -297,10 +301,10 @@ void ReceiveServer::handleCancelRoute(HttpConnection *conn, const HttpRequestHea
     conn->respond(200, "text/plain", "");
 }
 
-void ReceiveServer::accept(const QString &requestId, const QString &fileId)
+bool ReceiveServer::accept(const QString &requestId, const QString &fileId)
 {
     if (m_pendingOffer.requestId != requestId || !m_pendingOffer.files.contains(fileId)) {
-        return;
+        return false;
     }
 
     m_consentTimer->stop();
@@ -320,7 +324,8 @@ void ReceiveServer::accept(const QString &requestId, const QString &fileId)
                 m_app->endTransfer(requestId);
             }
             clearPendingOffer();
-            return;
+            emit receiveFailed(requestId, "Failed to create receive directory");
+            return false;
         }
     }
 
@@ -335,7 +340,8 @@ void ReceiveServer::accept(const QString &requestId, const QString &fileId)
             m_app->endTransfer(requestId);
         }
         clearPendingOffer();
-        return;
+        emit receiveFailed(requestId, "Failed to create destination temporary file");
+        return false;
     }
 
     m_activeSession.requestId = requestId;
@@ -367,6 +373,7 @@ void ReceiveServer::accept(const QString &requestId, const QString &fileId)
     }
 
     m_idleUploadTimer->start(60000); // 60s idle upload start timeout
+    return true;
 }
 
 void ReceiveServer::reject(const QString &requestId)
@@ -490,7 +497,9 @@ bool ReceiveServer::finishUpload(QString *savedPath, int *httpStatus, QString *e
         if (httpStatus) *httpStatus = 400;
         if (error) *error = QString("Incomplete upload: expected %1 bytes, got %2")
                             .arg(m_activeSession.meta.size).arg(m_activeSession.bytesReceived);
+        QString failedSessionId = m_activeSession.sessionId;
         cleanupActiveSession(false);
+        emit receiveFailed(failedSessionId, *error);
         return false;
     }
 
@@ -501,13 +510,32 @@ bool ReceiveServer::finishUpload(QString *savedPath, int *httpStatus, QString *e
             if (httpStatus) *httpStatus = 422;
             if (error) *error = QString("SHA-256 mismatch: declared %1, computed %2")
                                 .arg(m_activeSession.meta.sha256).arg(computed);
+            QString failedSessionId = m_activeSession.sessionId;
             cleanupActiveSession(false);
+            emit receiveFailed(failedSessionId, *error);
             return false;
         }
     }
 
-    m_activeSession.partFile->flush();
+    bool flushOk = m_activeSession.partFile->flush();
+    if (!flushOk || m_activeSession.partFile->error() != QFile::NoError) {
+        if (httpStatus) *httpStatus = 500;
+        if (error) *error = "Failed to flush destination file (I/O error or disk full)";
+        QString failedSessionId = m_activeSession.sessionId;
+        cleanupActiveSession(false);
+        emit receiveFailed(failedSessionId, *error);
+        return false;
+    }
+
     m_activeSession.partFile->close();
+    if (m_activeSession.partFile->error() != QFile::NoError) {
+        if (httpStatus) *httpStatus = 500;
+        if (error) *error = "Failed to close destination file (I/O error)";
+        QString failedSessionId = m_activeSession.sessionId;
+        cleanupActiveSession(false);
+        emit receiveFailed(failedSessionId, *error);
+        return false;
+    }
 
     QString dirPath = m_app ? m_app->receiveDirectory() : "data/received";
     QString finalDest = resolveUniqueDestination(dirPath, m_activeSession.meta.fileName);
@@ -515,7 +543,9 @@ bool ReceiveServer::finishUpload(QString *savedPath, int *httpStatus, QString *e
     if (!QFile::rename(m_activeSession.partFilePath, finalDest)) {
         if (httpStatus) *httpStatus = 500;
         if (error) *error = "Failed to commit destination file";
+        QString failedSessionId = m_activeSession.sessionId;
         cleanupActiveSession(false);
+        emit receiveFailed(failedSessionId, *error);
         return false;
     }
 
@@ -541,18 +571,19 @@ bool ReceiveServer::finishUpload(QString *savedPath, int *httpStatus, QString *e
 
 void ReceiveServer::cancelLocal(const QString &requestId)
 {
-    if (!m_pendingOffer.requestId.isEmpty() && m_pendingOffer.requestId == requestId) {
-        reject(requestId);
+    if (!m_pendingOffer.requestId.isEmpty() && (requestId.isEmpty() || m_pendingOffer.requestId == requestId)) {
+        reject(m_pendingOffer.requestId);
         return;
     }
 
-    if (!m_activeSession.requestId.isEmpty() && m_activeSession.requestId == requestId) {
+    if (!m_activeSession.requestId.isEmpty() && (requestId.isEmpty() || m_activeSession.requestId == requestId || m_activeSession.sessionId == requestId)) {
         QString sessId = m_activeSession.sessionId;
-        if (m_activeSession.connection) {
-            m_activeSession.connection->abort();
-        }
+        HttpConnection *conn = m_activeSession.connection;
         cleanupActiveSession(false);
         emit receiveCancelled(sessId, "Cancelled locally");
+        if (conn) {
+            conn->abort();
+        }
     }
 }
 
@@ -560,11 +591,12 @@ void ReceiveServer::handleCancel(const QString &sessionId, const QHostAddress &p
 {
     if (m_activeSession.sessionId == sessionId && m_activeSession.peerAddress == peer) {
         QString sessId = m_activeSession.sessionId;
-        if (m_activeSession.connection) {
-            m_activeSession.connection->abort();
-        }
+        HttpConnection *conn = m_activeSession.connection;
         cleanupActiveSession(false);
         emit receiveCancelled(sessId, "Cancelled by remote peer");
+        if (conn) {
+            conn->abort();
+        }
     }
 }
 
@@ -581,24 +613,31 @@ void ReceiveServer::onNetworkLost()
 void ReceiveServer::onConsentTimeout()
 {
     if (hasPendingOffer()) {
-        reject(m_pendingOffer.requestId);
+        QString reqId = m_pendingOffer.requestId;
+        reject(reqId);
+        emit offerCancelled(reqId, "Consent timeout");
     }
 }
 
 void ReceiveServer::onIdleUploadTimeout()
 {
     if (hasActiveSession() && !m_activeSession.isUploading) {
+        QString sessId = m_activeSession.sessionId;
         cleanupActiveSession(false);
+        emit receiveFailed(sessId, "Upload initiation timeout");
     }
 }
 
 void ReceiveServer::onInactivityTimeout()
 {
     if (hasActiveSession() && m_activeSession.isUploading) {
-        if (m_activeSession.connection) {
-            m_activeSession.connection->abort();
-        }
+        QString sessId = m_activeSession.sessionId;
+        HttpConnection *conn = m_activeSession.connection;
         cleanupActiveSession(false);
+        emit receiveFailed(sessId, "Upload stalled inactivity timeout");
+        if (conn) {
+            conn->abort();
+        }
     }
 }
 

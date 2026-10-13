@@ -1,0 +1,95 @@
+#!/bin/bash
+set -euo pipefail
+
+# ==============================================================================
+# BlackBerry 10 Universal Build & Packaging Tool
+# Supports any native BB10 Qt4 / Cascades project with .pro and bar-descriptor.xml
+# ==============================================================================
+
+PROJECT_DIR="${1:-.}"
+cd "${PROJECT_DIR}"
+
+echo "========================================================"
+echo "  BlackBerry 10 Universal Build & Packager"
+echo "  Target: BlackBerry 10 (ARMv7le, Cascades / Qt 4.8.5)"
+echo "========================================================"
+
+PRO_FILE=$(find . -maxdepth 1 -name "*.pro" | head -n 1)
+if [ -z "${PRO_FILE}" ]; then
+    echo "ERROR: No .pro file found in ${PROJECT_DIR}"
+    exit 1
+fi
+
+APP_NAME=$(basename "${PRO_FILE}" .pro)
+echo "Project: ${PRO_FILE} (App name: ${APP_NAME})"
+
+if [ ! -f "bar-descriptor.xml" ]; then
+    echo "ERROR: bar-descriptor.xml not found in ${PROJECT_DIR}"
+    exit 1
+fi
+
+export QNX_TARGET="${QNX_TARGET:-/bbndk/target_10_3_1_995/qnx6}"
+export QNX_HOST="${QNX_HOST:-/bbndk/host_10_3_1_12/win32/x86}"
+export QNX_CONFIGURATION="${QNX_CONFIGURATION:-/bbndk/configuration}"
+export MAKEFLAGS="-I${QNX_TARGET}/usr/include"
+
+# 1. Run qmake
+echo "==> 1. Running qmake for ARMv7le Cascades..."
+qmake -spec unsupported/blackberry-armv7le-qcc CONFIG+=cascades10 CONFIG+=release "${PRO_FILE}"
+
+# 2. Sanitize Makefile
+echo "==> 2. Sanitizing generated Makefile for Linux build..."
+python3 /usr/local/bin/sanitize-makefile.py Makefile
+
+# 3. Compile
+echo "==> 3. Compiling binary with qcc / ntoarmv7..."
+make clean >/dev/null 2>&1 || true
+make -j"$(nproc)"
+
+# 4. Locate binary and stage
+echo "==> 4. Staging binary for BlackBerry ARM package..."
+mkdir -p "arm/o.le-v7"
+SO_FILE=$(find . -maxdepth 1 -name "lib${APP_NAME}.so.1.0.0" -o -name "${APP_NAME}" | head -n 1)
+if [ -z "${SO_FILE}" ]; then
+    SO_FILE=$(find . -maxdepth 1 -name "*.so.1.0.0" | head -n 1)
+fi
+
+if [ -n "${SO_FILE}" ] && [ -f "${SO_FILE}" ]; then
+    cp -f "${SO_FILE}" "arm/o.le-v7/${APP_NAME}"
+    cp -f "${SO_FILE}" "arm/o.le-v7/${APP_NAME}.so"
+    echo "Staged binaries: arm/o.le-v7/${APP_NAME} and arm/o.le-v7/${APP_NAME}.so"
+else
+    echo "ERROR: Could not find compiled binary"
+    exit 1
+fi
+
+# 5. Package BAR
+echo "==> 5. Packaging .bar with blackberry-nativepackager..."
+EXTRA_ARGS=()
+if [ -d "assets" ]; then
+    EXTRA_ARGS+=("-C" "." "assets")
+fi
+if [ -f "icon.png" ]; then
+    EXTRA_ARGS+=("-e" "icon.png" "icon.png")
+fi
+
+if grep -q "${APP_NAME}.so" bar-descriptor.xml; then
+    ENTRY_FLAG=("-e" "arm/o.le-v7/${APP_NAME}.so" "${APP_NAME}.so")
+else
+    ENTRY_FLAG=("-e" "arm/o.le-v7/${APP_NAME}" "${APP_NAME}")
+fi
+
+blackberry-nativepackager \
+    -package "${APP_NAME}.bar" \
+    -devMode \
+    bar-descriptor.xml \
+    "${ENTRY_FLAG[@]}" \
+    "${EXTRA_ARGS[@]}"
+
+echo "========================================================"
+echo "  Build & Packaging Succeeded!"
+echo "  Artifact: $(pwd)/${APP_NAME}.bar"
+if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "${APP_NAME}.bar"
+fi
+echo "========================================================"

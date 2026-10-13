@@ -33,7 +33,7 @@ public:
     void setDiscoveryManager(DiscoveryManager *discovery) { m_discovery = discovery; }
 
     // T05: Asynchronous consent entry points
-    void accept(const QString &requestId, const QString &fileId);
+    bool accept(const QString &requestId, const QString &fileId);
     void reject(const QString &requestId);
 
     // T06: Core upload handling entry points
@@ -42,7 +42,7 @@ public:
     bool finishUpload(QString *savedPath = 0, int *httpStatus = 0, QString *error = 0);
 
     // T08: Cancellation and lifecycle entry points
-    void cancelLocal(const QString &requestId);
+    void cancelLocal(const QString &requestId = QString());
     void handleCancel(const QString &sessionId, const QHostAddress &peer);
     void onNetworkLost();
 
@@ -51,15 +51,18 @@ public:
     QString pendingRequestId() const { return m_pendingOffer.requestId; }
     bool hasActiveSession() const { return !m_activeSession.sessionId.isEmpty(); }
     QString activeSessionId() const { return m_activeSession.sessionId; }
+    QString activeRequestId() const { return m_activeSession.requestId; }
 
 signals:
     // T05
     void incomingOffer(const QString &requestId, const PeerDevice &peer,
                        const QList<FileMeta> &files);
+    void offerCancelled(const QString &requestId, const QString &reason);
 
     // T06
     void receiveProgress(const QString &sessionId, qint64 done, qint64 total);
     void receiveFinished(const QString &sessionId, const QString &savedPath);
+    void receiveFailed(const QString &sessionIdOrRequestId, const QString &reason);
 
     // T08
     void receiveCancelled(const QString &sessionId, const QString &reason);
