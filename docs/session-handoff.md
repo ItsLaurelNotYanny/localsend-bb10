@@ -14,7 +14,7 @@ This briefing provides the complete state and context for continuing development
   - **SHA-256**: `9ad0b10f45818df30f0f5b6bb8fe74d9f65a957070146edd18d11370a381bd1b`
   - **App Icon**: BlackBerry 10 obsidian dark squircle base with 1:1 official LocalSend proportions, featuring radiant teal radar arcs and center deep black BlackBerry 7-dot fruit logo (`144x144` RGBA PNG).
 - **Test Suite**: 66/66 PASS in host container (`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`), and verified passing under isolated network (`--network none`).
-- **Review Cadence**: Synchronized at ~10-minute intervals between agy and Codex. Physical device verification complete (12-round scan capture + bidirectional transfers), handed off to Codex for final review and release tagging.
+- **Review Cadence**: Synchronized at 15-minute intervals between agy and Codex. Physical device verification complete (12-round scan capture + bidirectional transfers), handed off to Codex for final review and release tagging.
 
 ---
 
@@ -85,9 +85,9 @@ Tested and verified on a physical **BlackBerry Passport** running BB10 OS 10.3.x
 
 ## 4. Key Verification Findings: Issue 2 Resolution
 
-### Root Cause and Implementation Summary
+### Implementation Summary & Hypotheses
 1. **QNX 6.5 Socket Buffer Pacing Hypothesis (`io-pkt`)**:
-   - Paced transmission via `m_udpSweepTimer` (15 ms intervals, 5 datagrams/batch) and expanded socket buffers to 64 KiB mitigate burst saturation. Transient `ENOBUFS` re-queuing prevents target drops (socket buffer exhaustion retained as design hypothesis rather than on-device measured counter).
+   - Bounded retries defer transient failures and abandon a target after three failed write attempts; transmission pacing via `m_udpSweepTimer` (15 ms intervals, 5 datagrams/batch) and buffer expansion to 64 KiB aim to mitigate pressure, while socket buffer exhaustion causes and delivery effects remain design hypotheses.
 2. **QUdpSocket Validity in Qt**:
    - A bound `QUdpSocket` in Qt has `isOpen() == false` because `bind()` does not open the underlying `QIODevice`. Checking `isOpen()` caused UDP writes to silently skip. Replaced with `(m_udpSocket->isValid() || m_udpSocket->isOpen())`.
 3. **Target Prioritization**:

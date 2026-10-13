@@ -61,6 +61,26 @@ $ curl -s http://192.168.3.124:53317/api/localsend/v2/info
 }
 ```
 
+### 4. BlackBerry Passport Physical Media Storage Verification (Direct SMB Fetch & Hash)
+
+Direct physical filesystem verification on target device `192.168.3.124` via native BlackBerry 10 Samba media share (`//192.168.3.124/media`), retrieving files from Passport internal storage (`/accounts/1000/shared/` corresponding to `media/`) and computing SHA-256 on target device payloads:
+
+```sh
+$ smbclient //192.168.3.124/media -U "blackberry%***" -c 'cd downloads; get "Mar 01.pdf"; cd LocalSend; get "Screenshot From 2025-10-24 10-33-53.png"; get "Assessment.pdf"; cd ../../camera; get "IMG_20240202_162742.jpg"; get "IMG_20261010_185044.jpg"'
+getting file \downloads\Mar 01.pdf of size 56565 as Mar 01.pdf
+getting file \downloads\LocalSend\Screenshot From 2025-10-24 10-33-53.png of size 183144 as Screenshot From 2025-10-24 10-33-53.png
+getting file \downloads\LocalSend\Assessment.pdf of size 32445 as Assessment.pdf
+getting file \camera\IMG_20240202_162742.jpg of size 1138317 as IMG_20240202_162742.jpg
+getting file \camera\IMG_20261010_185044.jpg of size 1640388 as IMG_20261010_185044.jpg
+
+$ sha256sum /tmp/passport_verified/*
+8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257  /tmp/passport_verified/Assessment.pdf
+cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da  /tmp/passport_verified/IMG_20240202_162742.jpg
+aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3  /tmp/passport_verified/IMG_20261010_185044.jpg
+4e6584fff8cf8e7c7e520e8247a13f237e5f63ca72b306b35923d9f67549f390  /tmp/passport_verified/Mar 01.pdf
+ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7  /tmp/passport_verified/Screenshot From 2025-10-24 10-33-53.png
+```
+
 ## Journal Log Correlation
 
 From `tests/fedora_localsend_journal.log`:
