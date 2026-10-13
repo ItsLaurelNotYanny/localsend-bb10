@@ -1,66 +1,82 @@
-[2026-10-13 13:21:58.893297] [START] Passive UDP Discovery Sniffer started on 0.0.0.0:53317 (non-interfering)
-[2026-10-13 13:22:10.463057] [UDP_PACKET] 192.168.3.233:53317 -> alias='Tidy Peach' ann=False model='iPhone' fp=C4D1C759 proto=https:53317 (229B)
-[2026-10-13 13:22:10.512670] [SCAN_BURST] === Passport Scan Round #1 Detected ===
-[2026-10-13 13:22:10.512843] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (279B)
-[2026-10-13 13:22:10.623890] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (279B)
-[2026-10-13 13:22:20.217601] [SCAN_BURST] === Passport Scan Round #2 Detected ===
-[2026-10-13 13:22:20.217866] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:22:20.249680] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:22:20.352283] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:22:26.707893] [SCAN_BURST] === Passport Scan Round #3 Detected ===
-[2026-10-13 13:22:26.708238] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:22:26.803488] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:22:26.804151] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:22:26.862734] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:22:27.149108] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:22:41.329717] [UDP_PACKET] 192.168.3.123:53317 -> alias='Secret Tomato' ann=False model='Linux' fp=95A93472 proto=http:53317 (231B)
-[2026-10-13 13:22:41.330513] [UDP_PACKET] 100.127.1.35:53317 -> alias='Secret Tomato' ann=False model='Linux' fp=95A93472 proto=http:53317 (231B)
-[2026-10-13 13:22:41.830956] [UDP_PACKET] 192.168.3.123:53317 -> alias='Secret Tomato' ann=False model='Linux' fp=95A93472 proto=http:53317 (231B)
-[2026-10-13 13:22:41.831397] [UDP_PACKET] 100.127.1.35:53317 -> alias='Secret Tomato' ann=False model='Linux' fp=95A93472 proto=http:53317 (231B)
-[2026-10-13 13:22:43.833449] [UDP_PACKET] 192.168.3.123:53317 -> alias='Secret Tomato' ann=False model='Linux' fp=95A93472 proto=http:53317 (231B)
-[2026-10-13 13:22:43.834237] [UDP_PACKET] 100.127.1.35:53317 -> alias='Secret Tomato' ann=False model='Linux' fp=95A93472 proto=http:53317 (231B)
-[2026-10-13 13:22:53.342642] [SCAN_BURST] === Passport Scan Round #4 Detected ===
-[2026-10-13 13:22:53.343079] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:22:53.427962] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:22:53.428504] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:23:23.397802] [SCAN_BURST] === Passport Scan Round #5 Detected ===
-[2026-10-13 13:23:23.398304] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:23:23.431331] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:23:23.533859] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:23:40.748513] [SCAN_BURST] === Passport Scan Round #6 Detected ===
-[2026-10-13 13:23:40.749047] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:23:40.840591] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:24:10.808569] [SCAN_BURST] === Passport Scan Round #7 Detected ===
-[2026-10-13 13:24:10.808860] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:24:10.843417] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:24:10.946735] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:24:15.247424] [SCAN_BURST] === Passport Scan Round #8 Detected ===
-[2026-10-13 13:24:15.247920] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:24:15.348737] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:24:15.349693] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:24:40.523606] [SCAN_BURST] === Passport Scan Round #9 Detected ===
-[2026-10-13 13:24:40.524427] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:24:40.539521] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:24:40.642211] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:24:40.681756] [UDP_PACKET] 192.168.3.161:51452 -> alias='Good Strawberry' ann=False model='macOS' fp=640A6CBE proto=http:53317 (255B)
-[2026-10-13 13:24:40.682476] [UDP_PACKET] 192.168.3.161:61975 -> alias='Good Strawberry' ann=False model='macOS' fp=640A6CBE proto=http:53317 (255B)
-[2026-10-13 13:25:10.578048] [SCAN_BURST] === Passport Scan Round #10 Detected ===
-[2026-10-13 13:25:10.599416] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:25:38.032406] [SCAN_BURST] === Passport Scan Round #11 Detected ===
-[2026-10-13 13:25:38.033038] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:25:38.089746] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:26:04.438528] [SCAN_BURST] === Passport Scan Round #12 Detected ===
-[2026-10-13 13:26:04.439015] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:26:04.508142] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:26:04.610684] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:26:22.047805] [SCAN_BURST] === Passport Scan Round #13 Detected ===
-[2026-10-13 13:26:22.048214] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:26:22.121711] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:26:22.122126] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:26:52.045490] [SCAN_BURST] === Passport Scan Round #14 Detected ===
-[2026-10-13 13:26:52.045901] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:26:52.125737] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:26:52.128912] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:27:08.986433] [SCAN_BURST] === Passport Scan Round #15 Detected ===
-[2026-10-13 13:27:08.986885] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
-[2026-10-13 13:27:09.021054] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=False model='BlackBerry Passport' fp=706d97c2 proto=http:53317 (278B)
+[2026-10-13 14:21:01.113897] [START] Passive Multicast UDP Sniffer started on 224.0.0.167:53317 (strictly zero-interference)
+[2026-10-13 14:21:27.021306] [BURST_DETECTED] === Passport Scan Burst #1 from 192.168.3.124 ===
+[2026-10-13 14:21:27.021689] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:21:56.819249] [BURST_DETECTED] === Passport Scan Burst #2 from 192.168.3.124 ===
+[2026-10-13 14:21:56.819408] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:22:27.846800] [BURST_DETECTED] === Passport Scan Burst #3 from 192.168.3.124 ===
+[2026-10-13 14:22:27.846999] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:23:11.162330] [BURST_DETECTED] === Passport Scan Burst #4 from 192.168.3.124 ===
+[2026-10-13 14:23:11.162459] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:24:14.242756] [BURST_DETECTED] === Passport Scan Burst #5 from 192.168.3.124 ===
+[2026-10-13 14:24:14.243182] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:24:14.856273] [UDP_PACKET] 192.168.3.161:62196 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:24:14.856799] [UDP_PACKET] 192.168.3.161:59858 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:24:14.857300] [UDP_PACKET] 192.168.3.161:53248 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:24:14.857827] [UDP_PACKET] 192.168.3.161:62399 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:24:43.631409] [BURST_DETECTED] === Passport Scan Burst #6 from 192.168.3.124 ===
+[2026-10-13 14:24:43.632455] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:25:02.472569] [BURST_DETECTED] === Passport Scan Burst #7 from 192.168.3.124 ===
+[2026-10-13 14:25:02.473153] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:25:20.290996] [BURST_DETECTED] === Passport Scan Burst #8 from 192.168.3.124 ===
+[2026-10-13 14:25:20.291469] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:25:20.905553] [UDP_PACKET] 192.168.3.161:61457 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:25:20.906675] [UDP_PACKET] 192.168.3.161:51353 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:25:21.008437] [UDP_PACKET] 192.168.3.161:51236 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:25:21.011400] [UDP_PACKET] 192.168.3.161:59531 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:25:37.186775] [BURST_DETECTED] === Passport Scan Burst #9 from 192.168.3.124 ===
+[2026-10-13 14:25:37.194673] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:26:11.900413] [BURST_DETECTED] === Passport Scan Burst #10 from 192.168.3.124 ===
+[2026-10-13 14:26:11.900664] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:26:12.515326] [UDP_PACKET] 192.168.3.161:60218 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:26:12.515618] [UDP_PACKET] 192.168.3.161:54657 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:26:30.540169] [BURST_DETECTED] === Passport Scan Burst #11 from 192.168.3.124 ===
+[2026-10-13 14:26:30.540420] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:26:31.151788] [UDP_PACKET] 192.168.3.161:62149 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:26:31.152112] [UDP_PACKET] 192.168.3.161:58659 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:26:31.153105] [UDP_PACKET] 192.168.3.161:65400 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:26:50.710946] [BURST_DETECTED] === Passport Scan Burst #12 from 192.168.3.124 ===
+[2026-10-13 14:26:50.711296] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:26:51.325277] [UDP_PACKET] 192.168.3.161:53453 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:26:51.325989] [UDP_PACKET] 192.168.3.161:52439 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:26:51.326534] [UDP_PACKET] 192.168.3.161:61009 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:26:51.327227] [UDP_PACKET] 192.168.3.161:59864 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:27:20.714923] [BURST_DETECTED] === Passport Scan Burst #13 from 192.168.3.124 ===
+[2026-10-13 14:27:20.715095] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:27:50.718400] [BURST_DETECTED] === Passport Scan Burst #14 from 192.168.3.124 ===
+[2026-10-13 14:27:50.718787] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:28:34.750800] [BURST_DETECTED] === Passport Scan Burst #15 from 192.168.3.124 ===
+[2026-10-13 14:28:34.751157] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:29:08.030756] [BURST_DETECTED] === Passport Scan Burst #16 from 192.168.3.124 ===
+[2026-10-13 14:29:08.031002] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:29:38.035021] [BURST_DETECTED] === Passport Scan Burst #17 from 192.168.3.124 ===
+[2026-10-13 14:29:38.035344] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:30:08.038404] [BURST_DETECTED] === Passport Scan Burst #18 from 192.168.3.124 ===
+[2026-10-13 14:30:08.038712] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:30:52.174547] [BURST_DETECTED] === Passport Scan Burst #19 from 192.168.3.124 ===
+[2026-10-13 14:30:52.177055] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:30:52.787254] [UDP_PACKET] 192.168.3.161:58382 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:30:52.787762] [UDP_PACKET] 192.168.3.161:59005 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:30:52.788174] [UDP_PACKET] 192.168.3.161:61516 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:30:52.788544] [UDP_PACKET] 192.168.3.161:60312 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:31:22.177186] [BURST_DETECTED] === Passport Scan Burst #20 from 192.168.3.124 ===
+[2026-10-13 14:31:22.177567] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:31:52.179696] [BURST_DETECTED] === Passport Scan Burst #21 from 192.168.3.124 ===
+[2026-10-13 14:31:52.180039] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:32:01.601175] [BURST_DETECTED] === Passport Scan Burst #22 from 192.168.3.124 ===
+[2026-10-13 14:32:01.601537] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:32:09.383838] [BURST_DETECTED] === Passport Scan Burst #23 from 192.168.3.124 ===
+[2026-10-13 14:32:09.384270] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:32:23.310481] [BURST_DETECTED] === Passport Scan Burst #24 from 192.168.3.124 ===
+[2026-10-13 14:32:23.310992] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:32:53.313864] [BURST_DETECTED] === Passport Scan Burst #25 from 192.168.3.124 ===
+[2026-10-13 14:32:53.314121] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:32:56.591356] [BURST_DETECTED] === Passport Scan Burst #26 from 192.168.3.124 ===
+[2026-10-13 14:32:56.591691] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:33:26.696851] [BURST_DETECTED] === Passport Scan Burst #27 from 192.168.3.124 ===
+[2026-10-13 14:33:26.697275] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:33:26.901502] [UDP_PACKET] 192.168.3.161:64306 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:33:26.903575] [UDP_PACKET] 192.168.3.161:63886 -> alias='Good Strawberry' ann=False model='macOS' fp='640A6CBE76F440C93FF915E28666CEA9D1877A679861E2131E57A7B0E73D886C' proto=http:53317 (255B)
+[2026-10-13 14:33:38.165508] [BURST_DETECTED] === Passport Scan Burst #28 from 192.168.3.124 ===
+[2026-10-13 14:33:38.165924] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
+[2026-10-13 14:34:08.271578] [BURST_DETECTED] === Passport Scan Burst #29 from 192.168.3.124 ===
+[2026-10-13 14:34:08.271998] [UDP_PACKET] 192.168.3.124:53317 -> alias='BlackBerry Passport' ann=True model='BlackBerry Passport' fp='706d97c2-9785-4fb8-948e-947729b96fc2' proto=http:53317 (278B)
