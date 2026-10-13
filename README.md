@@ -33,8 +33,7 @@ This project is built purely out of passion for retro hardware preservation—gi
 Due to the shutdown of official BlackBerry signing infrastructure in 2022, installing custom native applications on BlackBerry 10 requires the device to be rooted.
 
 ### 1. Rooting your BB10 Device
-If your device is not yet rooted, you can achieve root using community-developed tools such as **bb10root** / **bb10mt** (BlackBerry 10 MultiTool):
-- Tools and community guides can be found at [bb10.root.sx](https://bb10.root.sx) and the [r/BlackberryPhoenix](https://www.reddit.com/r/BlackberryPhoenix/) community.
+If your device is not yet rooted, you can achieve root using community-developed toolchains such as **bb10root** / **bb10mt** (BlackBerry 10 MultiTool).
 - **Safety note**: The custom autoloader / root image is generated locally on your machine by unpacking and patching official BlackBerry signed firmware autoloaders. It does not introduce unknown third-party binaries into the core system, making it transparent and verifiable.
 
 ### 2. Installing LocalSend BAR
