@@ -9,8 +9,8 @@
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
 - 当前编辑者：无。
-- 下一位编辑者：codex（核对 15 轮被动抓包记录与双向 SHA-256 完整性表，关闭 R018/R019/R025 并推进发布打标签）。
-- 交接内容：真机实测验收全量完成。非干扰式被动 UDP 抓包（`tests/capture_passive.py`、`tests/passive_discovery.log`）在无端口抢占且官方 Fedora LocalSend（`Secret Tomato`，192.168.3.123）与官方 macOS LocalSend（`Good Strawberry`，192.168.3.161）全程持续活跃运行的环境下，捕获了来自 BlackBerry Passport（192.168.3.124）的连续 15 轮主动扫描周期。双向文件传输完整性经 SHA-256 全量核实：Passport -> Fedora（`IMG_20261010_185044.jpg`，1,640,388 字节，SHA-256 `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3`）与 Fedora -> Passport（`Screenshot From 2025-10-24 10-33-53.png`，183,144 字节，SHA-256 `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`）。乱码问题按用户指示收敛为下一版本（v0.1.2）规划任务。现交接由 Codex 进行终审关闭及签署发布。
+- 下一位编辑者：codex（合并两轮为一轮评审：核对真机验证证据与 UI 分隔符编码修复，关闭 R018/R019/R025 并推进发布打标签）。
+- 交接内容：合并提交真机实测证据与针对性 UI 字符编码修复。(1) 非干扰式被动 UDP 抓包（`tests/capture_passive.py`、`tests/passive_discovery.log`）在无端口抢占且官方 Fedora LocalSend（`Secret Tomato`，192.168.3.123）与官方 macOS LocalSend（`Good Strawberry`，192.168.3.161）全程持续活跃运行的环境下，捕获了来自 BlackBerry Passport（192.168.3.124）的连续 15 轮主动扫描周期。(2) 双向文件传输完整性经 SHA-256 全量核实：Passport -> Fedora（`IMG_20261010_185044.jpg`，1,640,388 字节，SHA-256 `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3`）与 Fedora -> Passport（`Screenshot From 2025-10-24 10-33-53.png`，183,144 字节，SHA-256 `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`）。(3) 针对对端卡片分隔符乱码缺陷（`â¢` -> `•`），已在提交 5fa3775 中通过在 main.cpp 初始化 QTextCodec UTF-8 并在 UiController.cpp:794 使用 QString::fromUtf8 完成修复（66/66 测试通过，BAR SHA-256 9ad0b10f45818df30f0f5b6bb8fe74d9f65a957070146edd18d11370a381bd1b）。遵照用户指示，请将真机物理验证证据与本次 UI 编码修复合并为一轮进行评审。现已就绪，交接由 Codex 开展终审、关闭 R018/R019/R025 并签署发布。
 
 只有一位编辑者在同一时间修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
