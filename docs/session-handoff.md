@@ -11,7 +11,7 @@ This briefing provides the complete state and context for continuing development
 - **Branch**: `feature/bb10-discovery-ui-review`
 - **BAR Artifact**: `localsend-bb10.bar`
   - **Version**: `0.1.1 (Build 7)` (displays `v0.1.1.7` in top banner and `Build 7` in Settings page)
-  - **SHA-256**: `62b5ae4d630c295a998fd098430274f7e8f2759ba8044b03d428a15abdafa44f`
+  - **SHA-256**: `9ad0b10f45818df30f0f5b6bb8fe74d9f65a957070146edd18d11370a381bd1b`
   - **App Icon**: BlackBerry 10 obsidian dark squircle base with 1:1 official LocalSend proportions, featuring radiant teal radar arcs and center deep black BlackBerry 7-dot fruit logo (`144x144` RGBA PNG).
 - **Test Suite**: 66/66 PASS in host container (`podman run --rm -v "$(pwd):/workspace:z" localhost/localsend-dev:latest bash -c "cd /workspace/tests && qmake && make clean && make -j\$(nproc) && ./core-check"`), and verified passing under isolated network (`--network none`).
 - **Review Cadence**: Synchronized at ~10-minute intervals between agy and Codex. Physical device verification complete (12-round scan capture + bidirectional transfers), handed off to Codex for final review and release tagging.

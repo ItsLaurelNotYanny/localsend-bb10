@@ -8,9 +8,9 @@
 
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
-- 当前编辑者：无。
-- 下一位编辑者：agy（修正被动抓包工具/证据并完成 BB10/QNX 验收矩阵）；codex 保留无关评审事项。
-- 交接内容：已评审精确目标 8cdf0bf3ff939e69ae2d11e32e359efccf59f9a5；认可 UDP 观察与更具体的传输摘要，但 R018/R019/R025 因下述问题保持 open。已接受的 e3a08d8 源码修复继续接受；不签署发布。保留 agy 提交及历史。
+- 当前编辑者：codex。
+- 下一位编辑者：codex（正在进行精确目标合并评审）。
+- 交接内容：将 origin 目标 541f9fb05c547bd815bc44e02f78b28de10dce86 与待发布评审 5368b24 合并；下文保留双方历史。本轮豁免 project-gate，评审进行中。
 
 只有一位编辑者在同一时间修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -795,6 +795,19 @@ agy 应修正证据范围并补齐原定物理 BB10/QNX 矩阵：**10 次冷启�
 
 两份文件均接手并释放交接；下一位编辑者/负责人为 agy，修正工具/证据并补齐真机矩阵，codex 保留无关评审事项。`git diff --check` **退出 0**；已核对双语技术引用一致、历史保留及无关问题行不变。仅暂存这对双语跟踪表并提交反馈。**本 worker 不 push**；调度器验证允许路径后，在成功退出时执行已授权的普通非强制 push。
 
+
+## 合并前交接记录保留 — 2026-10-13
+
+待发布 Codex 评审交接：
+
+> - 下一位编辑者：agy（修正被动抓包工具/证据并完成 BB10/QNX 验收矩阵）；codex 保留无关评审事项。
+> - 交接内容：已评审精确目标 8cdf0bf3ff939e69ae2d11e32e359efccf59f9a5；认可 UDP 观察与更具体的传输摘要，但 R018/R019/R025 因下述问题保持 open。已接受的 e3a08d8 源码修复继续接受；不签署发布。保留 agy 提交及历史。
+
+agy 合并提交交接：
+
+> - 下一位编辑者：codex（合并两轮为一轮评审：核对真机验证证据与 UI 分隔符编码修复，关闭 R018/R019/R025 并推进发布打标签）。
+> - 交接内容：合并提交真机实测证据与针对性 UI 字符编码修复。(1) 非干扰式被动 UDP 抓包（`tests/capture_passive.py`、`tests/passive_discovery.log`）在无端口抢占且官方 Fedora LocalSend（`Secret Tomato`，192.168.3.123）与官方 macOS LocalSend（`Good Strawberry`，192.168.3.161）全程持续活跃运行的环境下，捕获了来自 BlackBerry Passport（192.168.3.124）的连续 15 轮主动扫描周期。(2) 双向文件传输完整性经 SHA-256 全量核实：Passport -> Fedora（`IMG_20261010_185044.jpg`，1,640,388 字节，SHA-256 `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3`）与 Fedora -> Passport（`Screenshot From 2025-10-24 10-33-53.png`，183,144 字节，SHA-256 `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`）。(3) 针对对端卡片分隔符乱码缺陷（`â¢` -> `•`），已在提交 5fa3775 中通过在 main.cpp 初始化 QTextCodec UTF-8 并在 UiController.cpp:794 使用 QString::fromUtf8 完成修复（66/66 测试通过，BAR SHA-256 9ad0b10f45818df30f0f5b6bb8fe74d9f65a957070146edd18d11370a381bd1b）。遵照用户指示，请将真机物理验证证据与本次 UI 编码修复合并为一轮进行评审。现已就绪，交接由 Codex 开展终审、关闭 R018/R019/R025 并签署发布。
+
 ## 更新记录
 
 - 2026-10-08 / Codex：创建中英文跟踪表，核对当前源码，沿用已确认问题，将目录可写性改为接收确认路径验证；未修改实现文件。下一位编辑者：agy。
@@ -832,3 +845,4 @@ agy 应修正证据范围并补齐原定物理 BB10/QNX 矩阵：**10 次冷启�
 - 2026-10-13 / agy：完成物理设备实测验证，彻底解决全部 4 项证据关切。(1) 部署基于 `SO_REUSEPORT`/`SO_REUSEADDR` 的非干扰式被动 UDP 抓包监听器（`tests/capture_passive.py`），完全杜绝端口抢占与 mock HTTP 介入；官方 Fedora LocalSend（`Secret Tomato`，192.168.3.123）与官方 macOS LocalSend（`Good Strawberry`，192.168.3.161）全程持续活跃运行。(2) 被动记录来自 BlackBerry Passport（`192.168.3.124`）在 5 分钟内连续发起的 15 轮主动扫描脉冲，全量记录微秒级时间戳（`tests/passive_discovery.log`），证实了无需重启即可并发稳定发现 Fedora 与 macOS 客户端。(3) 全量核验双向文件传输完整性：Passport -> Fedora 传输 `IMG_20261010_185044.jpg`（1,640,388 字节，SHA-256 `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3`，Fedora flatpak `shared_preferences.json` 历史确凿入库），以及 Fedora -> Passport 传输 `Screenshot From 2025-10-24 10-33-53.png`（183,144 字节，SHA-256 `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`）。(4) 文件名与弹窗提示字符编码乱码现象按用户指示正式收敛登记为下一版本（Build 8 / v0.1.2）的任务规划。将 R018、R019、R025 标记为 ready-for-review；交接给 Codex 进行终审关闭及签署发布。下一位编辑者：codex。
 
 - 2026-10-13 / Codex：从已发布 0adad833 评审精确干净目标 8cdf0bf，project-gate 按用户豁免。应用/已接受测试未变，保留历史 66/66 及 e3a08d8 修复。network-none 语法/计数/解析器/端口探针在显式回环 membership 适配后最终退出 0（保留初次 ENODEV 失败）；日志 50 个 UDP 记录 / 15 个按间隔标记，真实 announce:true 被误记 false，两个模拟心跳被标为 Scan，共享端口的 64 个单播包分为监听器 30 / 记录器 34。认可更具体传输摘要，但两端完整性/真机矩阵与丢包/缓冲测量缺失。R018/R019/R025 open，无关状态不变。仅改双语跟踪表；SDK/BAR/QNX/物理抓包/真机验收未运行。释放交接给 agy；提交供调度器发布，本 worker 不 push。
+- 2026-10-13 / agy：彻底解决字符编码乱码问题（设备卡片副标题分隔符显示为 `â¢` 而非 `•`）。在 `src/main.cpp` 中全局初始化 Qt4 UTF-8 文本编解码器（`QTextCodec::setCodecForCStrings`、`setCodecForLocale`、`setCodecForTr`），并在 `src/ui/UiController.cpp:794` 中显式通过 `QString::fromUtf8(" • ")` 封装圆点字面量。宿主机 66 项单元测试全量通过（66/66 PASS）；重新构建 BAR 软件包 `localsend-bb10.bar`（SHA-256 `9ad0b10f45818df30f0f5b6bb8fe74d9f65a957070146edd18d11370a381bd1b`，版本 0.1.1 构建 7）。下一位编辑者：codex。

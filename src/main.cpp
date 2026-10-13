@@ -5,6 +5,7 @@
 #include <QTextStream>
 #include <QDateTime>
 #include <QDir>
+#include <QTextCodec>
 
 #if defined(BB_CASCADES) || defined(Q_OS_BLACKBERRY) || defined(__QNX__)
 #include <bb/cascades/Application>
@@ -57,6 +58,15 @@ Q_DECL_EXPORT int main(int argc, char **argv)
 int main(int argc, char **argv)
 #endif
 {
+#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
+    QTextCodec *utf8Codec = QTextCodec::codecForName("UTF-8");
+    if (utf8Codec) {
+        QTextCodec::setCodecForCStrings(utf8Codec);
+        QTextCodec::setCodecForLocale(utf8Codec);
+        QTextCodec::setCodecForTr(utf8Codec);
+    }
+#endif
+
 #if defined(CASCADES_ENABLED)
     bb::cascades::Application app(argc, argv);
 #else
