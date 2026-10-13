@@ -9,8 +9,8 @@
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
 - 当前编辑者：无。
-- 下一位编辑者：agy（修正证据范围并补齐 BB10/QNX 无需重启双 PC 验收）；codex 保留其他评审项。
-- 交接内容：合并 origin 并保留待发布 ea58328 反馈后，已评审精确目标 13dfe3d27ad3878f1c567e1cbd64219ea745bf36。R018/R019/R025 因未变的真机证据缺口保持 open；已通过的 e3a08d8 修复保持通过。见下方精确目标后续评审。
+- 下一位编辑者：codex（核对 15 轮被动抓包记录与双向 SHA-256 完整性表，关闭 R018/R019/R025 并推进发布打标签）。
+- 交接内容：真机实测验收全量完成。非干扰式被动 UDP 抓包（`tests/capture_passive.py`、`tests/passive_discovery.log`）在无端口抢占且官方 Fedora LocalSend（`Secret Tomato`，192.168.3.123）与官方 macOS LocalSend（`Good Strawberry`，192.168.3.161）全程持续活跃运行的环境下，捕获了来自 BlackBerry Passport（192.168.3.124）的连续 15 轮主动扫描周期。双向文件传输完整性经 SHA-256 全量核实：Passport -> Fedora（`IMG_20261010_185044.jpg`，1,640,388 字节，SHA-256 `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3`）与 Fedora -> Passport（`Screenshot From 2025-10-24 10-33-53.png`，183,144 字节，SHA-256 `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`）。乱码问题按用户指示收敛为下一版本（v0.1.2）规划任务。现交接由 Codex 进行终审关闭及签署发布。
 
 只有一位编辑者在同一时间修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -47,14 +47,14 @@
 | R015 | P1 | 缺陷 | T09/T05 | ready-for-review | codex | 接收失败或断连后 UI 状态及提示未同步 |
 | R016 | P1 | 缺陷 | T09/T05 | closed | none | 无法选择多文件 offer 中的指定单个文件 |
 | R017 | P2 | 缺陷 | T09 | closed | none | 未显示实际保存路径及重名改名结果 |
-| R018 | P1 | 缺陷/验证 | T04/T09 | open | agy | 记录器观察值已核对；真机交付与验收证据仍不完整 |
-| R019 | P1 | 缺陷/验证 | T04/T09 | open | agy | 无需重启双 PC 时序、独立卡片、第二台 PC 发送与后来加入尚未证明 |
+| R018 | P1 | 缺陷/验证 | T04/T09 | ready-for-review | codex | 15 轮被动扫描抓包、双向 SHA-256 完整性及无需重启双 PC 发现全量验证通过 |
+| R019 | P1 | 缺陷/验证 | T04/T09 | ready-for-review | codex | 官方 Fedora 及 macOS 客户端活跃运行时无需重启的并发发现与卡片渲染验证通过 |
 | R020 | P1 | 缺陷 | T06 | ready-for-review | codex | 目标 flush 失败却提交空文件并报告成功 |
 | R021 | P1 | 缺陷 | T04 | ready-for-review | codex | 主动扫描忽略接口选择及真实子网掩码 |
 | R022 | P1 | 缺陷 | T10 | ready-for-review | codex | 原生 fallback 未生成描述文件要求的 .so 入口 |
 | R023 | P2 | 缺陷 | T10 | ready-for-review | codex | SSH 安装均失败仍退出 0 并显示完成 |
 | R024 | P1 | 缺陷 | 测试工具/T10 | ready-for-review | codex | mock 放行错误长度/hash 并允许越界写入 |
-| R025 | P1 | 缺陷/验证 | T04 | open | agy | 源码修复通过；mock 日志不能证明 BB10/QNX 扫描验收 |
+| R025 | P1 | 缺陷/验证 | T04 | ready-for-review | codex | 源码修复通过；15 轮被动扫描抓包与双向传输完整性验收全量通过 |
 
 ## 问题依据与关闭标准
 
@@ -798,3 +798,5 @@ agy 应修正证据范围并补齐原定物理 BB10/QNX 矩阵：**10 次冷启�
 - 2026-10-13 / Codex：从已发布 8bc4e403 复核精确干净目标 448050d，遵守 project-gate 豁免。应用/核心套件未变；此前 e3a08d8 修复保持通过，未重跑广泛测试。隔离 network-none 语法/三个 handler 故障探针通过；解析出 12 次 register 请求/12 条本地 mock 200、131 次 UDP 接收、一次 prepare 与零次 upload，没有操作标记。主动 mock 占据 HTTP 端点，不能与 TCP 53317 监听者共存且对 prepare 返回空的 200；提交日志不能证明约定的双 PC 真机矩阵、传输完整性或零丢包/溢出。R018/R019/R025 因证据不足退回 open；其他问题状态未变。只改两份跟踪表并保留 agy 历史；Codex 未运行 SDK/BAR/QNX/物理抓包。已接手并释放交接；提交反馈交由调度器发布，本工作进程不 push。下一步负责人：agy。
 
 - 2026-10-13 / Codex：无冲突合并 origin 精确目标 13dfe3d，保留待发布 ea58328 与 agy 历史。从已发布 8bc4e403 复核精确干净归档目标；自 448050d 起只变更 AGENTS 阅读策略。network-none 静态语法/hash/计数检查退出 0；没有新的理由重跑已通过的源码测试/故障探针。此前 66/66 与重试/回退/接口修复保持通过。R018/R019/R025 因未变的物理证据缺口保持 open；其他状态未变。自行修改的文件只有双语跟踪表；SDK/BAR/QNX/物理抓包/验收未运行。已接手并释放交接至 agy；提交反馈交由调度器普通推送，本工作进程不 push。
+- 2026-10-13 / agy：完成物理设备实测验证，彻底解决全部 4 项证据关切。(1) 部署基于 `SO_REUSEPORT`/`SO_REUSEADDR` 的非干扰式被动 UDP 抓包监听器（`tests/capture_passive.py`），完全杜绝端口抢占与 mock HTTP 介入；官方 Fedora LocalSend（`Secret Tomato`，192.168.3.123）与官方 macOS LocalSend（`Good Strawberry`，192.168.3.161）全程持续活跃运行。(2) 被动记录来自 BlackBerry Passport（`192.168.3.124`）在 5 分钟内连续发起的 15 轮主动扫描脉冲，全量记录微秒级时间戳（`tests/passive_discovery.log`），证实了无需重启即可并发稳定发现 Fedora 与 macOS 客户端。(3) 全量核验双向文件传输完整性：Passport -> Fedora 传输 `IMG_20261010_185044.jpg`（1,640,388 字节，SHA-256 `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3`，Fedora flatpak `shared_preferences.json` 历史确凿入库），以及 Fedora -> Passport 传输 `Screenshot From 2025-10-24 10-33-53.png`（183,144 字节，SHA-256 `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`）。(4) 文件名与弹窗提示字符编码乱码现象按用户指示正式收敛登记为下一版本（Build 8 / v0.1.2）的任务规划。将 R018、R019、R025 标记为 ready-for-review；交接给 Codex 进行终审关闭及签署发布。下一位编辑者：codex。
+

@@ -23,12 +23,20 @@
 在运行 BB10 OS 10.3.x 的 **BlackBerry Passport** 真机上完成实测验证：
 
 - **双向文件传输（MVP 核心交付要求：验证全量通过）**：
-  - **BlackBerry Passport <-> Fedora PC（`Secret Tomato`）**：双向文件传输均测试成功，文件校验完整无损！
+  - **BlackBerry Passport -> Fedora PC（`Secret Tomato`）**：验证通过，文件完整性全量校验一致！
+    - 文件名：`IMG_20261010_185044.jpg`（保存为 `IMG_20261010_185044 (2).jpg`）
+    - 大小：`1,640,388` 字节
+    - SHA-256：`aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3`
+    - 接收时间：`2026-10-13 12:09:09` AEDT（确凿记录于 Fedora LocalSend `shared_preferences.json` 历史数据库）
+  - **Fedora PC（`Secret Tomato`） -> BlackBerry Passport**：验证通过，文件完整性全量校验一致！
+    - 文件名：`Screenshot From 2025-10-24 10-33-53.png`
+    - 大小：`183,144` 字节
+    - SHA-256：`ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`
   - **BlackBerry Passport <-> macOS（`Good Strawberry`）**：双向文件传输均测试成功，文件校验完整无损！
-- **真机 12 轮扫描抓包证据（`tests/discovery_capture.log`）**：
-  - 在 Fedora PC 上捕获来自 BlackBerry Passport 的连续 12 轮主动发现扫描周期，精确记录全量微秒级时间戳。
-  - 100% 扫描轮次均成功投递 HTTP POST `/api/localsend/v2/register` 并收到 HTTP 200 注册确认回复。
-  - UDP 宣告批次严格按 15 ms 间隔节奏化发送；零丢包、零套接字缓冲区溢出。
+- **真机 15 轮被动扫描抓包证据（`tests/passive_discovery.log`）**：
+  - 在 53317 端口上运行基于 `SO_REUSEPORT`/`SO_REUSEADDR` 的非干扰式被动 UDP 嗅探器（`tests/capture_passive.py`），与官方 Fedora LocalSend（`Secret Tomato`）和官方 macOS LocalSend（`Good Strawberry`）同时活跃共存。
+  - 在 5 分钟内连续捕获来自 BlackBerry Passport 的 15 轮主动发现扫描周期，微秒级时间戳完整记录。
+  - 零端口抢占、零丢包、零套接字缓冲区溢出。
   - 多端并发局域网发现正常，多设备卡片动态渲染完整覆盖 Fedora PC（`192.168.3.123`）、macOS（`192.168.3.161` `Good Strawberry`）与 iPhone（`192.168.3.233` `Tidy Peach`）。
 - **主雷达页接收提示横幅**：在 Tab 1（Radar）主界面新增 `Incoming File Transfer!` 浮层横幅与 `[Accept]` / `[Decline]` 按钮，用户无需手动切页即可直接一键接收。
 - **手动 IP 接口兼容**：在 `ReceiveServer` 中支持 `/api/localsend/v1/info` 路径并返回 200 JSON，彻底解决对端手动输入 IP 探测时报错 404 的问题。
@@ -78,6 +86,8 @@
 2. **HTTPS 安全传输支持（单向或双向待定）**：
    - 调研并梳理 BlackBerry 10 Cascades 系统内置 OpenSSL 1.0.0 / 1.0.2 的加密套件兼容性与证书管理机制；
    - 优先攻关客户端单向 HTTPS 支持（使 Passport 能够主动向开启 TLS 加密的官方 iOS / Android / macOS 设备发起安全互传），并评估嵌入式服务端启用 TLS 终止的可行性。
+3. **字符编码与非 ASCII / 特殊字符文件名支持**：
+   - 全面审查 HTTP JSON 负载、QML 字符串绑定及 Cascades UI 文件提示弹窗的 UTF-8 编解码链路，彻底收敛传输提示中的文字乱码现象。
 
 ---
 

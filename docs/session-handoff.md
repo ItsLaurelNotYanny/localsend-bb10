@@ -23,13 +23,21 @@ This briefing provides the complete state and context for continuing development
 Tested and verified on a physical **BlackBerry Passport** running BB10 OS 10.3.x:
 
 - **Bidirectional File Transfer (MVP Core Requirement: PASSED & VERIFIED)**:
-  - **BlackBerry Passport <-> Fedora PC (`Secret Tomato`)**: Bidirectional file transfer verified completed in both directions with full file integrity!
+  - **BlackBerry Passport -> Fedora PC (`Secret Tomato`)**: Verified with full file integrity!
+    - Filename: `IMG_20261010_185044.jpg` (saved as `IMG_20261010_185044 (2).jpg`)
+    - Size: `1,640,388` bytes
+    - SHA-256: `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3`
+    - Timestamp: `2026-10-13 12:09:09` AEDT (logged in Fedora LocalSend `shared_preferences.json`)
+  - **Fedora PC (`Secret Tomato`) -> BlackBerry Passport**: Verified with full file integrity!
+    - Filename: `Screenshot From 2025-10-24 10-33-53.png`
+    - Size: `183,144` bytes
+    - SHA-256: `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7`
   - **BlackBerry Passport <-> macOS (`Good Strawberry`)**: Bidirectional file transfer verified completed in both directions with full file integrity!
-- **Real-Device 12-Round Scan Packet Capture (`tests/discovery_capture.log`)**:
-  - Captured 12 consecutive active discovery scan rounds from BlackBerry Passport on Fedora PC with microsecond timestamps.
-  - 100% of scans successfully delivered HTTP POST `/api/localsend/v2/register` and received HTTP 200 confirmations.
-  - UDP announcement batches strictly paced at 15 ms intervals; zero packet loss, zero socket buffer drops.
-  - Concurrent multi-peer discovery dynamically populated cards for Fedora PC (`192.168.3.123`), macOS (`192.168.3.161` `Good Strawberry`), and iPhone (`192.168.3.233` `Tidy Peach`).
+- **Passive 15-Round Scan Packet Capture (`tests/passive_discovery.log`)**:
+  - Implemented non-interfering passive UDP sniffer (`tests/capture_passive.py`) with `SO_REUSEPORT`/`SO_REUSEADDR` on port 53317, running concurrently with official Fedora LocalSend (`Secret Tomato`) and official macOS LocalSend (`Good Strawberry`).
+  - Passively captured 15 consecutive active scan bursts from BlackBerry Passport over 5 minutes with microsecond timestamps.
+  - Zero port contention, zero packet loss, zero socket buffer drops.
+  - Multi-peer concurrent discovery dynamically populated cards for Fedora PC (`192.168.3.123`), macOS (`192.168.3.161` `Good Strawberry`), and iPhone (`192.168.3.233` `Tidy Peach`).
 - **Incoming Transfer Alert on Radar Tab**: Added `Incoming File Transfer!` prompt with `[Accept]` and `[Decline]` buttons directly on Tab 1 (Radar), allowing users to accept incoming files immediately from any tab.
 - **Manual IP Compatibility**: Implemented `/api/localsend/v1/info` route in `ReceiveServer` returning HTTP 200 JSON, resolving 404 errors when peers query the legacy endpoint.
 - **Diagnostic Logging**: Logs saved to `/accounts/1000/shared/documents/localsend_launch.txt`, viewable natively on device and accessible via the "Open Diagnostic Log" button in Settings.
@@ -79,6 +87,8 @@ Tested and verified on a physical **BlackBerry Passport** running BB10 OS 10.3.x
 2. **HTTPS Support (One-way or Bidirectional)**:
    - Investigate OpenSSL 1.0.0 / 1.0.2 capabilities and TLS certificate management on BlackBerry 10 Cascades.
    - Prioritize unidirectional HTTPS client support (connecting securely to official iOS/Android/macOS peers running TLS mode), evaluating feasibility of embedded server TLS termination.
+3. **Character Encoding & Non-ASCII / Special Filename Handling**:
+   - Audit UTF-8 string encoding across HTTP JSON payloads, QML string bindings, and Cascades UI file offer dialogs to eliminate character garbling observed during file transfers.
 
 ---
 
