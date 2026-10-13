@@ -1,6 +1,6 @@
 # LocalSend for BlackBerry 10
 
-An unofficial, native C++ / Qt Cascades client bringing modern **[LocalSend](https://github.com/localsend/localsend)** LAN file sharing to legacy **BlackBerry 10** devices (BlackBerry Passport, Classic, Q10, Z30, etc.).
+An unofficial, native client bringing modern **[LocalSend](https://github.com/localsend/localsend)** local network file sharing to legacy **BlackBerry 10** devices (BlackBerry Passport, Classic, Q10, Z30, etc.).
 
 This project is built purely out of passion for retro hardware preservation—giving beloved legacy devices a second life as practical, seamless tools in modern local networks.
 
@@ -11,18 +11,18 @@ This project is built purely out of passion for retro hardware preservation—gi
 
 ## Features
 
-- **Native Cascades UI**: Designed specifically for BB10 with native look and feel, responsive layout, and dark/light system theme support.
+- **Native BlackBerry 10 Experience**: Built specifically for BB10 with a fluid, responsive layout that fits square and portrait screens alike, supporting both dark and light system themes.
 - **Local Network Discovery**:
-  - Multicast (`224.0.0.167`) and broadcast UDP announcements.
+  - Automatic detection of nearby devices via multicast (`224.0.0.167`) and broadcast UDP.
   - Active subnet scanning with paced unicast fallback to bypass Wi-Fi AP client isolation.
-  - Automatic peer card rendering with live status badges.
+  - Device cards displaying alias, device model, and real-time status.
 - **Seamless Bidirectional Transfers**:
-  - **PC / Phone -> BlackBerry 10**: Instant transfer acceptance banner right on the Radar tab or via the Transfers tab.
-  - **BlackBerry 10 -> PC / Phone**: Native Cascades file picker to select and send photos, documents, and media.
-  - Full cryptographic integrity verification using streaming SHA-256 hashing.
+  - **PC / Phone -> BlackBerry 10**: Instant transfer acceptance alert on the Radar tab or Transfers tab with one-tap confirmation.
+  - **BlackBerry 10 -> PC / Phone**: Native system file picker to select and send photos, documents, and media.
+  - Streaming SHA-256 validation ensuring bit-exact transfer integrity.
 - **Settings & Diagnostics**:
   - Customizable device alias and network port.
-  - Built-in diagnostic log viewer via BlackBerry 10 Docs To Go.
+  - In-app diagnostic log viewer accessible via the built-in Docs To Go viewer.
 
 ---
 
@@ -36,27 +36,28 @@ This project is built purely out of passion for retro hardware preservation—gi
 
 ## Prerequisites & Installation
 
-Due to the shutdown of official BlackBerry signing infrastructure in 2022, installing custom native applications on BlackBerry 10 requires the device to be rooted.
+### 1. Root Access
+Due to the shutdown of official BlackBerry infrastructure in 2022, installing unsigned native applications on BlackBerry 10 requires the device to be rooted.
+- If your device is not yet rooted, please look into community root solutions (such as custom patched autoloader toolchains).
+- **Safety note**: Trusted community autoloaders are built locally by unpacking official BlackBerry signed firmware and applying minimal system patches, keeping the underlying OS clean and verifiable.
 
-### 1. Rooting your BB10 Device
-If your device is not yet rooted, you can achieve root using the open-source community toolkit [**bb10root / bb10mt**](https://github.com/bb10root/bb10mt) (BlackBerry 10 MultiTool).
-- **Safety note**: The custom autoloader / root image is generated locally on your machine by unpacking and patching official BlackBerry signed firmware autoloaders. It does not introduce unknown third-party binaries into the core system, making it transparent and verifiable.
-
-### 2. Installing LocalSend BAR
-Once rooted, you can deploy the pre-built `.bar` package directly via `blackberry-deploy` or standard BB10 management tools:
-```sh
-# Deploying via BlackBerry 10 WebWorks / NDK tooling
-blackberry-deploy -installApp -device <DEVICE_IP> -password <DEVICE_PASSWORD> localsend-bb10.bar
-```
+### 2. Installing the App (`.bar`)
+You can install the pre-built `localsend-bb10.bar` package using any standard BlackBerry 10 app installer or management tool:
+- **Graphical Tools**: DBBTool, Sachesi, Chrome BB10 / PlayBook App Manager extension, or similar community sideloading utilities.
+- **Command Line**: Use `blackberry-deploy` if you have the BlackBerry WebWorks / NDK tools installed:
+  ```sh
+  blackberry-deploy -installApp -device <DEVICE_IP> -password <DEVICE_PASSWORD> localsend-bb10.bar
+  ```
 
 ---
 
 ## Interoperability with Official LocalSend Clients
 
 To share files between your BlackBerry 10 device and modern clients (Windows, macOS, Linux, Android, iOS):
-1. Ensure both devices are connected to the same local Wi-Fi / LAN network.
-2. In the official LocalSend client on your PC or smartphone, navigate to **Settings** and ensure **Encryption (HTTPS)** is disabled (set to standard HTTP mode), as the BB10 client communicates over standard HTTP.
-3. Your BlackBerry device will appear automatically in the nearby devices list!
+1. Connect both devices to the same local Wi-Fi network.
+2. In the official LocalSend client on your PC or smartphone, navigate to **Settings** and turn off **Encryption (HTTPS)** (switch to standard HTTP mode).
+   > *Why HTTP?* Legacy BB10 systems only support older SSL/TLS cipher suites (OpenSSL 1.0.x / 0.9.8) and lack modern TLS 1.3 / contemporary cipher support required by modern HTTPS endpoints. Plain HTTP operates transparently and reliably across your local private network.
+3. Your BlackBerry device will automatically appear in the nearby devices radar—ready to send and receive!
 
 ---
 
