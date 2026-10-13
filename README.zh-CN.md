@@ -28,6 +28,17 @@
 
 ---
 
+## 屏幕截图
+
+<p align="center">
+  <img src="docs/screenshots/home-icon.png" width="22%" alt="桌面图标" />
+  <img src="docs/screenshots/radar-peers.png" width="22%" alt="附近设备雷达" />
+  <img src="docs/screenshots/transfers-completed.png" width="22%" alt="传输完成页面" />
+  <img src="docs/screenshots/settings.png" width="22%" alt="设置标签页" />
+</p>
+
+---
+
 ## 前置条件与安装说明
 
 由于 BlackBerry 官方签名服务器已于 2022 年正式下线，在 BlackBerry 10 上安装未签名的原生应用需要设备具备 Root 权限。

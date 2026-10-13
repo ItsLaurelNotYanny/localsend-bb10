@@ -28,6 +28,17 @@ This project is built purely out of passion for retro hardware preservation—gi
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/home-icon.png" width="22%" alt="Home Screen Icon" />
+  <img src="docs/screenshots/radar-peers.png" width="22%" alt="Nearby Peers Radar" />
+  <img src="docs/screenshots/transfers-completed.png" width="22%" alt="Transfer Completed" />
+  <img src="docs/screenshots/settings.png" width="22%" alt="Settings Tab" />
+</p>
+
+---
+
 ## Prerequisites & Installation
 
 Due to the shutdown of official BlackBerry signing infrastructure in 2022, installing custom native applications on BlackBerry 10 requires the device to be rooted.
