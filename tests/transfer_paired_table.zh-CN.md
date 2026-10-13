@@ -10,7 +10,7 @@
 | Passport -> Fedora | `IMG_20261010_185044.jpg` | 1,640,388 字节 | 1,640,388 字节 | `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3` | `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3` | 完全一致 | 2026-10-13 12:09 | 保存为 Downloads 下的 `IMG_20261010_185044 (2).jpg`；记录于 flatpak `shared_preferences.json` |
 | Fedora -> Passport | `Screenshot From 2025-10-24 10-33-53.png` | 183,144 字节 | 183,144 字节 | `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7` | `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7` | 完全一致 | 2026-10-13 12:10 | 接收于 Passport `shared/downloads/`，校验无损 |
 | Passport -> Ubuntu (`Fast Onion`) | `IMG_20240202_162742.jpg` | 1,138,317 字节 | 1,138,317 字节 | `cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da` | `cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da` | 完全一致 | 2026-10-13 15:43 | 保存于 ThinkPad-X1-Carbon-5th (`192.168.3.111`) `/home/ellery/Downloads/IMG_20240202_162742.jpg` |
-| Ubuntu (`Fast Onion`) -> Passport | `Assessment.pdf` | 32,445 字节 | 32,445 字节 | `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257` | `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257` | 完全一致 | 2026-10-13 15:47 | 发送自 ThinkPad-X1-Carbon-5th (`192.168.3.111`)；保存于 Passport `/accounts/1000/shared/downloads/Assessment.pdf` |
+| Ubuntu (`Fast Onion`) -> Passport | `Assessment.pdf` | 32,445 字节 | 32,445 字节 | `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257` | `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257` | 完全一致 | 2026-10-13 15:47 | 发送自 ThinkPad-X1-Carbon-5th (`192.168.3.111`)；保存于 Passport `/accounts/1000/shared/downloads/LocalSend/Assessment.pdf` |
 
 ## 校验命令与实际输出
 
@@ -22,6 +22,18 @@ $ ls -la "/home/ellery/Downloads/Mar 01.pdf"
 
 $ sha256sum "/home/ellery/Downloads/Mar 01.pdf"
 4e6584fff8cf8e7c7e520e8247a13f237e5f63ca72b306b35923d9f67549f390  /home/ellery/Downloads/Mar 01.pdf
+
+$ ls -la "/home/ellery/Downloads/IMG_20261010_185044 (2).jpg"
+-rw-r--r--. 1 ellery ellery 1640388 Oct 13 12:09 '/home/ellery/Downloads/IMG_20261010_185044 (2).jpg'
+
+$ sha256sum "/home/ellery/Downloads/IMG_20261010_185044 (2).jpg"
+aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3  /home/ellery/Downloads/IMG_20261010_185044 (2).jpg
+
+$ ls -la "/home/ellery/Pictures/Screenshots/Screenshot From 2025-10-24 10-33-53.png"
+-rw-r--r--. 1 ellery ellery  183144 Oct 24  2025 '/home/ellery/Pictures/Screenshots/Screenshot From 2025-10-24 10-33-53.png'
+
+$ sha256sum "/home/ellery/Pictures/Screenshots/Screenshot From 2025-10-24 10-33-53.png"
+ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7  /home/ellery/Pictures/Screenshots/Screenshot From 2025-10-24 10-33-53.png
 ```
 
 ### 2. Ubuntu PC (`Fast Onion`, 192.168.3.111)
@@ -63,9 +75,10 @@ $ curl -s http://192.168.3.124:53317/api/localsend/v2/info
 
 ### 4. BlackBerry Passport 物理存储实测验证（直连 SMB 读取与哈希）
 
-通过 BlackBerry 10 原生 Samba 共享（`//192.168.3.124/media`，对应真机机身存储 `/accounts/1000/shared/`）直连 Passport 实测核验，拉取物理文件并对其完整性计算 SHA-256：
+通过 BlackBerry 10 原生 Samba 共享（`//192.168.3.124/media`，对应真机机身存储 `/accounts/1000/shared/`）直连 Passport 实测核验，拉取物理文件至本地目录 `/tmp/passport_verified/` 并对拉取副本计算 SHA-256：
 
 ```sh
+$ mkdir -p /tmp/passport_verified && cd /tmp/passport_verified
 $ smbclient //192.168.3.124/media -U "blackberry%***" -c 'cd downloads; get "Mar 01.pdf"; cd LocalSend; get "Screenshot From 2025-10-24 10-33-53.png"; get "Assessment.pdf"; cd ../../camera; get "IMG_20240202_162742.jpg"; get "IMG_20261010_185044.jpg"'
 getting file \downloads\Mar 01.pdf of size 56565 as Mar 01.pdf
 getting file \downloads\LocalSend\Screenshot From 2025-10-24 10-33-53.png of size 183144 as Screenshot From 2025-10-24 10-33-53.png

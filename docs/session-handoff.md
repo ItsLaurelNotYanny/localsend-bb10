@@ -49,7 +49,7 @@ Tested and verified on a physical **BlackBerry Passport** running BB10 OS 10.3.x
     - Size: `32,445` bytes (Source and Destination match exactly)
     - SHA-256: `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257`
     - Source Path: `/home/ellery/Downloads/Assessment.pdf` on `ellery@ellery-ThinkPad-X1-Carbon-5th`
-    - Destination Path: Passport `/accounts/1000/shared/downloads/Assessment.pdf`
+    - Destination Path: Passport `/accounts/1000/shared/downloads/LocalSend/Assessment.pdf`
     - Timestamp: `2026-10-13 15:47` AEDT
 - **Passive 29-Round Scan Packet Capture (`tests/passive_discovery.log`)**:
   - Implemented non-interfering passive UDP sniffer (`tests/capture_passive.py`) bound specifically to multicast group `224.0.0.167:53317`, running concurrently with official Fedora LocalSend (`Secret Tomato`) and official macOS LocalSend (`Good Strawberry`).

@@ -49,7 +49,7 @@
     - 大小：`32,445` 字节（源端与接收端字节完全一致）
     - SHA-256：`8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257`
     - 源端路径：`ellery@ellery-ThinkPad-X1-Carbon-5th` 上的 `/home/ellery/Downloads/Assessment.pdf`
-    - 保存路径：Passport 上的 `/accounts/1000/shared/downloads/Assessment.pdf`
+    - 保存路径：Passport 上的 `/accounts/1000/shared/downloads/LocalSend/Assessment.pdf`
     - 接收时间：`2026-10-13 15:47` AEDT
 - **真机 29 轮被动扫描抓包证据（`tests/passive_discovery.log`）**：
   - 在 53317 端口上运行精确定向绑定至组播地址 `224.0.0.167:53317` 的非干扰式被动 UDP 监听器（`tests/capture_passive.py`），与官方 Fedora LocalSend（`Secret Tomato`）和官方 macOS LocalSend（`Good Strawberry`）同时活跃共存。

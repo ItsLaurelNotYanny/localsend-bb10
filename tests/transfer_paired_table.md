@@ -10,7 +10,7 @@ English | [Simplified Chinese](transfer_paired_table.zh-CN.md)
 | Passport -> Fedora | `IMG_20261010_185044.jpg` | 1,640,388 B | 1,640,388 B | `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3` | `aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3` | EXACT | 2026-10-13 12:09 | Saved as `IMG_20261010_185044 (2).jpg` in Downloads; recorded in flatpak `shared_preferences.json` |
 | Fedora -> Passport | `Screenshot From 2025-10-24 10-33-53.png` | 183,144 B | 183,144 B | `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7` | `ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7` | EXACT | 2026-10-13 12:10 | Received in Passport `shared/downloads/` and verified with full integrity |
 | Passport -> Ubuntu (`Fast Onion`) | `IMG_20240202_162742.jpg` | 1,138,317 B | 1,138,317 B | `cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da` | `cbce1646becd8869e86f81e9cbb54823fbd776d03cb62a09f84417b3c28e65da` | EXACT | 2026-10-13 15:43 | Saved on ThinkPad-X1-Carbon-5th (`192.168.3.111`) `/home/ellery/Downloads/IMG_20240202_162742.jpg` |
-| Ubuntu (`Fast Onion`) -> Passport | `Assessment.pdf` | 32,445 B | 32,445 B | `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257` | `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257` | EXACT | 2026-10-13 15:47 | Sent from ThinkPad-X1-Carbon-5th (`192.168.3.111`); saved in Passport `/accounts/1000/shared/downloads/Assessment.pdf` |
+| Ubuntu (`Fast Onion`) -> Passport | `Assessment.pdf` | 32,445 B | 32,445 B | `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257` | `8469fd2112bc581355b4ddf506c12c56f83e82224047f9c4e9a54852fdf90257` | EXACT | 2026-10-13 15:47 | Sent from ThinkPad-X1-Carbon-5th (`192.168.3.111`); saved in Passport `/accounts/1000/shared/downloads/LocalSend/Assessment.pdf` |
 
 ## Verification Commands & Outputs
 
@@ -22,6 +22,18 @@ $ ls -la "/home/ellery/Downloads/Mar 01.pdf"
 
 $ sha256sum "/home/ellery/Downloads/Mar 01.pdf"
 4e6584fff8cf8e7c7e520e8247a13f237e5f63ca72b306b35923d9f67549f390  /home/ellery/Downloads/Mar 01.pdf
+
+$ ls -la "/home/ellery/Downloads/IMG_20261010_185044 (2).jpg"
+-rw-r--r--. 1 ellery ellery 1640388 Oct 13 12:09 '/home/ellery/Downloads/IMG_20261010_185044 (2).jpg'
+
+$ sha256sum "/home/ellery/Downloads/IMG_20261010_185044 (2).jpg"
+aea2b9d48ec27243ae25b8d3396c3dfcf182d5ad43a36ead2c48b9300b520ba3  /home/ellery/Downloads/IMG_20261010_185044 (2).jpg
+
+$ ls -la "/home/ellery/Pictures/Screenshots/Screenshot From 2025-10-24 10-33-53.png"
+-rw-r--r--. 1 ellery ellery  183144 Oct 24  2025 '/home/ellery/Pictures/Screenshots/Screenshot From 2025-10-24 10-33-53.png'
+
+$ sha256sum "/home/ellery/Pictures/Screenshots/Screenshot From 2025-10-24 10-33-53.png"
+ddb76b7dba40101f0d332aa4d832b9f4a5ce01c239c7e972439ea7f8d23589f7  /home/ellery/Pictures/Screenshots/Screenshot From 2025-10-24 10-33-53.png
 ```
 
 ### 2. Ubuntu PC (`Fast Onion`, 192.168.3.111)
@@ -63,9 +75,10 @@ $ curl -s http://192.168.3.124:53317/api/localsend/v2/info
 
 ### 4. BlackBerry Passport Physical Media Storage Verification (Direct SMB Fetch & Hash)
 
-Direct physical filesystem verification on target device `192.168.3.124` via native BlackBerry 10 Samba media share (`//192.168.3.124/media`), retrieving files from Passport internal storage (`/accounts/1000/shared/` corresponding to `media/`) and computing SHA-256 on target device payloads:
+Direct physical filesystem verification on target device `192.168.3.124` via native BlackBerry 10 Samba media share (`//192.168.3.124/media`), retrieving files from Passport internal storage (`/accounts/1000/shared/` corresponding to `media/`) to local directory `/tmp/passport_verified/` and computing SHA-256 on the retrieved copies:
 
 ```sh
+$ mkdir -p /tmp/passport_verified && cd /tmp/passport_verified
 $ smbclient //192.168.3.124/media -U "blackberry%***" -c 'cd downloads; get "Mar 01.pdf"; cd LocalSend; get "Screenshot From 2025-10-24 10-33-53.png"; get "Assessment.pdf"; cd ../../camera; get "IMG_20240202_162742.jpg"; get "IMG_20261010_185044.jpg"'
 getting file \downloads\Mar 01.pdf of size 56565 as Mar 01.pdf
 getting file \downloads\LocalSend\Screenshot From 2025-10-24 10-33-53.png of size 183144 as Screenshot From 2025-10-24 10-33-53.png
