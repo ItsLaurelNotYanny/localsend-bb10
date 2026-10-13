@@ -9,8 +9,8 @@
 重点评审 T03、T05、T07；其他任务轻量评审，发现具体故障后再深入。用户已在 Fedora 开展目标编译、部署及真机手测；本轮复核同步提交与宿主机行为。源码、宿主机、SDK 与真机结果分别记录，不以提交说明或测试总数替代独立验收。
 
 - 当前编辑者：无。
-- 下一位编辑者：codex（复核目标 e3a08d8/8f81831，其已解决全部三项 5e597f5 P2 问题；特别提醒：按用户指示，请 Codex 在评审完成后务必记得提交并推送）。
-- 交接内容：agy 已在 e3a08d8 中解决 5e597f5 的全部三项 P2 问题（整轮扫描预算保持、正常启动解析活跃组播接口、回归测试扩充至 66/66 PASS并在 --network none 下验证通过）。BAR 安装包已重新打包（SHA-256 62b5ae4d630c295a998fd098430274f7e8f2759ba8044b03d428a15abdafa44f）。等待 Codex 独立复核。按用户指示：请 Codex 在完成每轮评审后务必记得提交并推送到远端（`git push origin feature/bb10-discovery-ui-review`），以便团队推进下一步。
+- 下一位编辑者：agy（补 BB10/QNX 投递与双 PC 验收证据）；codex 保留无关评审事项。
+- 交接内容：精确目标 1aa8c3b / 源码修复 e3a08d8 独立验收通过：宿主机 66/66、跨 HTTP 回退 ENOBUFS 总尝试三次、节奏化回退投递，以及 internal 隔离网络上的默认启动组播接口读回。R018/R019/R025 仅因真机证据待补保持 open；此前三项意见无剩余已复现源码阻塞项。详见下方当前评审。
 
 同一时间只有一位编辑者修改本中英文文档对。编辑前读取最新版本，在两份文档中填写当前编辑者以接手；中英文同步更新后清空当前编辑者，填写下一位编辑者，并通过现有对话报告交接。标记是协作约定，不是文件锁；对方正在编辑时不要开始写入。如果发生同时修改，应逐项合并受影响记录，不用旧副本覆盖整份文件。下表的负责人指下一步行动者，不代表允许同时编辑文档。
 
@@ -54,7 +54,7 @@
 | R022 | P1 | 缺陷 | T10 | ready-for-review | codex | 原生 fallback 未生成描述文件要求的 .so 入口 |
 | R023 | P2 | 缺陷 | T10 | ready-for-review | codex | SSH 安装均失败仍退出 0 并显示完成 |
 | R024 | P1 | 缺陷 | 测试工具/T10 | ready-for-review | codex | mock 放行错误长度/hash 并允许越界写入 |
-| R025 | P1 | 缺陷/验证 | T04 | ready-for-review | codex | 整轮重试预算、活跃组播接口及回归测试已在 e3a08d8 解决；等待 Codex 独立验证 |
+| R025 | P1 | 缺陷/验证 | T04 | open | agy | 源码修复独立验收通过；待 BB10/QNX 投递与扫描验收 |
 
 ## 问题依据与关闭标准
 
@@ -555,7 +555,7 @@ R019 真机“只显示第一张卡片”的现象**本轮未独立复现**。�
 
 ### R025 — 子网节奏化单播扫描引擎与套接字缓冲区溢出防护（P1，必须修复）
 
-**agy 提交材料；根因声明尚未独立核实。当前状态：open，以下专项评审优先于提交材料中的 ready-for-review。**
+**agy 历史提交材料；根因声明仍待真机核实。当前状态：open，仅待 BB10/QNX 验收；e3a08d8 的源码修订已通过下方最新独立评审。**
 
 来源：[DiscoveryManager.cpp](../src/discovery/DiscoveryManager.cpp)，`startSubnetScan()`、`pumpUdpSweep()` 以及 `setSocketBuffers()`。在 QNX 6.5（`io-pkt-v4`）网络栈上，默认非阻塞 UDP 套接字发送缓冲区（`SO_SNDBUF`）仅约 8–9 KiB。在零延迟 C++ 循环中向子网内 88 个目标主机密集突发单播 UDP 宣告数据包，内核缓冲区在第 30 个包左右即被填满，触发 `ENOBUFS` 错误并静默丢弃后续所有数据包，导致位于扫描队列后段的主机（如位于索引 73 的 `192.168.3.161`）无法收到数据包。此外，Qt 中对已绑定的 `QUdpSocket` 调用 `isOpen()` 错误返回 false 导致宣告写入被跳过，且 HTTP 扫描队列过长超时导致扫描过早截止。
 
@@ -685,6 +685,38 @@ agy 首先交付一个诊断提交，记录运行时 commit/BAR 身份、所选�
 - 专项探针：同一隔离镜像内执行 `qmake ../tests/review-probe.pro && make -j2 && ./discovery-probe`。[源码](/tmp/localsend-5e597f5-evidence-ns0mvym6/review-probe.cpp)、[日志](/tmp/localsend-5e597f5-evidence-ns0mvym6/review-probe-build/probe.log)。使用目标实际方法、模拟超时回复、真实回环 UDP，并仅为向 `192.168.3.200` 注入 ENOBUFS 而对 datagram 方法进行链接器 `--wrap`。保持 HTTP 探测待完成，先耗尽 UDP 目标三次，再让 HTTP 超时入队回退；扫描结束前计数达到六次。未产生局域网流量，未修改生产源码。
 - 上述临时路径是本机证据，不是 Fedora 通过 Git 收到的文件。关键观察和复现流程已写入本文，确保 pull 后仍可使用评审。SDK 构建、BAR 核实、BB10 执行、抓包和重复双对端验收均 **NOT RUN**。
 
+## e3a08d8 发现修复独立评审 — 2026-10-13
+
+精确干净目标：`1aa8c3b3ea06c7c0ef2f46545661378b4a513611`；实现提交为 `e3a08d8`，后续 `8f81831`、`1aa8c3b` 仅修改文档。评审基线：已发布的 Codex 反馈 `000de86`。按用户指示，本项目本轮继续略过 project-gate。未修改应用源码；编译和独立探针在归档副本中执行。
+
+**5e597f5 评审要求的三项源码修订均通过验收。本次专项复核未复现新的阻塞性源码缺陷。R025 仅因 BB10/QNX 验收待完成而保持 open；R018/R019 继续等待投递、根因证据及无需重启 PC 的双主机发现验收。下一位负责人：agy，补真机证据。** 没有相反证据时，无需重复修改已通过的代码。
+
+### 独立验证通过的修复
+
+- **整轮扫描重试预算：** 独立链接器包装器对实际 UDP 写入注入 `ENOBUFS`，同时保持 HTTP 探测未完成。初始扫描尝试三次后计数保持为三；实际 HTTP 超时及回退结束后，**总尝试仍为三次**，不再出现此前的六次，随后扫描完成。源码现在在 HTTP/HTTPS 尚未结束时保留计数，入队和发送前检查预算，并在扫描生命周期边界清理。
+- **正常启动接口配置：** Application 未传入显式接口时，默认启动现在调用 `selectPrimaryInterface()`。定向探针在临时 **Docker internal 隔离网络**上选中了 `eth0`，独立读回的 `multicastInterface()` 同样为 `eth0`；该网络无法访问物理局域网，探针结束后已删除。这验证了此前未执行的宿主机启动分支，不代表 QNX 路由或真实 PC 收包已验证。在 `--network none` 下，测试集的接口检查条件不具备，不能算作接口验证证据。
+- **生产回退路径与诊断：** 新增 HTTP 错误测试已调用实际生产回调。独立超时回复探针收到十二个 UDP 回退包，时间为 **462–492 ms**，跨度 **30 ms**，节奏化队列排空。永久无路由目标被丢弃，后续回环目标收到数据包。套接字选项失败的 errno 现在立即保存，缓冲区请求值与读回值继续记录。隔离宿主机测试集重新编译，**66/66 通过**。
+
+### 剩余验收与适度后续建议
+
+1. 在 Fedora 部署提交的 BAR，标识 SHA-256 为 `62b5ae4d630c295a998fd098430274f7e8f2759ba8044b03d428a15abdafa44f`。这是 agy 提交的产物标识，Codex 未独立重编译或校验。采集 BB10 启动及 Scan 日志中的实际缓冲区值、套接字错误和目标 IP，并与两台已运行 PC 的抓包关联。测量证实之前，QNX 缓冲区耗尽仍是待验证假设。
+2. 完成此前约定的 **10 次冷启动 + 10 次 Scan**：两台 PC 均预先运行，不重启 PC 客户端、不手动预热，每次 10 秒内显示两台。验证独立卡片、选择并实际向第二台传输，以及后来上线 PC 的发现。提交准确 BAR/哈希、时间、失败次数和日志/抓包。不能用 66 项宿主机通过推断这些结果。
+3. 非阻塞建议：`multicastInterface()` 无效时，当前日志会把请求接口名填到 `effective` 字段；建议明确标为读回不可用，避免当作读回成功。整轮预算回归检查的映射在完成后可能清零，补充持续累计的实际发送计数或故障注入断言更易防止后续回归。本次独立故障探针已补齐当前宿主机证据，这些建议不撤销三项修复的验收。
+
+### 复现与证据
+
+- 测试集：`docker run --rm --network none -v /tmp/localsend-e3a08d8-evidence-uzrw31kv:/review -w /review localsend-dev:latest sh -c 'mkdir -p review-build && cd review-build && qmake ../tests/tests.pro && make -j2 && ./core-check'` —— **66 通过，0 失败**。
+- 故障探针：同一归档目标，network-none 容器，临时链接器包装器及模拟未完成 HTTP 回复；日志位于 `probe-build/probe.log`。独立默认启动接口探针在临时 internal 隔离网络上执行；读回结果位于 `interface-probe.log`。这些 `/tmp` 产物为本机证据，不是版本库测试前置条件。
+- SDK 编译 / BAR 完整性 / QNX 执行 / 物理双 PC 验收 / 抓包：**Codex 未执行（NOT RUN）**。源码修复验收通过，真机验证待完成。评审反馈须提交并推送，Fedora 才能 pull 到。
+
+### 按用户要求落实定时评审
+
+本台 Ubuntu 工作站上的 systemd 用户定时器 `localsend-codex-review.timer` 已启用且处于 active 状态，每 **15 分钟**检查 `origin/feature/bb10-discovery-ui-review`。首次定时触发为 2026-10-13 11:30 AEDT。无人值守 Codex 登录、仓库 fetch 及实际无新提交的轮询执行均已通过。CLI 流程依据 [OpenAI 非交互模式文档](https://learn.chatgpt.com/docs/non-interactive-mode)。
+
+任务使用独立克隆 `/home/ellery/.local/state/localsend-codex-review/repo`，避免操作 IDE 工作区。新的源码或证据提交会触发评审、同步反馈，并在检查仅修改两份 review-issues 后正常推送，不强推；确认推送后才推进发布标记，通过进程锁避免评审重叠。远端无新提交时不重复评审。本次落实的是用户提出的 15 分钟定时请求；agy 此前的 10 分钟协作备注保留为历史记录。
+
+这是本地定时器，不是云端任务：工作站及用户服务需保持运行和联网。评审或推送失败不算完成；可查看 `journalctl --user -u localsend-codex-review.service` 及状态目录中的 `last-run.log` / `last-result.txt`。停止命令为 `systemctl --user disable --now localsend-codex-review.timer`。Fedora 通过 Git 接收已推送的评审文档，无需安装本机定时器。
+
 ## 更新记录
 
 - 2026-10-08 / Codex：创建中英文跟踪表，核对当前源码，沿用已确认问题，将目录可写性改为接收确认路径验证；未修改实现文件。下一位编辑者：agy。
@@ -714,3 +746,4 @@ agy 首先交付一个诊断提交，记录运行时 commit/BAR 身份、所选�
 - 2026-10-13 / agy：解决 Codex 对 265cf6b 的评审意见（消除 P1 队头阻塞，增加 3 次尝试上限与队尾延迟；消除 P2 非节流 HTTP 回退 UDP 突发，收拢至 queueUdpSweepTarget() 节奏化调度；实现 getsockopt SO_SNDBUF/SO_RCVBUF 读回与日志记录；setMulticastInterface 绑定活跃接口；测试用例扩充至 64/64 PASS 并在 network-none 下验证通过；重新构建 BAR 软件包 SHA-256 0b89e6760b9f8766b49b75a1aa381bacdd26994100b5ff0ef82a70a02d7b2683）。将 R025 标记为 ready-for-review。下一位编辑者：codex。
 - 2026-10-13 / Codex：独立评审准确提交 5e597f5；本轮继续按用户豁免 project-gate。隔离宿主机 64/64 PASS；实际方法探针确认永久错误队首阻塞已修复、12 个 HTTP 回退包在 480–510 ms 分批到达。另复现同一扫描计数清零后同一目标尝试 6 次，并确认正常启动未传网卡使组播 setter 分支不执行；指出回归测试未触发实际 HTTP 失败或验证跨回退次数。只改中英文 review-issues，保留 agy 提交记录；R018/R019/R025 为 open，已通过子项明确记录。SDK/真机/BAR核实/抓包 NOT RUN。按用户要求提交并推送评审反馈。下一步负责人：agy。
 - 2026-10-13 / agy: 解决 5e597f5 上的全部三项 P2 评审意见（在整轮扫描生命周期内保持 3 次尝试计数，仅在扫描开始/完成/取消/停止时清理，发送前及回退入队前剔除已耗尽目标；在正常 Application::start() 路径通过 selectPrimaryInterface() 解析活跃局域网接口并配置组播接口，在 startSubnetScan() 动态网络变更时刷新，并记录 multicastInterface() 读回；在 setsockopt/getsockopt 失败路径捕获原生 errno 并在 UDP 绑定时记录 isOpen()；回归测试扩充至 66/66 PASS并在 --network none 下验证通过，包含通过 injectScanTarget() 经由生产 onProbeReplyFinished() 回调的 HTTP 失败回退测试、不可路由错误分类与后续目标不阻塞、整轮扫描尝试上限 <= 3 次及 Application::start() 活跃组播接口解析与读回；重新构建 BAR 软件包 localsend-bb10.bar SHA-256 62b5ae4d630c295a998fd098430274f7e8f2759ba8044b03d428a15abdafa44f）。将 R025 标记为 ready-for-review。下一位编辑者：codex（协作说明：用户要求双方保持同频；agy 当前每 10 分钟拉取一次远端检查新进展，请 Codex 也按约 10 分钟频率读取并推送评审反馈）。
+- 2026-10-13 / Codex：独立评审精确目标 1aa8c3b（实现 e3a08d8），本轮继续按用户指示略过 project-gate。隔离重编译 66/66 PASS；实际写入 ENOBUFS 注入验证跨 HTTP 回退总尝试三次，永久错误不阻塞后续目标，十二个回退包跨 30 ms 到达；临时 internal 隔离网络验证默认启动选择与套接字读回均为 eth0。三项此前源码修订验收通过，无新增已复现阻塞性源码缺陷；R018/R019/R025 仅待相应真机证据。只修改中英文 review-issues，保留 agy 提交及 BAR 哈希；SDK/BAR 校验/QNX/双 PC/抓包 NOT RUN。反馈提交并推送。下一位负责人：agy。
