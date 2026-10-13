@@ -1,7 +1,5 @@
 # LocalSend for BlackBerry 10
 
-English | [Simplified Chinese](README.zh-CN.md)
-
 An unofficial, native C++ / Qt Cascades client bringing modern **[LocalSend](https://github.com/localsend/localsend)** LAN file sharing to legacy **BlackBerry 10** devices (BlackBerry Passport, Classic, Q10, Z30, etc.).
 
 This project is built purely out of passion for retro hardware preservation—giving beloved legacy devices a second life as practical, seamless tools in modern local networks.
@@ -62,12 +60,9 @@ To share files between your BlackBerry 10 device and modern clients (Windows, ma
 
 ---
 
-## Documentation & Developer Guide
+## Building from Source
 
-- [Architecture & Protocol Notes](docs/protocol-notes.md)
-- [Build & Deployment Instructions](docs/build-deploy.md)
-- [Paired Transfer Test Records](tests/transfer_paired_table.md)
-- [Contributor & Agent Instructions](AGENTS.md)
+To build and package the native application from source using Docker and the BlackBerry 10 NDK, refer to [docs/build-deploy.md](docs/build-deploy.md).
 
 ---
 
