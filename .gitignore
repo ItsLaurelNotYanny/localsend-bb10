@@ -32,3 +32,7 @@ ui_*
 tests/fixtures/
 __pycache__/
 *.pyc
+
+# Local / internal documentation
+*.zh-CN.md
+docs/archive/
