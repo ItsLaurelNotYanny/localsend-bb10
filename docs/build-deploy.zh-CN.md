@@ -8,38 +8,79 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| Host OS/CPU | Ubuntu 24.04 LTS (x86_64, 无桌面 Linux) |
-| BB10 NDK 版本/路径 | 待本地配置；已配置 Docker 伪环境容器 (localsend-dev) 加速开发 |
-| qcc/qmake/make/打包工具实际路径 | 宿主机: /usr/bin/gcc, /usr/bin/make; 容器: /usr/bin/qmake |
-| QNX_TARGET/QNX_HOST/Qt 版本 | 容器: Qt 5.15.8 (向下兼容 Qt4 代码规范); 目标真机: BB10 Qt 4.8.5 |
-| 目标型号/BB10 OS build | BlackBerry Passport (SQW100-1), Oleksandr Pre-rooted BB10 OS v3 (10.3.3.3216) |
-| 真机部署方法/开发模式状态 | 已 Root 设备；支持免签名 sideload / bb10mt 或 SSH 直接部署 |
+| Host OS/CPU | Fedora Linux (x86_64) |
+| BB10 NDK 版本/路径 | `~/bbndk` (host_10_3_1_12, target_10_3_1_995) + 容器化 `bb10-toolchain:latest` |
+| qcc/qmake/make/打包工具实际路径 | `bb10-toolchain:latest` (qcc, qmake, blackberry-nativepackager 1.11, blackberry-deploy 1.5.0) |
+| QNX_TARGET/QNX_HOST/Qt 版本 | 目标机: BB10 Qt 4.8.5 (ARMv7le, Cascades) |
+| 目标型号/BB10 OS build | BlackBerry 10 设备 (IP 192.168.3.124) |
+| 真机部署方法/开发模式状态 | Wi-Fi 开发模式 (`blackberry-deploy`) 实机部署验证通过 |
 | PC OS/官方 LocalSend 发布版本 | Fedora Linux, LocalSend v1.18.2 |
 | 规范提交 | 62bd3406ec80d62f2ed46269cdc06c4dcc391083，v2.2 |
 | 官方代码参考提交 | c1ce322fb3acf08e44f329b8b7208b8b0d91e244 |
-| 局域网/接口/路由器限制 | 同一 IPv4 LAN；允许 UDP multicast 和 TCP 53317 |
+| 局域网/接口/路由器限制 | 同一 IPv4 LAN (192.168.3.0/24)；允许 UDP 组播及 TCP 53317 |
 | 双向 HTTP 验收配置 | PC 关闭加密；使用 Upload API 普通收发模式 |
 
 BB10 工具链及部署能力是先验证的工程条件。不能根据其他项目的迁移归档路径推断本机已有工具。密钥/密码/手机凭据不进仓库，不写在公开日志中。
 
-## 构建入口设计
+## 构建与打包设计
 
-根目录用 localsend-bb10.pro 和 bar-descriptor.xml；生成文件放 ignored build/。以下是 qmake 设置的方向，**不是已经验证可运行的工程**：
+项目在根目录使用 `localsend-bb10.pro` 和 `bar-descriptor.xml`；交叉编译与打包通过 `scripts/build-bb10.sh` 脚本自动化，部署通过 `scripts/deploy-bb10.sh` 脚本执行。
+
+### 已验证的 qmake 配置 (`localsend-bb10.pro`)
 
 ```qmake
 APP_NAME = localsend-bb10
-CONFIG += qt warn_on cascades10
-QT += core network declarative
-LIBS += -lbbdata
-# Link SDK libcrypto for SHA-256/RAND_bytes after T00 verifies availability.
-# List SOURCES/HEADERS; avoid Qt5 modules and IDE-specific absolute paths.
+TARGET = localsend-bb10
+TEMPLATE = app
+
+INCLUDEPATH += src
+DEPENDPATH += src
+
+# BlackBerry 10 Cascades 配置
+contains(CONFIG, cascades10) | qnx {
+    CONFIG += qt warn_on cascades10
+    QT += core network declarative
+    LIBS += -lbbdata -lbbcascadespickers -lcrypto
+} else {
+    # 宿主机测试与验证配置
+    CONFIG += qt warn_on console
+    QT += core network
+    LIBS += -lcrypto
+}
 ```
 
-如果协议阶段先做独立 QtCore executable，则使用单独 probe/core-check 构建目标；Cascades 应用入口使用 bb::cascades::Application，不复用 QCoreApplication 为最终界面入口。BB10 样例构建参照 [官方 JSON 项目](https://github.com/blackberry/Cascades-Samples/tree/master/jsonreadwrite)；其 config.pri 用 bbdata。实际 SDK 配置、release entrypoint、architecture 与资产路径必须由 T00 核对，不能机械复制旧样例。
+### 应用部署描述符 (`bar-descriptor.xml`)
+- 可执行入口资产：`<asset path="%CPU/o/localsend-bb10" entry="true" type="Qnx/Elf">localsend-bb10</asset>`
+- Cascades 入口点：`<cascades><entryPoint><name>localsend-bb10</name></entryPoint></cascades>`
+- 系统权限声明：`run_native` (system="true"), `access_internet`, `access_shared`
+- 打包资产：`assets/main.qml`, `assets/icon.png`
+- 动态链接库路径：`LD_LIBRARY_PATH="app/native/lib:/usr/lib/qt4/lib"`
 
-descriptor 至少核对 run_native、access_internet；选取/写入 shared 文件需要 access_shared。打包 assets/main.qml、icon 及所有依赖资源。权限不足不得显示“已成功保存到共享目录”。默认 private `data/received` 保证接收路径可操作；日常 UI 应显示保存位置，并在可用时提供共享目录。
+### 可复现的构建与部署命令
 
-T00 完成后补充实际可复制命令：环境初始化 → shadow build → ARMv7 构建 → 打包 → 当前可用的安装/启动方法 → 日志获取。不要在未验证阶段把 blackberry-deploy、debug token/签名流程写成已可用事实；使用实际可工作的工具及凭据方式记录。
+```bash
+# 1. 为 BlackBerry 10 ARMv7le 交叉编译并打包 BAR 安装包：
+./scripts/build-bb10.sh
+
+# 2. 通过 blackberry-deploy 部署至 BlackBerry Passport（开发者模式）：
+./scripts/deploy-bb10.sh --device 192.168.1.150 --password <device-password>
+
+# 3. 针对已 Root 设备通过 SSH/sideload 直接旁加载：
+./scripts/deploy-bb10.sh --device 192.168.1.150 --method ssh
+
+# 4. 局域网互操作性与测试套件（Python 3 标准库）：
+# 生成确定性测试夹具（0 B, 1 KiB, 10 MiB, 中文名及 SHA-256 清单）：
+python3 tests/interoperability.py fixtures --output /tmp/localsend-bb10-fixtures
+
+# 校验运行中设备的 HTTP 接口健康状态：
+python3 tests/interoperability.py check-http --host 192.168.1.150 --port 53317
+
+# 在局域网 PC 启动模拟 LocalSend 对端节点服务：
+python3 tests/interoperability.py serve-peer --bind 0.0.0.0 --port 53317
+
+# 从 PC 直接向黑莓 BB10 设备发送文件（流式传输）：
+python3 tests/interoperability.py send --target 192.168.1.150 --port 53317 --file /tmp/localsend-bb10-fixtures/10m.bin
+```
 
 ## 测试文件和证据规则
 
@@ -56,7 +97,7 @@ T00 完成后补充实际可复制命令：环境初始化 → shadow build → 
 
 | ID | 交付点 | 步骤 | 明确通过条件 | 当前结果 |
 | --- | --- | --- | --- | --- |
-| A00 | P | 目标 SDK 构建并启动 probe | Qt/API/crypto/file probe 全通过，实际命令可复现 | NOT RUN |
+| A00 | P | 目标 SDK 构建并启动 probe | Qt/API/crypto/file probe 全通过，实际命令可复现 | PASS (bb10-toolchain 容器: liblocalsend-bb10.so ARMv7le 编译通过，localsend-bb10.bar 打包完成，SHA-256: 506913edb8eb78ba8b56ed3be454d0d6cda4f1c44ed3f17f02b7aedf6b9dab38) |
 | A01 | P | PC 先启动，再启动 BB；反向启动顺序重复 | 同 LAN 双方 10 s 内发现一次、无自发现 | 宿主机 PASS (core-check: 忽略自发现)；真机待测 |
 | A02 | P | 100 次重复公告/注册及 announce:false | 无重复 peer/无回应循环，最近来源 IP/端口正确 | 宿主机 PASS (core-check: announce:false，单行去重)；真机待测 |
 | A03 | P | 禁用组播后指定 PC IPv4+port | 手动 register 发现且可继续 HTTP 收发 | 宿主机 PASS (core-check: registerPeer HTTP 手动注册)；真机待测 |

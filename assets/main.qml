@@ -9,10 +9,18 @@ TabbedPane {
         Page {
             titleBar: TitleBar {
                 title: "LocalSend BB10"
+                acceptAction: ActionItem {
+                    title: app.isScanning ? "Scanning..." : "Scan"
+                    enabled: !app.isScanning
+                    onTriggered: {
+                        app.refreshDevices();
+                    }
+                }
             }
             actions: [
                 ActionItem {
-                    title: "Refresh"
+                    title: app.isScanning ? "Scanning..." : "Scan"
+                    enabled: !app.isScanning
                     ActionBar.placement: ActionBarPlacement.OnBar
                     onTriggered: {
                         app.refreshDevices();
@@ -48,13 +56,60 @@ TabbedPane {
                             textStyle.color: Color.White
                         }
                         Label {
-                            text: "Port " + app.devicePort + " • LocalSend Protocol v2.2"
+                            text: app.networkStatus + " • Port " + app.devicePort + " • " + app.appVersion
                             textStyle.base: SystemDefaults.TextStyles.SmallText
-                            textStyle.color: Color.create("#A0AEC0")
+                            textStyle.color: Color.create("#68D391")
                         }
                     }
 
                     Divider {}
+
+                    // Incoming transfer alert banner on Radar tab
+                    Container {
+                        visible: app.hasIncomingOffer
+                        topPadding: 16.0
+                        bottomPadding: 16.0
+                        leftPadding: 16.0
+                        rightPadding: 16.0
+                        bottomMargin: 12.0
+                        background: Color.create("#FEFCBF")
+
+                        Label {
+                            text: "Incoming File Transfer!"
+                            textStyle.base: SystemDefaults.TextStyles.TitleText
+                            textStyle.color: Color.create("#B7791F")
+                        }
+                        Label {
+                            text: "From: " + app.incomingPeerAlias + "\nFile: " + app.incomingFileName + " (" + app.incomingFileSize + ")"
+                            textStyle.base: SystemDefaults.TextStyles.BodyText
+                            textStyle.color: Color.create("#2D3748")
+                        }
+                        Container {
+                            layout: StackLayout {
+                                orientation: LayoutOrientation.LeftToRight
+                            }
+                            topMargin: 12.0
+
+                            Button {
+                                text: "Accept"
+                                layoutProperties: StackLayoutProperties {
+                                    spaceQuota: 1.0
+                                }
+                                onClicked: {
+                                    app.acceptIncoming(app.incomingRequestId);
+                                }
+                            }
+                            Button {
+                                text: "Decline"
+                                layoutProperties: StackLayoutProperties {
+                                    spaceQuota: 1.0
+                                }
+                                onClicked: {
+                                    app.rejectIncoming(app.incomingRequestId);
+                                }
+                            }
+                        }
+                    }
 
                     // Selected file section
                     Header {
@@ -88,7 +143,7 @@ TabbedPane {
                         Button {
                             text: app.hasSelectedFile ? "Change Selected File" : "Choose File to Send"
                             horizontalAlignment: HorizontalAlignment.Fill
-                            onTriggered: {
+                            onClicked: {
                                 app.chooseFile();
                             }
                         }
@@ -98,12 +153,12 @@ TabbedPane {
 
                     // Nearby devices section
                     Header {
-                        title: "Nearby Devices (" + app.peers.length + ")"
+                        title: "Nearby Devices (" + app.peerCount + ")"
                     }
 
                     Label {
-                        visible: app.peers.length === 0
-                        text: "Scanning for LocalSend peers on Wi-Fi..."
+                        visible: app.peerCount === 0
+                        text: app.isScanning ? "Scanning local subnet (192.168.x.x) for LocalSend peers..." : "No devices found. Tap Scan above or enter manual IP below."
                         textStyle.base: SystemDefaults.TextStyles.SubtitleText
                         textStyle.color: Color.create("#718096")
                     }
@@ -111,11 +166,9 @@ TabbedPane {
                     // Peer list rendering
                     Container {
                         id: peersContainer
+                        objectName: "peersContainer"
                         topPadding: 8.0
                         bottomPadding: 8.0
-
-                        // Dynamic peer items built from app.peers
-                        // Each item has device alias, model, address, and a Send button
                     }
 
                     Divider {}
@@ -151,7 +204,7 @@ TabbedPane {
                     Button {
                         text: "Connect to Device"
                         horizontalAlignment: HorizontalAlignment.Fill
-                        onTriggered: {
+                        onClicked: {
                             app.addManualPeer(manualIpField.text, parseInt(manualPortField.text));
                             manualIpField.text = "";
                         }
@@ -177,6 +230,54 @@ TabbedPane {
             titleBar: TitleBar {
                 title: "Transfer Activity"
             }
+
+            attachedObjects: [
+                ComponentDefinition {
+                    id: candidateFileCardDef
+                    Container {
+                        id: candRoot
+                        property string fileId: ""
+                        property string fileName: ""
+                        property string fileSize: ""
+                        property bool isSelected: false
+
+                        topPadding: 8.0
+                        bottomPadding: 8.0
+                        leftPadding: 12.0
+                        rightPadding: 12.0
+                        bottomMargin: 4.0
+                        background: candRoot.isSelected ? Color.create("#CBD5E0") : Color.create("#EDF2F7")
+
+                        Container {
+                            layout: StackLayout {
+                                orientation: LayoutOrientation.LeftToRight
+                            }
+
+                            Label {
+                                text: (candRoot.isSelected ? "● " : "○ ") + candRoot.fileName + " (" + candRoot.fileSize + ")"
+                                layoutProperties: StackLayoutProperties {
+                                    spaceQuota: 3.0
+                                }
+                                textStyle.base: SystemDefaults.TextStyles.BodyText
+                                textStyle.color: candRoot.isSelected ? Color.create("#2B6CB0") : Color.create("#2D3748")
+                                verticalAlignment: VerticalAlignment.Center
+                            }
+
+                            Button {
+                                text: candRoot.isSelected ? "Selected" : "Select"
+                                enabled: !candRoot.isSelected
+                                layoutProperties: StackLayoutProperties {
+                                    spaceQuota: 1.0
+                                }
+                                verticalAlignment: VerticalAlignment.Center
+                                onClicked: {
+                                    app.selectIncomingFile(candRoot.fileId);
+                                }
+                            }
+                        }
+                    }
+                }
+            ]
 
             ScrollView {
                 Container {
@@ -205,9 +306,69 @@ TabbedPane {
                             textStyle.color: Color.create("#2D3748")
                         }
                         Label {
-                            text: "File: " + app.incomingFileName + " (" + app.incomingFileSize + ")"
+                            text: "Selected: " + app.incomingFileName + " (" + app.incomingFileSize + ")"
                             textStyle.base: SystemDefaults.TextStyles.BodyText
                             textStyle.color: Color.create("#2D3748")
+                        }
+
+                        // Candidate selection for multi-file offer
+                        Label {
+                            visible: app.incomingFiles.length > 1
+                            text: "Choose file to receive (" + app.incomingFiles.length + " offered):"
+                            textStyle.base: SystemDefaults.TextStyles.SmallText
+                            textStyle.color: Color.create("#718096")
+                            topMargin: 8.0
+                        }
+
+                        Container {
+                            id: candidateFilesContainer
+                            visible: app.incomingFiles.length > 1
+                            topPadding: 4.0
+                            bottomPadding: 4.0
+
+                            property variant activeCandidateCards: []
+                            property variant candidateList: app.incomingFiles
+                            property string selectedCandidateId: app.selectedIncomingFileId
+
+                            onCandidateListChanged: {
+                                renderCandidates();
+                            }
+                            onSelectedCandidateIdChanged: {
+                                renderCandidates();
+                            }
+
+                            function renderCandidates() {
+                                for (var i = 0; i < activeCandidateCards.length; ++i) {
+                                    if (activeCandidateCards[i]) {
+                                        activeCandidateCards[i].destroy();
+                                    }
+                                }
+                                activeCandidateCards = [];
+                                candidateFilesContainer.removeAll();
+
+                                var files = app.incomingFiles;
+                                if (!files) {
+                                    return;
+                                }
+                                var cards = [];
+                                for (var j = 0; j < files.length; ++j) {
+                                    var c = candidateFileCardDef.createObject();
+                                    if (c) {
+                                        var f = files[j];
+                                        c.fileId = f.id;
+                                        c.fileName = f.fileName;
+                                        c.fileSize = f.formattedSize;
+                                        c.isSelected = (f.id === app.selectedIncomingFileId);
+                                        candidateFilesContainer.add(c);
+                                        cards.push(c);
+                                    }
+                                }
+                                activeCandidateCards = cards;
+                            }
+
+                            onCreationCompleted: {
+                                renderCandidates();
+                            }
                         }
 
                         Container {
@@ -218,21 +379,19 @@ TabbedPane {
 
                             Button {
                                 text: "Accept"
-                                color: Color.create("#38A169")
                                 layoutProperties: StackLayoutProperties {
                                     spaceQuota: 1.0
                                 }
-                                onTriggered: {
-                                    app.acceptIncoming(app.incomingRequestId, app.incomingFileId);
+                                onClicked: {
+                                    app.acceptIncoming(app.incomingRequestId, app.selectedIncomingFileId);
                                 }
                             }
                             Button {
                                 text: "Decline"
-                                color: Color.create("#E53E3E")
                                 layoutProperties: StackLayoutProperties {
                                     spaceQuota: 1.0
                                 }
-                                onTriggered: {
+                                onClicked: {
                                     app.rejectIncoming(app.incomingRequestId);
                                 }
                             }
@@ -268,9 +427,11 @@ TabbedPane {
                         }
 
                         // Progress indicator
-                        ProgressBar {
-                            value: app.transferProgress
+                        ProgressIndicator {
+                            fromValue: 0.0
                             toValue: 100.0
+                            value: app.transferProgress
+                            state: ProgressIndicatorState.Progress
                             topMargin: 12.0
                             bottomMargin: 12.0
                         }
@@ -278,10 +439,27 @@ TabbedPane {
                         Button {
                             text: "Cancel Transfer"
                             enabled: app.transferActive
-                            color: Color.create("#E53E3E")
                             horizontalAlignment: HorizontalAlignment.Fill
-                            onTriggered: {
+                            onClicked: {
                                 app.cancelTransfer();
+                            }
+                        }
+
+                        Label {
+                            visible: app.lastSavedFilePath.length > 0
+                            text: "Saved file:\n" + app.lastSavedFilePath
+                            textStyle.base: SystemDefaults.TextStyles.SmallText
+                            textStyle.color: Color.create("#2B6CB0")
+                            topMargin: 8.0
+                        }
+
+                        Button {
+                            visible: app.lastSavedFilePath.length > 0
+                            text: "Open Received File"
+                            horizontalAlignment: HorizontalAlignment.Fill
+                            topMargin: 8.0
+                            onClicked: {
+                                app.openFile(app.lastSavedFilePath);
                             }
                         }
                     }
@@ -295,6 +473,14 @@ TabbedPane {
                         text: app.receiveDirectory
                         textStyle.base: SystemDefaults.TextStyles.SmallText
                         textStyle.color: Color.create("#718096")
+                    }
+                    Button {
+                        text: "Open Downloads Folder"
+                        horizontalAlignment: HorizontalAlignment.Fill
+                        topMargin: 8.0
+                        onClicked: {
+                            app.openReceiveDirectory();
+                        }
                     }
                 }
             }
@@ -329,7 +515,7 @@ TabbedPane {
                     Button {
                         text: "Save Device Name"
                         horizontalAlignment: HorizontalAlignment.Fill
-                        onTriggered: {
+                        onClicked: {
                             app.setDeviceAlias(aliasEditField.text);
                         }
                     }
@@ -352,6 +538,29 @@ TabbedPane {
                     Divider {}
 
                     Header {
+                        title: "Diagnostics & Logs"
+                    }
+                    Label {
+                        text: "Diagnostic Log File:"
+                        textStyle.base: SystemDefaults.TextStyles.BodyText
+                    }
+                    Label {
+                        text: app.diagnosticLogPath
+                        textStyle.base: SystemDefaults.TextStyles.SmallText
+                        textStyle.color: Color.create("#4A5568")
+                    }
+                    Button {
+                        text: "Open Diagnostic Log"
+                        horizontalAlignment: HorizontalAlignment.Fill
+                        topMargin: 8.0
+                        onClicked: {
+                            app.openDiagnosticLog();
+                        }
+                    }
+
+                    Divider {}
+
+                    Header {
                         title: "About LocalSend for BB10"
                     }
                     Label {
@@ -359,7 +568,7 @@ TabbedPane {
                         textStyle.base: SystemDefaults.TextStyles.TitleText
                     }
                     Label {
-                        text: "Version 0.1.0 (MVP)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
+                        text: "Version 0.1.1 (Build 7)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
                         textStyle.base: SystemDefaults.TextStyles.BodyText
                         textStyle.color: Color.create("#718096")
                     }

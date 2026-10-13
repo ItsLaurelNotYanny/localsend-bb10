@@ -34,7 +34,8 @@ SOURCES += \
 contains(CONFIG, cascades10) | qnx {
     CONFIG += qt warn_on cascades10
     QT += core network declarative
-    LIBS += -lbbdata -lcrypto
+    DEFINES += BB_CASCADES
+    LIBS += -lbbdata -lbbcascadespickers -lbbsystem -lcrypto
 } else {
     # Host testing / verification configuration
     CONFIG += qt warn_on console

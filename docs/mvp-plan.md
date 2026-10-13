@@ -363,6 +363,13 @@ check-http and serve-peer only access developer-specified endpoints, without net
 
 **Definition of done**: all applicable P items have PASS and evidence; U also passes UI items. Mark unexecuted checks NOT RUN and failures FAIL with a minimal reproduction. Predicted behavior is not evidence. Without SDK/device access, deliver source and host checks while explicitly identifying missing P acceptance.
 
+**Implementation Status (Completed)**:
+- Deterministic test fixtures generator, endpoint verifier, LAN mock PC peer, and streaming sender implemented in `tests/interoperability.py` (Python 3 standard library, 0 external dependencies).
+- Application packaging descriptor configured in `bar-descriptor.xml` with `%CPU/o/localsend-bb10` entry asset, permissions (`run_native`, `access_internet`, `access_shared`), and assets.
+- Cascades build configuration verified in `localsend-bb10.pro` including `-lbbcascadespickers` linkage.
+- Automated packaging and deployment scripts provided: `scripts/build-bb10.sh` and `scripts/deploy-bb10.sh` (supporting development mode and root SSH sideload).
+- Full automated test suite passes 56/56 in Docker container (`Total: 56, Passed: 56, Failed: 0`). Real device tests scheduled for next session.
+
 ## Execution Contract to Hand to agy
 
 > Implement protocol MVP P in localsend-bb10 following docs/mvp-plan.md. Read README, protocol-notes, build-deploy, and AGENTS first. Deliver T00-T08 and T10 individually. Bidirectional 10 MiB transfers from BB10 to PC and PC to BB10 are mandatory and may not be deferred. If full UI delays protocol validation, keep only required test actions and defer T09, while retaining selection of one offered file. Use BB10 Qt4.8/C++03 and platform JSON; do not use QJsonDocument/QUrlQuery/QMimeDatabase/QSaveFile/QtQuick.Controls 2. Preserve raw binary HTTP uploads, bounded memory, asynchronous consent, session/token/source IP checks, temporary-file commit, and v2.2 checksum mismatch 422. Do not add HTTPS, multi-file scheduling, background services, Download API, or third-party UI frameworks. Keep code, comments, and technical text in English; maintain full English and Simplified Chinese documentation pairs together. Record changed files, commands, results, and unverified items for every task. Do not claim P completion without SDK/device validation. If T00 finds incompatible tooling/libraries, provide evidence and the smallest viable alternative. Do not commit generated Makefiles, credentials, signing keys, or large fixtures.

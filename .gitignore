@@ -1,8 +1,11 @@
 # Build directories and artifacts
 build/
+build-arm/
+arm/
 *.o
 *.obj
 *.so
+*.so.*
 *.a
 *.bar
 *.moc
@@ -13,6 +16,7 @@ Makefile.*
 moc_*
 qrc_*
 ui_*
+.assets.index
 .qmake.cache
 .qmake.stash
 
@@ -26,3 +30,5 @@ ui_*
 # Test scratch
 /tmp/localsend-*
 tests/fixtures/
+__pycache__/
+*.pyc
