@@ -27,6 +27,14 @@ ui_*
 *~
 .DS_Store
 
+# Test logs, captures, and output
+*.log
+*.jsonl
+*.pcap
+tests/*.log
+tests/*.jsonl
+tests/*.pcap
+
 # Test scratch
 /tmp/localsend-*
 tests/fixtures/
