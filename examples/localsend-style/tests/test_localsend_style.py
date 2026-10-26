@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import select
 import socket
 import ssl
 import struct
@@ -34,6 +35,34 @@ def exact_read(sock: socket.socket, count: int) -> bytes:
             raise EOFError("Socket closed prematurely")
         buf += chunk
     return buf
+
+
+def wait_for_startup_line(proc: subprocess.Popen, timeout: float = 5.0) -> str:
+    if proc.stdout is None:
+        raise RuntimeError("Process stdout is not captured")
+    fd = proc.stdout.fileno()
+    deadline = time.time() + timeout
+    line_buf = b""
+    while time.time() < deadline:
+        rem = max(0.001, deadline - time.time())
+        r, _, _ = select.select([fd], [], [], min(rem, 0.1))
+        if r:
+            chunk = os.read(fd, 1024)
+            if not chunk:
+                break
+            line_buf += chunk
+            if b'\n' in line_buf:
+                return line_buf.decode('utf-8', errors='replace')
+        if proc.poll() is not None:
+            try:
+                chunk = os.read(fd, 4096)
+                line_buf += chunk
+            except OSError:
+                pass
+            break
+    if not line_buf and time.time() >= deadline:
+        raise RuntimeError(f"Timed out after {timeout:.1f}s waiting for process startup output")
+    return line_buf.decode('utf-8', errors='replace')
 
 
 def test_case_1_identity_and_pin(demo_bin: str, tmp_dir: Path) -> str:
@@ -151,7 +180,7 @@ def test_case_2_tls13_loopback_transfer(demo_bin: str, tmp_dir: Path, cert_path:
     )
 
     try:
-        server_line = server_proc.stdout.readline()
+        server_line = wait_for_startup_line(server_proc, timeout=5.0)
         if f"LISTENING port={port}" not in server_line:
             raise RuntimeError(f"Server failed to start listening on port {port}: {server_line}")
 
@@ -220,7 +249,7 @@ def test_case_3_pin_mismatch(demo_bin: str, tmp_dir: Path, cert_path: Path, key_
     )
 
     try:
-        server_line = server_proc.stdout.readline()
+        server_line = wait_for_startup_line(server_proc, timeout=5.0)
         if f"LISTENING port={port}" not in server_line:
             raise RuntimeError(f"Server failed to start listening: {server_line}")
 
@@ -272,7 +301,7 @@ def test_case_4_edge_cases_and_recovery(demo_bin: str, tmp_dir: Path, cert_path:
         text=True,
     )
     try:
-        s_line = server_hdr.stdout.readline()
+        s_line = wait_for_startup_line(server_hdr, timeout=5.0)
         assert f"LISTENING port={p_hdr}" in s_line
 
         cctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -326,7 +355,7 @@ def test_case_4_edge_cases_and_recovery(demo_bin: str, tmp_dir: Path, cert_path:
                     exact_read(ss, cnt)
                     behavior(ss)
             except Exception as e:
-                errs.append(str(e))
+                errs.append(e)
             finally:
                 listener.close()
 
@@ -346,7 +375,7 @@ def test_case_4_edge_cases_and_recovery(demo_bin: str, tmp_dir: Path, cert_path:
         if th.is_alive():
             raise RuntimeError("Peer worker thread did not terminate within timeout!")
         if errs:
-            print(f"    (Worker observed expected peer error: {errs})")
+            raise errs[0]
         return cp
 
     # Stalled ACK (server pauses longer than client timeout)
@@ -390,7 +419,8 @@ def test_case_4_edge_cases_and_recovery(demo_bin: str, tmp_dir: Path, cert_path:
         text=True,
     )
     try:
-        assert f"LISTENING port={p_disc}" in server_disc.stdout.readline()
+        s_disc_line = wait_for_startup_line(server_disc, timeout=5.0)
+        assert f"LISTENING port={p_disc}" in s_disc_line
         cctx_disc = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         cctx_disc.check_hostname = False
         cctx_disc.verify_mode = ssl.CERT_NONE
@@ -434,7 +464,8 @@ def test_case_4_edge_cases_and_recovery(demo_bin: str, tmp_dir: Path, cert_path:
         text=True,
     )
     try:
-        assert f"LISTENING port={p_chk}" in server_chk.stdout.readline()
+        s_chk_line = wait_for_startup_line(server_chk, timeout=5.0)
+        assert f"LISTENING port={p_chk}" in s_chk_line
         with cctx_disc.wrap_socket(socket.create_connection(('127.0.0.1', p_chk), timeout=2.0), server_hostname='localhost') as s:
             s.settimeout(2.0)
             payload_data = os.urandom(4096)
@@ -481,7 +512,7 @@ def test_case_4_edge_cases_and_recovery(demo_bin: str, tmp_dir: Path, cert_path:
         text=True,
     )
     try:
-        s_sym_line = server_sym.stdout.readline()
+        s_sym_line = wait_for_startup_line(server_sym, timeout=5.0)
         assert f"LISTENING port={p_sym}" in s_sym_line
 
         cp_sym_client = run_cmd([
@@ -532,7 +563,8 @@ def test_case_5_descriptor_ownership(demo_bin: str, tmp_dir: Path, cert_path: Pa
         text=True,
     )
     try:
-        assert f"LISTENING port={port}" in server_proc.stdout.readline()
+        s_line = wait_for_startup_line(server_proc, timeout=5.0)
+        assert f"LISTENING port={port}" in s_line
 
         trace_file = tmp_dir / "client_close.strace"
         cp = run_cmd([
@@ -583,7 +615,8 @@ def test_case_6_fault_injection_and_backpressure(demo_bin: str, tmp_dir: Path, c
     env_fsync.update(LD_PRELOAD=str(faults_so), H1_FAULT_MODE="fsync", H1_FAULT_OUTPUT=str(out_fsync))
     srv_fsync = subprocess.Popen([demo_bin, "server", "--port", str(p_fsync), "--cert", str(cert_path), "--key", str(key_path), "--output", str(out_fsync), "--timeout-ms", "700"], env=env_fsync, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        assert f"LISTENING port={p_fsync}" in srv_fsync.stdout.readline()
+        s_line = wait_for_startup_line(srv_fsync, timeout=5.0)
+        assert f"LISTENING port={p_fsync}" in s_line
         run_cmd([demo_bin, "client", "--port", str(p_fsync), "--file", str(payload), "--expected-pin", pin, "--timeout-ms", "700"])
         so, se = srv_fsync.communicate(timeout=3.0)
     finally:
@@ -605,7 +638,8 @@ def test_case_6_fault_injection_and_backpressure(demo_bin: str, tmp_dir: Path, c
     env_close.update(LD_PRELOAD=str(faults_so), H1_FAULT_MODE="close", H1_FAULT_OUTPUT=str(out_close))
     srv_close = subprocess.Popen([demo_bin, "server", "--port", str(p_close), "--cert", str(cert_path), "--key", str(key_path), "--output", str(out_close), "--timeout-ms", "700"], env=env_close, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        assert f"LISTENING port={p_close}" in srv_close.stdout.readline()
+        s_line = wait_for_startup_line(srv_close, timeout=5.0)
+        assert f"LISTENING port={p_close}" in s_line
         run_cmd([demo_bin, "client", "--port", str(p_close), "--file", str(payload), "--expected-pin", pin, "--timeout-ms", "700"])
         so, se = srv_close.communicate(timeout=3.0)
     finally:
@@ -630,7 +664,8 @@ def test_case_6_fault_injection_and_backpressure(demo_bin: str, tmp_dir: Path, c
     env_ren.update(LD_PRELOAD=str(faults_so), H1_FAULT_MODE="rename", H1_FAULT_OUTPUT=str(out_ren))
     srv_ren = subprocess.Popen([demo_bin, "server", "--port", str(p_ren), "--cert", str(cert_path), "--key", str(key_path), "--output", str(out_ren), "--timeout-ms", "700"], env=env_ren, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        assert f"LISTENING port={p_ren}" in srv_ren.stdout.readline()
+        s_line = wait_for_startup_line(srv_ren, timeout=5.0)
+        assert f"LISTENING port={p_ren}" in s_line
         run_cmd([demo_bin, "client", "--port", str(p_ren), "--file", str(payload), "--expected-pin", pin, "--timeout-ms", "700"])
         so, se = srv_ren.communicate(timeout=3.0)
     finally:
@@ -649,7 +684,8 @@ def test_case_6_fault_injection_and_backpressure(demo_bin: str, tmp_dir: Path, c
     env_ack.update(LD_PRELOAD=str(faults_so), H1_FAULT_MODE="ack", H1_FAULT_OUTPUT=str(out_ack))
     srv_ack = subprocess.Popen([demo_bin, "server", "--port", str(p_ack), "--cert", str(cert_path), "--key", str(key_path), "--output", str(out_ack), "--timeout-ms", "700"], env=env_ack, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-        assert f"LISTENING port={p_ack}" in srv_ack.stdout.readline()
+        s_line = wait_for_startup_line(srv_ack, timeout=5.0)
+        assert f"LISTENING port={p_ack}" in s_line
         run_cmd([demo_bin, "client", "--port", str(p_ack), "--file", str(payload), "--expected-pin", pin, "--timeout-ms", "700"])
         so, se = srv_ack.communicate(timeout=3.0)
     finally:
