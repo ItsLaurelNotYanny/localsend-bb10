@@ -289,10 +289,13 @@ void SendManager::onPrepareReplyFinished()
     if (status == 204) {
         // Peer indicated no transfer needed
         qDebug() << "[SendManager] Peer returned 204 No Content (transfer skipped)";
+        quint64 curGen = ++m_generation;
+        Q_UNUSED(curGen);
         QString reqId = m_requestId;
-        transitionState(State_Completed);
-        emit sendFinished(reqId);
+        m_state = State_Completed;
         cleanup(true);
+        emit sendStateChanged(reqId, "Completed");
+        emit sendFinished(reqId);
         return;
     }
 
@@ -421,9 +424,12 @@ void SendManager::onUploadReplyFinished()
 
     if (status == 200) {
         qDebug() << "[SendManager] Upload completed and acknowledged by peer (HTTP 200)";
-        transitionState(State_Completed);
-        emit sendFinished(reqId);
+        quint64 curGen = ++m_generation;
+        Q_UNUSED(curGen);
+        m_state = State_Completed;
         cleanup(true);
+        emit sendStateChanged(reqId, "Completed");
+        emit sendFinished(reqId);
     } else if (status == 422) {
         fail("Peer reported SHA-256 checksum mismatch (HTTP 422)", Failure_ChecksumMismatch);
     } else if (status >= 500) {
@@ -449,10 +455,13 @@ void SendManager::onHttpsPrepareFinished(int status, const QByteArray &body)
 
     if (status == 204) {
         qDebug() << "[SendManager] Peer returned 204 No Content (transfer skipped)";
+        quint64 curGen = ++m_generation;
+        Q_UNUSED(curGen);
         QString reqId = m_requestId;
-        transitionState(State_Completed);
-        emit sendFinished(reqId);
+        m_state = State_Completed;
         cleanup(true);
+        emit sendStateChanged(reqId, "Completed");
+        emit sendFinished(reqId);
         return;
     }
 
@@ -578,9 +587,12 @@ void SendManager::onHttpsUploadFinished(int status, const QByteArray &body)
 
     if (status == 200) {
         qDebug() << "[SendManager] HTTPS upload completed and acknowledged by peer (HTTP 200)";
-        transitionState(State_Completed);
-        emit sendFinished(reqId);
+        quint64 curGen = ++m_generation;
+        Q_UNUSED(curGen);
+        m_state = State_Completed;
         cleanup(true);
+        emit sendStateChanged(reqId, "Completed");
+        emit sendFinished(reqId);
     } else if (status == 422) {
         fail("Peer reported SHA-256 checksum mismatch (HTTP 422)", Failure_ChecksumMismatch);
     } else if (status >= 500) {
