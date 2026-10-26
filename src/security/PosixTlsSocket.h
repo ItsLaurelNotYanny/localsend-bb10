@@ -24,6 +24,7 @@ class PosixTlsSocket : public QIODevice {
 public:
     static const int DEFAULT_HANDSHAKE_TIMEOUT_MS = 10000;
     static const int DEFAULT_SHUTDOWN_TIMEOUT_MS  = 2000;
+    static const int DEFAULT_WRITE_TIMEOUT_MS     = 10000;
     static const int DEFAULT_READ_BUFFER_CAP      = 262144; // 256 KiB decrypted read buffer cap
     static const int MAX_WRITE_BUFFER_CAP         = 1048576; // 1 MiB pending write queue cap
     static const int MAX_DRAIN_PER_EVENT          = 262144; // Max decrypted bytes drained per event turn
@@ -60,6 +61,9 @@ public:
 
     void setHandshakeTimeout(int timeoutMs) { m_handshakeTimeoutMs = timeoutMs; }
     int handshakeTimeout() const { return m_handshakeTimeoutMs; }
+
+    void setWriteTimeout(int timeoutMs);
+    int writeTimeout() const { return m_writeTimeoutMs; }
 
     SocketState state() const { return m_state; }
     bool isEncrypted() const { return m_state == State_Encrypted; }
@@ -104,6 +108,7 @@ protected:
     virtual qint64 writeData(const char *data, qint64 maxSize);
 
 private slots:
+    void advanceHandshake();
     void onReadActivated(int fd);
     void onWriteActivated(int fd);
     void onDrainMore();
@@ -117,7 +122,6 @@ private:
     int activeFd() const;
 
     void advanceTcpConnect();
-    void advanceHandshake();
     void advanceReads();
     void advanceWrites();
     void advanceShutdown();
@@ -161,7 +165,9 @@ private:
     QSocketNotifier *m_writeNotifier;
     QTimer *m_deadlineTimer;
     QTimer *m_drainTimer;
+    QTimer *m_writeProgressTimer;
     int m_handshakeTimeoutMs;
+    int m_writeTimeoutMs;
 
     int m_wantWriteCount;
     int m_wantReadCount;

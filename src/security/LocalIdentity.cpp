@@ -20,7 +20,7 @@ namespace {
 bool readRegularFileNoFollow(const QString &path, QByteArray *outData, mode_t *outMode, QString *error)
 {
     QByteArray nativePath = QFile::encodeName(path);
-    int flags = O_RDONLY;
+    int flags = O_RDONLY | O_NONBLOCK;
 #ifdef O_NOFOLLOW
     flags |= O_NOFOLLOW;
 #endif
@@ -47,6 +47,12 @@ bool readRegularFileNoFollow(const QString &path, QByteArray *outData, mode_t *o
         }
         ::close(fd);
         return false;
+    }
+
+    // Restore blocking mode for reading the regular file
+    int curFlags = ::fcntl(fd, F_GETFL, 0);
+    if (curFlags >= 0) {
+        ::fcntl(fd, F_SETFL, curFlags & ~O_NONBLOCK);
     }
 
     if (st.st_size <= 0 || st.st_size > 256 * 1024) {

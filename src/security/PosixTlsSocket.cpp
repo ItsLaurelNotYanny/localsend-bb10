@@ -56,7 +56,9 @@ PosixTlsSocket::PosixTlsSocket(posix_tls_context_t *ctx, QObject *parent)
     , m_writeNotifier(0)
     , m_deadlineTimer(new QTimer(this))
     , m_drainTimer(new QTimer(this))
+    , m_writeProgressTimer(new QTimer(this))
     , m_handshakeTimeoutMs(DEFAULT_HANDSHAKE_TIMEOUT_MS)
+    , m_writeTimeoutMs(DEFAULT_WRITE_TIMEOUT_MS)
     , m_wantWriteCount(0)
     , m_wantReadCount(0)
     , m_writeRetrySameBufferCount(0)
@@ -68,6 +70,9 @@ PosixTlsSocket::PosixTlsSocket(posix_tls_context_t *ctx, QObject *parent)
 
     m_drainTimer->setSingleShot(true);
     connect(m_drainTimer, SIGNAL(timeout()), this, SLOT(onDrainMore()));
+
+    m_writeProgressTimer->setSingleShot(true);
+    connect(m_writeProgressTimer, SIGNAL(timeout()), this, SLOT(onTimeout()));
 }
 
 PosixTlsSocket::~PosixTlsSocket()
@@ -94,10 +99,23 @@ void PosixTlsSocket::setReadBufferSize(qint64 size)
     }
 }
 
+void PosixTlsSocket::setWriteTimeout(int timeoutMs)
+{
+    m_writeTimeoutMs = timeoutMs;
+    if (m_writeTimeoutMs <= 0) {
+        m_writeProgressTimer->stop();
+    } else if (bytesToWrite() > 0 && (m_state == State_Encrypted || m_state == State_Closing)) {
+        if (!m_writeProgressTimer->isActive()) {
+            m_writeProgressTimer->start(m_writeTimeoutMs);
+        }
+    }
+}
+
 bool PosixTlsSocket::connectToHostEncrypted(const QHostAddress &address, quint16 port,
                                             const QString &hostname, int timeoutMs)
 {
     abort();
+    m_state = State_Unconnected;
 
     if (!m_ctx) {
         failSocket(POSIX_TLS_ERR_INVALID_ARG, "Null posix_tls_context_t");
@@ -153,8 +171,13 @@ bool PosixTlsSocket::connectToHostEncrypted(const QHostAddress &address, quint16
 
     if (rc == 0) {
         // Connected immediately
+        m_state = State_ConnectingTcp;
         emit connected();
-        if (m_state == State_Closed || m_state == State_Error) {
+        if (m_state != State_ConnectingTcp) {
+            if (m_rawFd >= 0) {
+                ::close(m_rawFd);
+                m_rawFd = -1;
+            }
             return false;
         }
         int takeFd = m_rawFd;
@@ -166,13 +189,13 @@ bool PosixTlsSocket::connectToHostEncrypted(const QHostAddress &address, quint16
             return false;
         }
         m_state = State_Handshaking;
-        advanceHandshake();
+        m_handshakeWantWrite = true; updateNotifierInterests(); QMetaObject::invokeMethod(this, "advanceHandshake", Qt::QueuedConnection);
     } else {
         m_state = State_ConnectingTcp;
         updateNotifierInterests();
     }
 
-    return m_state != State_Error;
+    return m_state != State_Error && m_state != State_Closed;
 }
 
 bool PosixTlsSocket::startServerEncryption(int socketFd, int timeoutMs)
@@ -188,6 +211,7 @@ bool PosixTlsSocket::startClientEncryption(int socketFd, const QString &hostname
 bool PosixTlsSocket::adoptDescriptorAndStartHandshake(int fd, bool isServer, const QString &hostname, int timeoutMs)
 {
     abort();
+    m_state = State_Unconnected;
 
     if (fd < 0) {
         failSocket(POSIX_TLS_ERR_INVALID_ARG, "Invalid socket descriptor");
@@ -232,7 +256,7 @@ bool PosixTlsSocket::adoptDescriptorAndStartHandshake(int fd, bool isServer, con
     }
 
     advanceHandshake();
-    return m_state != State_Error;
+    return m_state != State_Error && m_state != State_Closed;
 }
 
 void PosixTlsSocket::setupNotifiers(int fd)
@@ -267,6 +291,7 @@ void PosixTlsSocket::destroyConnectionAndFd()
 {
     m_deadlineTimer->stop();
     m_drainTimer->stop();
+    m_writeProgressTimer->stop();
     teardownNotifiers();
 
     if (m_conn) {
@@ -333,15 +358,19 @@ void PosixTlsSocket::onReadActivated(int)
         if (m_writeWantRead) {
             advanceWrites();
         }
-        if (m_state == State_Encrypted || m_state == State_Closing) {
+        if ((m_state == State_Encrypted || m_state == State_Closing) && !m_readWantWrite) {
             advanceReads();
         }
     } else if (m_state == State_Closing) {
         if (!m_activeWriteBlock.isEmpty() || !m_queuedWriteData.isEmpty()) {
-            advanceWrites();
+            if (m_writeWantRead) {
+                advanceWrites();
+            }
         }
         if (m_state == State_Closing && m_activeWriteBlock.isEmpty() && m_queuedWriteData.isEmpty()) {
-            advanceShutdown();
+            if (m_shutdownWantRead) {
+                advanceShutdown();
+            }
         }
     }
 }
@@ -356,15 +385,19 @@ void PosixTlsSocket::onWriteActivated(int)
         if (m_readWantWrite) {
             advanceReads();
         }
-        if (m_state == State_Encrypted || m_state == State_Closing) {
+        if ((m_state == State_Encrypted || m_state == State_Closing) && !m_writeWantRead) {
             advanceWrites();
         }
     } else if (m_state == State_Closing) {
         if (!m_activeWriteBlock.isEmpty() || !m_queuedWriteData.isEmpty()) {
-            advanceWrites();
+            if (!m_writeWantRead) {
+                advanceWrites();
+            }
         }
         if (m_state == State_Closing && m_activeWriteBlock.isEmpty() && m_queuedWriteData.isEmpty()) {
-            advanceShutdown();
+            if (!m_shutdownWantRead) {
+                advanceShutdown();
+            }
         }
     }
 }
@@ -378,10 +411,21 @@ void PosixTlsSocket::onDrainMore()
 
 void PosixTlsSocket::onTimeout()
 {
+    QObject *snd = sender();
+    if (snd == m_writeProgressTimer) {
+        failSocket(POSIX_TLS_ERR_IO_FAILED, "Write progress deadline exceeded");
+        return;
+    }
+
     if (m_state == State_ConnectingTcp || m_state == State_Handshaking) {
         failSocket(POSIX_TLS_ERR_IO_FAILED, "TLS handshake deadline exceeded");
     } else if (m_state == State_Closing) {
-        completeClose();
+        bool hasPendingWrites = (!m_activeWriteBlock.isEmpty() || !m_queuedWriteData.isEmpty());
+        if (hasPendingWrites) {
+            failSocket(POSIX_TLS_ERR_IO_FAILED, "Flush timeout in State_Closing: unsent bytes remain");
+        } else {
+            failSocket(POSIX_TLS_ERR_IO_FAILED, "TLS shutdown deadline exceeded in State_Closing");
+        }
     }
 }
 
@@ -629,8 +673,8 @@ void PosixTlsSocket::advanceWrites()
             m_lastWriteRetryLen = len;
             break;
         } else if (rc == POSIX_TLS_ERR_CLOSED) {
-            m_peerClosedCleanly = true;
-            break;
+            failSocket(POSIX_TLS_ERR_CLOSED, "Connection closed by peer while write was pending");
+            return;
         } else {
             const char *detail = posix_tls_get_last_error(m_conn);
             QString errMsg = (detail && detail[0] != '\0')
@@ -639,6 +683,17 @@ void PosixTlsSocket::advanceWrites()
             failSocket(rc, errMsg);
             return;
         }
+    }
+
+    if (totalWrittenThisTurn > 0) {
+        if (bytesToWrite() > 0 && m_writeTimeoutMs > 0) {
+            m_writeProgressTimer->start(m_writeTimeoutMs);
+        }
+    }
+    if (bytesToWrite() == 0) {
+        m_writeProgressTimer->stop();
+    } else if (m_writeTimeoutMs > 0 && !m_writeProgressTimer->isActive()) {
+        m_writeProgressTimer->start(m_writeTimeoutMs);
     }
 
     updateNotifierInterests();
@@ -682,8 +737,11 @@ void PosixTlsSocket::advanceShutdown()
         return;
     }
 
-    // Underlying peer already closed or reset during shutdown after all writes were flushed
-    completeClose();
+    const char *detail = posix_tls_get_last_error(m_conn);
+    QString errMsg = (detail && detail[0] != '\0')
+        ? QString::fromUtf8(detail)
+        : QString::fromLatin1(posix_tls_strerror(rc));
+    failSocket(rc, errMsg);
 }
 
 void PosixTlsSocket::disconnectFromHost()
@@ -759,7 +817,7 @@ void PosixTlsSocket::close()
 
 void PosixTlsSocket::failSocket(int tlsErrCode, const QString &reason)
 {
-    if (m_state == State_Error || m_state == State_Closed) {
+    if (m_state == State_Error) {
         return;
     }
 
@@ -798,6 +856,11 @@ void PosixTlsSocket::completeClose()
 
     m_state = State_Closed;
     m_hasUnreadSslData = false;
+    m_activeWriteBlock.clear();
+    m_activeWriteOffset = 0;
+    m_queuedWriteData.clear();
+    m_lastWriteRetryPtr = 0;
+    m_lastWriteRetryLen = 0;
     destroyConnectionAndFd();
     emit disconnected();
 }
@@ -870,6 +933,10 @@ qint64 PosixTlsSocket::writeData(const char *data, qint64 maxSize)
     }
 
     m_queuedWriteData.append(data, static_cast<int>(maxSize));
+
+    if (m_writeTimeoutMs > 0 && !m_writeProgressTimer->isActive()) {
+        m_writeProgressTimer->start(m_writeTimeoutMs);
+    }
 
     if (m_state == State_Encrypted) {
         advanceWrites();

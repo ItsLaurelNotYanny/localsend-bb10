@@ -4095,6 +4095,8 @@ void testPosixTlsSocketPinMismatchRejectionH2()
     ASSERT_TRUE(serverSock.bytesAvailable() == 0,
                 "server must receive 0 application bytes when client rejects pin");
 
+    clientSock.abort();
+    serverSock.abort();
     posix_tls_context_destroy(clientCtx);
     posix_tls_context_destroy(serverCtx);
     QDir(idDir).removeRecursively();
@@ -4324,6 +4326,305 @@ void testPosixTlsSocketHandshakeDeadlineAndCloseOwnershipH2()
     TEST_PASS();
 }
 
+void testPosixTlsSocketInitAndSyncConnectH2A()
+{
+    TEST_CASE("H2 - PosixTlsSocket H2-A pre-handshake errors and synchronous connect handling");
+
+    // Case 1: Null context initialization fails cleanly with error signal and state State_Error
+    {
+        localsend::PosixTlsSocket nullSock(0);
+        TlsSocketSpy spy(&nullSock);
+        bool ok = nullSock.connectToHostEncrypted(QHostAddress::LocalHost, 8080);
+        ASSERT_FALSE(ok, "connect with null context must return false");
+        ASSERT_TRUE(nullSock.state() == localsend::PosixTlsSocket::State_Error, "state must be State_Error");
+        ASSERT_TRUE(nullSock.lastTlsErrorCode() == POSIX_TLS_ERR_INVALID_ARG, "code must be POSIX_TLS_ERR_INVALID_ARG");
+        ASSERT_TRUE(spy.errorReceived, "error signal must be emitted");
+        ASSERT_TRUE(spy.lastErrorCode == POSIX_TLS_ERR_INVALID_ARG, "spy captured error code");
+
+        // Subsequent reuse after error
+        bool ok2 = nullSock.connectToHostEncrypted(QHostAddress::LocalHost, 8080);
+        ASSERT_FALSE(ok2, "reused socket with null context must return false");
+        ASSERT_TRUE(nullSock.state() == localsend::PosixTlsSocket::State_Error, "state remains State_Error");
+    }
+
+    // Case 2: Invalid address fails cleanly with error signal
+    {
+        posix_tls_context_t *ctx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+        localsend::PosixTlsSocket sock(ctx);
+        TlsSocketSpy spy(&sock);
+        bool ok = sock.connectToHostEncrypted(QHostAddress::Null, 8080);
+        ASSERT_FALSE(ok, "connect with null address must return false");
+        ASSERT_TRUE(sock.state() == localsend::PosixTlsSocket::State_Error, "state must be State_Error");
+        ASSERT_TRUE(spy.errorReceived, "error signal must be emitted for invalid address");
+        posix_tls_context_destroy(ctx);
+    }
+
+    // Case 3: Invalid adopted descriptor fails cleanly and closes nothing invalid
+    {
+        posix_tls_context_t *ctx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+        localsend::PosixTlsSocket sock(ctx);
+        TlsSocketSpy spy(&sock);
+        bool ok = sock.startServerEncryption(-1);
+        ASSERT_FALSE(ok, "startServerEncryption with fd -1 must return false");
+        ASSERT_TRUE(sock.state() == localsend::PosixTlsSocket::State_Error, "state must be State_Error");
+        ASSERT_TRUE(spy.errorReceived, "error signal must be emitted for fd -1");
+        posix_tls_context_destroy(ctx);
+    }
+
+    // Case 4: Synchronous TCP connect proceeds to State_Handshaking with valid descriptor
+    {
+        RawAcceptServer server;
+        ASSERT_TRUE(server.start(), "server start for synchronous connect test");
+
+        posix_tls_context_t *ctx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+        localsend::PosixTlsSocket clientSock(ctx);
+        bool ok = clientSock.connectToHostEncrypted(QHostAddress::LocalHost, server.port);
+        ASSERT_TRUE(ok, "connectToHostEncrypted must return true on initial TCP connect dispatch");
+        ASSERT_TRUE(clientSock.state() == localsend::PosixTlsSocket::State_ConnectingTcp ||
+                    clientSock.state() == localsend::PosixTlsSocket::State_Handshaking,
+                    "state must be connecting or handshaking");
+        ASSERT_TRUE(clientSock.socketDescriptor() >= 0, "socketDescriptor must be valid fd >= 0");
+
+        clientSock.abort();
+        ASSERT_TRUE(clientSock.state() == localsend::PosixTlsSocket::State_Closed, "aborted socket state is Closed");
+        ASSERT_TRUE(clientSock.socketDescriptor() == -1, "aborted socket descriptor is -1");
+        posix_tls_context_destroy(ctx);
+    }
+
+    TEST_PASS();
+}
+
+void testPosixTlsSocketWriteClosureAndFdReleaseH2B()
+{
+    TEST_CASE("H2 - PosixTlsSocket H2-B write on closed connection terminates and releases fd");
+
+    QString idDir = "/tmp/localsend_h2_writeclose_id";
+    QDir(idDir).removeRecursively();
+    localsend::LocalIdentity serverId;
+    QString err;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(idDir, &serverId, &err), "identity creation");
+
+    posix_tls_context_t *serverCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    posix_tls_context_set_credentials(serverCtx,
+        serverId.certPem().constData(), static_cast<size_t>(serverId.certPem().size()),
+        serverId.keyPem().constData(), static_cast<size_t>(serverId.keyPem().size()));
+
+    posix_tls_context_t *clientCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    QByteArray pinAscii = serverId.fingerprint().toLatin1();
+    posix_tls_context_set_expected_fingerprint(clientCtx, pinAscii.constData());
+
+    int fds[2];
+    ASSERT_TRUE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0, "socketpair");
+
+    localsend::PosixTlsSocket serverSock(serverCtx);
+    localsend::PosixTlsSocket clientSock(clientCtx);
+    TlsSocketSpy clientSpy(&clientSock);
+
+    ASSERT_TRUE(serverSock.startServerEncryption(fds[0]), "server startServerEncryption");
+    ASSERT_TRUE(clientSock.startClientEncryption(fds[1]), "client startClientEncryption");
+
+    QTime t;
+    t.start();
+    while ((!clientSock.isEncrypted() || !serverSock.isEncrypted()) && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(clientSock.isEncrypted() && serverSock.isEncrypted(), "both encrypted");
+
+    // Close server abruptly
+    serverSock.abort();
+
+    // Now client writes data. The peer socket is closed, so posix_tls_write triggers POSIX_TLS_ERR_CLOSED
+    // PosixTlsSocket must fail the socket with POSIX_TLS_ERR_CLOSED, clear pending write buffer, and release fd
+    clientSock.write("hello after peer closed", 23);
+
+    t.restart();
+    while (!clientSpy.errorReceived && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(clientSpy.errorReceived, "client must emit tlsError on write to closed peer");
+    ASSERT_TRUE(clientSock.state() == localsend::PosixTlsSocket::State_Error, "client state must be State_Error");
+    ASSERT_TRUE(clientSock.bytesToWrite() == 0, "client pending write queue must be cleared (0)");
+    ASSERT_TRUE(clientSock.socketDescriptor() == -1, "client socket descriptor must be released (-1)");
+
+    clientSock.abort();
+    posix_tls_context_destroy(clientCtx);
+    posix_tls_context_destroy(serverCtx);
+    QDir(idDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testPosixTlsSocketFlushTimeoutAndShutdownH2C()
+{
+    TEST_CASE("H2 - PosixTlsSocket H2-C shutdown timeout with unsent bytes reports error and clears queue");
+
+    QString idDir = "/tmp/localsend_h2_flushtimeout_id";
+    QDir(idDir).removeRecursively();
+    localsend::LocalIdentity serverId;
+    QString err;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(idDir, &serverId, &err), "identity creation");
+
+    posix_tls_context_t *serverCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    posix_tls_context_set_credentials(serverCtx,
+        serverId.certPem().constData(), static_cast<size_t>(serverId.certPem().size()),
+        serverId.keyPem().constData(), static_cast<size_t>(serverId.keyPem().size()));
+
+    posix_tls_context_t *clientCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    QByteArray pinAscii = serverId.fingerprint().toLatin1();
+    posix_tls_context_set_expected_fingerprint(clientCtx, pinAscii.constData());
+
+    int fds[2];
+    ASSERT_TRUE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0, "socketpair");
+    int smallBuf = 4096;
+    ::setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &smallBuf, sizeof(smallBuf));
+    ::setsockopt(fds[1], SOL_SOCKET, SO_SNDBUF, &smallBuf, sizeof(smallBuf));
+
+    localsend::PosixTlsSocket serverSock(serverCtx);
+    localsend::PosixTlsSocket clientSock(clientCtx);
+    TlsSocketSpy clientSpy(&clientSock);
+
+    ASSERT_TRUE(serverSock.startServerEncryption(fds[0]), "server start");
+    ASSERT_TRUE(clientSock.startClientEncryption(fds[1]), "client start");
+
+    QTime t;
+    t.start();
+    while ((!clientSock.isEncrypted() || !serverSock.isEncrypted()) && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(clientSock.isEncrypted() && serverSock.isEncrypted(), "both encrypted");
+
+    // Queue 512 KiB data to induce backpressure without server draining
+    QByteArray bigData(512 * 1024, 'Z');
+    clientSock.write(bigData);
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+
+    qint64 pendingBefore = clientSock.bytesToWrite();
+    ASSERT_TRUE(pendingBefore > 0, "bytes must remain pending due to backpressure");
+
+    // Disconnect: socket enters State_Closing and starts 2000ms shutdown timer
+    clientSock.disconnectFromHost();
+    ASSERT_TRUE(clientSock.state() == localsend::PosixTlsSocket::State_Closing, "state must be State_Closing");
+
+    // Pump past the 2000ms shutdown deadline without server reading
+    t.restart();
+    while (!clientSpy.errorReceived && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        usleep(5000);
+    }
+
+    ASSERT_TRUE(clientSpy.errorReceived, "client must emit tlsError on flush deadline exceeded");
+    ASSERT_TRUE(clientSock.lastTlsErrorCode() == POSIX_TLS_ERR_IO_FAILED, "code must be POSIX_TLS_ERR_IO_FAILED");
+    ASSERT_TRUE(clientSock.bytesToWrite() == 0, "pending bytes must be reset to 0 after failure");
+    ASSERT_TRUE(clientSock.state() == localsend::PosixTlsSocket::State_Error, "state must be State_Error");
+
+    clientSock.abort();
+    serverSock.abort();
+    posix_tls_context_destroy(clientCtx);
+    posix_tls_context_destroy(serverCtx);
+    QDir(idDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testPosixTlsSocketWriteProgressDeadlineH2D()
+{
+    TEST_CASE("H2 - PosixTlsSocket H2-D bounded write progress deadline expiry");
+
+    QString idDir = "/tmp/localsend_h2_writedeadline_id";
+    QDir(idDir).removeRecursively();
+    localsend::LocalIdentity serverId;
+    QString err;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(idDir, &serverId, &err), "identity creation");
+
+    posix_tls_context_t *serverCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    posix_tls_context_set_credentials(serverCtx,
+        serverId.certPem().constData(), static_cast<size_t>(serverId.certPem().size()),
+        serverId.keyPem().constData(), static_cast<size_t>(serverId.keyPem().size()));
+
+    posix_tls_context_t *clientCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    QByteArray pinAscii = serverId.fingerprint().toLatin1();
+    posix_tls_context_set_expected_fingerprint(clientCtx, pinAscii.constData());
+
+    int fds[2];
+    ASSERT_TRUE(::socketpair(AF_UNIX, SOCK_STREAM, 0, fds) == 0, "socketpair");
+    int smallBuf = 4096;
+    ::setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &smallBuf, sizeof(smallBuf));
+    ::setsockopt(fds[1], SOL_SOCKET, SO_SNDBUF, &smallBuf, sizeof(smallBuf));
+
+    localsend::PosixTlsSocket serverSock(serverCtx);
+    localsend::PosixTlsSocket clientSock(clientCtx);
+    TlsSocketSpy clientSpy(&clientSock);
+
+    ASSERT_TRUE(serverSock.startServerEncryption(fds[0]), "server start");
+    ASSERT_TRUE(clientSock.startClientEncryption(fds[1]), "client start");
+
+    QTime t;
+    t.start();
+    while ((!clientSock.isEncrypted() || !serverSock.isEncrypted()) && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(clientSock.isEncrypted() && serverSock.isEncrypted(), "both encrypted");
+
+    // Configure a short 150ms write progress deadline
+    clientSock.setWriteTimeout(150);
+    ASSERT_TRUE(clientSock.writeTimeout() == 150, "writeTimeout is 150ms");
+
+    // Enqueue 512 KiB data while receiver does not read
+    QByteArray bigData(512 * 1024, 'W');
+    clientSock.write(bigData);
+
+    // Pump past the 150ms deadline
+    t.restart();
+    while (!clientSpy.errorReceived && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(clientSpy.errorReceived, "write progress deadline expiry must emit tlsError");
+    ASSERT_TRUE(clientSock.lastTlsErrorCode() == POSIX_TLS_ERR_IO_FAILED, "code must be POSIX_TLS_ERR_IO_FAILED");
+    ASSERT_TRUE(clientSock.errorString().contains("Write progress deadline exceeded"), "error string matched");
+    ASSERT_TRUE(clientSock.bytesToWrite() == 0, "pending bytes cleared to 0");
+    ASSERT_TRUE(clientSock.socketDescriptor() == -1, "fd released");
+
+    clientSock.abort();
+    serverSock.abort();
+    posix_tls_context_destroy(clientCtx);
+    posix_tls_context_destroy(serverCtx);
+    QDir(idDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testLocalIdentityFifoRejectionH2E()
+{
+    TEST_CASE("H2 - LocalIdentity H2-E non-blocking rejection of FIFO certificate/key");
+
+    QString dirPath = "/tmp/localsend_h2_fifo_id";
+    QDir(dirPath).removeRecursively();
+    QDir().mkpath(dirPath);
+
+    // Create a FIFO at device_cert.pem
+    QString fifoPath = dirPath + "/device_cert.pem";
+    ASSERT_TRUE(::mkfifo(QFile::encodeName(fifoPath).constData(), 0600) == 0, "create FIFO for cert");
+
+    localsend::LocalIdentity id;
+    QString err;
+    QTime t;
+    t.start();
+    bool ok = localsend::LocalIdentity::loadOrCreate(dirPath, &id, &err);
+    int elapsed = t.elapsed();
+
+    ASSERT_FALSE(ok, "loadOrCreate must fail on FIFO identity file");
+    ASSERT_TRUE(elapsed < 1000, "FIFO check must not hang waiting on open (must be < 1000ms)");
+    ASSERT_TRUE(!err.isEmpty(), "error message must be populated");
+
+    ::unlink(QFile::encodeName(fifoPath).constData());
+    QDir(dirPath).removeRecursively();
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -4416,6 +4717,11 @@ int main(int argc, char **argv)
     testPosixTlsSocketPinMismatchRejectionH2();
     testPosixTlsSocketBackpressureAndExactWriteRetryH2();
     testPosixTlsSocketHandshakeDeadlineAndCloseOwnershipH2();
+    testPosixTlsSocketInitAndSyncConnectH2A();
+    testPosixTlsSocketWriteClosureAndFdReleaseH2B();
+    testPosixTlsSocketFlushTimeoutAndShutdownH2C();
+    testPosixTlsSocketWriteProgressDeadlineH2D();
+    testLocalIdentityFifoRejectionH2E();
 
     std::cout << "================================================" << std::endl;
     std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;
