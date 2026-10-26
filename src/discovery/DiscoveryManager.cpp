@@ -140,6 +140,18 @@ void DiscoveryManager::stop()
             reply->deleteLater();
         }
     }
+
+    // Safely abort pending HTTPS register requests without iterator invalidation
+    QList<localsend::PosixTlsHttpClient*> httpsPending = m_pendingHttpsRegisters.keys();
+    m_pendingHttpsRegisters.clear();
+    for (int i = 0; i < httpsPending.size(); ++i) {
+        localsend::PosixTlsHttpClient *client = httpsPending.at(i);
+        if (client) {
+            client->disconnect(this);
+            client->abort();
+            client->deleteLater();
+        }
+    }
 }
 
 void DiscoveryManager::refresh()
@@ -329,17 +341,24 @@ void DiscoveryManager::registerPeer(const QHostAddress &address, quint16 port)
     }
 
     // If peer is already known and uses HTTPS protocol, send HTTPS register using frozen pin
+    const PeerDevice *bestMatch = NULL;
     for (QMap<QString, PeerDevice>::const_iterator it = m_peers.begin(); it != m_peers.end(); ++it) {
         if (it.value().address == address && (port == 0 || it.value().info.port == port)) {
-            if (it.value().info.protocol.toLower() == "https") {
-                QString pin = it.value().info.fingerprint;
-                if (!pin.isEmpty() && pin.length() == 64) {
-                    sendHttpsRegister(address, port > 0 ? port : it.value().info.port, pin);
-                    return;
-                }
-                // Unknown-pin bootstrap policy: do not send plaintext HTTP to TLS port
+            if (!bestMatch || it.value().lastSeen > bestMatch->lastSeen) {
+                bestMatch = &it.value();
+            }
+        }
+    }
+
+    if (bestMatch) {
+        if (bestMatch->info.protocol.toLower() == "https") {
+            QString normPin = localsend::LocalIdentity::normalizeFingerprint(bestMatch->info.fingerprint);
+            if (!normPin.isEmpty() && normPin.length() == 64) {
+                sendHttpsRegister(address, port > 0 ? port : bestMatch->info.port, normPin);
                 return;
             }
+            // Unknown-pin bootstrap policy: do not send plaintext HTTP to TLS port
+            return;
         }
     }
 

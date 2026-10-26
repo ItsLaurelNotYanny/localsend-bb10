@@ -97,6 +97,7 @@ private:
 
     SendState m_state;
     FailureReason m_failureReason;
+    quint64 m_generation;
 
     QString m_requestId;
     QString m_sessionId;

@@ -36,6 +36,7 @@ public:
 
     static const int MAX_HEADER_SIZE = 65536;           // 64 KiB header limit
     static const int MAX_RESPONSE_BODY_SIZE = 4194304;  // 4 MiB response limit
+    static const int MAX_RAW_BUFFER_CAP = 4259840;      // 4 MiB + 64 KiB total raw incoming buffer limit
 
     explicit PosixTlsHttpClient(const LocalIdentity &identity = LocalIdentity(), QObject *parent = 0);
     virtual ~PosixTlsHttpClient();

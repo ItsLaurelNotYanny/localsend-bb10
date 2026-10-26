@@ -19,6 +19,7 @@ SendManager::SendManager(localsend::Application *app,
     , m_failureReason(Failure_None)
     , m_fileSize(0)
     , m_isHttps(false)
+    , m_generation(0)
     , m_httpsPrepareClient(0)
     , m_httpsUploadClient(0)
     , m_httpsCancelClient(0)
@@ -81,17 +82,22 @@ void SendManager::fail(const QString &reason, FailureReason failureCode)
     if (m_state == State_Failed || m_state == State_Cancelled || m_state == State_Completed) {
         return;
     }
-    m_failureReason = failureCode;
+    quint64 curGen = ++m_generation;
+    Q_UNUSED(curGen);
     QString reqId = m_requestId;
+    if (reqId.isEmpty()) {
+        return;
+    }
 
+    m_failureReason = failureCode;
     qWarning() << "[SendManager] Transfer failure:" << reason
                << "code:" << failureReasonString() << "requestId:" << reqId;
 
-    transitionState(State_Failed);
+    cleanup(true);
+    m_state = State_Failed;
+    emit sendStateChanged(reqId, "Failed");
     emit sendFailed(reqId, reason);
     emit sendFailedWithReason(reqId, reason, static_cast<int>(failureCode));
-
-    cleanup(true);
 }
 
 bool SendManager::sendFile(const PeerDevice &peer, const QString &filePath, QString *error)
@@ -155,8 +161,9 @@ bool SendManager::sendFile(const PeerDevice &peer, const QString &filePath, QStr
         return false;
     }
 
-    QString requestId = CryptoUtil::randomHex(16);
-    if (m_app && !m_app->beginTransfer(requestId)) {
+    quint64 thisGen = ++m_generation;
+    QString thisRequestId = CryptoUtil::randomHex(16);
+    if (m_app && !m_app->beginTransfer(thisRequestId)) {
         m_failureReason = Failure_PeerBusy;
         if (error) {
             *error = "Transfer slot occupied";
@@ -165,14 +172,14 @@ bool SendManager::sendFile(const PeerDevice &peer, const QString &filePath, QStr
     }
 
     m_failureReason = Failure_None;
-    m_requestId = requestId;
+    m_requestId = thisRequestId;
     m_peer = peer;
     m_filePath = filePath;
     m_fileSize = fi.size();
     m_fileId = CryptoUtil::randomHex(8);
 
     transitionState(State_Preparing);
-    if (m_state != State_Preparing) {
+    if (m_state != State_Preparing || m_generation != thisGen || m_requestId != thisRequestId) {
         return false;
     }
 
@@ -193,11 +200,18 @@ bool SendManager::sendFile(const PeerDevice &peer, const QString &filePath, QStr
         if (error) {
             *error = "Failed to encode prepare-upload JSON: " + jsonErr;
         }
-        fail("Failed to encode prepare-upload JSON", Failure_ProtocolError);
+        if (m_generation == thisGen && m_state != State_Failed && m_state != State_Cancelled) {
+            fail("Failed to encode prepare-upload JSON", Failure_ProtocolError);
+        }
         return false;
     }
 
-    if (m_isHttps) {
+    if (m_generation != thisGen || m_state != State_Preparing || m_requestId != thisRequestId) {
+        return false;
+    }
+
+    bool isHttps = (proto == "https");
+    if (isHttps) {
         m_httpsPrepareClient = new localsend::PosixTlsHttpClient(
             m_app ? m_app->localIdentity() : localsend::LocalIdentity(), this);
         connect(m_httpsPrepareClient, SIGNAL(finished(int,QByteArray)),
@@ -214,7 +228,7 @@ bool SendManager::sendFile(const PeerDevice &peer, const QString &filePath, QStr
             if (error) {
                 *error = "Failed to initiate HTTPS prepare-upload request";
             }
-            if (m_state != State_Failed && m_state != State_Cancelled) {
+            if (m_generation == thisGen && m_state != State_Failed && m_state != State_Cancelled) {
                 fail("Failed to initiate HTTPS prepare-upload request", Failure_NetworkError);
             }
             return false;
@@ -240,7 +254,9 @@ bool SendManager::sendFile(const PeerDevice &peer, const QString &filePath, QStr
         if (error) {
             *error = "Failed to initiate prepare HTTP request";
         }
-        fail("Failed to initiate prepare HTTP request", Failure_NetworkError);
+        if (m_generation == thisGen && m_state != State_Failed && m_state != State_Cancelled) {
+            fail("Failed to initiate prepare HTTP request", Failure_NetworkError);
+        }
         return false;
     }
 
@@ -598,6 +614,8 @@ void SendManager::cancel()
         return;
     }
 
+    quint64 curGen = ++m_generation;
+    Q_UNUSED(curGen);
     QString reqId = m_requestId;
     QString sessId = m_sessionId;
     PeerDevice peer = m_peer;
@@ -605,8 +623,9 @@ void SendManager::cancel()
     bool isHttps = m_isHttps;
 
     qDebug() << "[SendManager] Cancelling active transfer requestId:" << reqId;
-    transitionState(State_Cancelled);
     cleanup(true);
+    m_state = State_Cancelled;
+    emit sendStateChanged(reqId, "Cancelled");
 
     if (!sessId.isEmpty()) {
         if (isHttps) {
