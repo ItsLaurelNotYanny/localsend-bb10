@@ -1189,6 +1189,32 @@ public slots:
     }
 };
 
+class TxMidStreamCancelHandler : public QObject {
+    Q_OBJECT
+public:
+    SendManager *sendManager;
+    bool cancelled;
+    bool sawUploading;
+    qint64 bytesAtCancel;
+
+    TxMidStreamCancelHandler(SendManager *sm = 0, QObject *parent = 0)
+        : QObject(parent), sendManager(sm), cancelled(false), sawUploading(false), bytesAtCancel(0) {}
+
+public slots:
+    void onReceiveProgress(const QString &sessId, qint64 done, qint64 total) {
+        Q_UNUSED(sessId);
+        Q_UNUSED(total);
+        if (done > 0 && !cancelled && sendManager) {
+            if (sendManager->state() == SendManager::State_Uploading) {
+                sawUploading = true;
+                cancelled = true;
+                bytesAtCancel = done;
+                sendManager->cancel();
+            }
+        }
+    }
+};
+
 void testDiscoverySelfIgnored()
 {
     TEST_CASE("Discovery - Self-announcements ignored without duplicate entry");
@@ -2143,9 +2169,9 @@ void testTransferRecoveryAfterCancelAndFailWith10MiB()
         QObject::connect(rxApp.receiveServer(), SIGNAL(incomingOffer(QString,PeerDevice,QList<FileMeta>)),
                          &autoAccept, SLOT(onIncomingOffer(QString,PeerDevice,QList<FileMeta>)));
 
-        RxBodyTracker rxTracker;
+        TxMidStreamCancelHandler txCancel(txApp.sendManager());
         QObject::connect(rxApp.receiveServer(), SIGNAL(receiveProgress(QString,qint64,qint64)),
-                         &rxTracker, SLOT(onProgress(QString,qint64,qint64)));
+                         &txCancel, SLOT(onReceiveProgress(QString,qint64,qint64)));
 
         TestSendTracker tracker;
         QObject::connect(txApp.sendManager(), SIGNAL(sendStateChanged(QString,QString)), &tracker, SLOT(onStateChanged(QString,QString)));
@@ -2159,19 +2185,13 @@ void testTransferRecoveryAfterCancelAndFailWith10MiB()
 
         QTime t;
         t.start();
-        while ((txApp.sendManager()->state() != SendManager::State_Uploading || rxTracker.bytes == 0) && t.elapsed() < 3000) {
-            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
-        }
-        ASSERT_TRUE(txApp.sendManager()->state() == SendManager::State_Uploading, "must reach Uploading state");
-        ASSERT_TRUE(rxTracker.bytes > 0, "receiver body bytes must be delivered (>0) before cancellation");
-
-        txApp.sendManager()->cancel();
-
-        t.restart();
         while ((txApp.isTransferActive() || rxApp.isTransferActive()) && t.elapsed() < 3000) {
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
         }
 
+        ASSERT_TRUE(txCancel.sawUploading, "must reach Uploading state before cancellation");
+        ASSERT_TRUE(txCancel.cancelled, "must cancel during active transfer");
+        ASSERT_TRUE(txCancel.bytesAtCancel > 0, "receiver body bytes must be delivered (>0) before cancellation");
         ASSERT_FALSE(txApp.isTransferActive(), "tx slot must be released after cancel");
         ASSERT_FALSE(rxApp.isTransferActive(), "rx slot must be released after cancel");
         ASSERT_TRUE(txApp.sendManager()->state() == SendManager::State_Cancelled, "must report Cancelled state");
