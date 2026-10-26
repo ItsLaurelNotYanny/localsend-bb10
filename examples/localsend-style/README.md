@@ -92,18 +92,19 @@ To calculate the fingerprint of an existing certificate:
 
 ## Running Automated Verification
 
-Run the complete 5-case test suite covering:
-1. Self-signed identity generation and independent verification against OpenSSL leaf DER SHA-256.
+Run the comprehensive 6-case test suite covering:
+1. Self-signed identity generation, owner-only mode 0600 on keys, `/dev/full` failure rejection, and independent OpenSSL leaf DER SHA-256 fingerprint verification.
 2. Real loopback TCP transfer under TLS 1.3 with SHA-256 payload integrity check.
 3. Single-hex-digit fingerprint tampering rejection (`POSIX_TLS_ERR_PIN_MISMATCH`).
-4. Partial writes, mid-stream peer disconnect, deadline timeouts, and clean recovery.
-5. Performance and throughput measurements for 1 MiB and 10 MiB payloads.
+4. Robustness & edge cases: delayed header handling within deadline, bounded ACK wait timeout, fragmented ACK frame assembly, wrong-digest ACK rejection, temporary file isolation (symlink protection via `mkstemp`), and clean recovery transfer.
+5. Socket descriptor ownership verification via `strace` (verifying 0 `EBADF` double-close calls).
+6. Performance benchmark over 5 iterations per payload, system environment reporting, and explicit demarcation of unmeasured device metrics.
 
 ```bash
 python3 tests/test_localsend_style.py
 ```
 
-Or run the full example gate (host build + tests + QNX cross-compile + symbol isolation):
+Or run the full example gate (host build + tests + QNX cross-compile + mandatory symbol isolation):
 
 ```bash
 ./check.sh

@@ -69,9 +69,11 @@ run "privacy-boundary-check" check_privacy_boundaries
 
 if [ "$FAST" -eq 1 ]; then
     run "build-host-tests" docker run --rm -v "$(pwd):/workspace:z" "$CONTAINER_IMAGE" bash -c "cd /workspace/tests && qmake && make -j\$(nproc)"
+    run "build-localsend-style" bash examples/localsend-style/scripts/build_host.sh
 else
     run "build-host-tests" docker run --rm -v "$(pwd):/workspace:z" "$CONTAINER_IMAGE" bash -c "cd /workspace/tests && qmake && make -j\$(nproc)"
     run "run-host-tests" docker run --rm -v "$(pwd):/workspace:z" "$CONTAINER_IMAGE" bash -c "cd /workspace/tests && ./core-check"
+    run "run-localsend-style-gate" bash examples/localsend-style/check.sh
 fi
 
 # --- custom checks (preserve during refresh) ---

@@ -2,6 +2,7 @@
 #include <posix_tls/posix_tls.hpp>
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <sys/time.h>
@@ -79,35 +80,55 @@ std::string read_file_string(const std::string& path) {
     return ss.str();
 }
 
+bool safe_write_file(const std::string& path, const char* data, size_t len, mode_t mode) {
+    if (path.empty()) return false;
+    // O_NOFOLLOW prevents following pre-existing symlinks
+    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, mode);
+    if (fd < 0) return false;
+
+    // Explicitly enforce mode regardless of ambient umask
+    fchmod(fd, mode);
+
+    size_t written = 0;
+    while (written < len) {
+        ssize_t n = write(fd, data + written, len - written);
+        if (n <= 0) {
+            if (n < 0 && (errno == EINTR || errno == EAGAIN)) continue;
+            close(fd);
+            unlink(path.c_str());
+            return false;
+        }
+        written += static_cast<size_t>(n);
+    }
+    if (fsync(fd) < 0) {
+        close(fd);
+        unlink(path.c_str());
+        return false;
+    }
+    if (close(fd) < 0) {
+        unlink(path.c_str());
+        return false;
+    }
+    return true;
+}
+
 int perform_handshake(posix_tls_connection_t* conn, int fd, bool is_server, int timeout_ms, std::string& err_msg) {
     double deadline = get_time_ms() + static_cast<double>(timeout_ms);
     while (get_time_ms() < deadline) {
         int rc = is_server ? posix_tls_accept(conn) : posix_tls_connect(conn, NULL);
         if (rc == POSIX_TLS_OK) {
             return POSIX_TLS_OK;
-        } else if (rc == POSIX_TLS_ERR_WANT_READ) {
-            int remaining_ms = static_cast<int>(deadline - get_time_ms());
-            if (remaining_ms <= 0 || !wait_fd(fd, false, remaining_ms > 100 ? 100 : remaining_ms)) {
-                if (get_time_ms() >= deadline) {
-                    err_msg = "Handshake timed out waiting for socket read";
-                    return POSIX_TLS_ERR_IO_FAILED;
-                }
-            }
-        } else if (rc == POSIX_TLS_ERR_WANT_WRITE) {
-            int remaining_ms = static_cast<int>(deadline - get_time_ms());
-            if (remaining_ms <= 0 || !wait_fd(fd, true, remaining_ms > 100 ? 100 : remaining_ms)) {
-                if (get_time_ms() >= deadline) {
-                    err_msg = "Handshake timed out waiting for socket write";
-                    return POSIX_TLS_ERR_IO_FAILED;
-                }
-            }
+        } else if (rc == POSIX_TLS_ERR_WANT_READ || rc == POSIX_TLS_ERR_WANT_WRITE) {
+            int rem = static_cast<int>(deadline - get_time_ms());
+            if (rem <= 0) break;
+            wait_fd(fd, rc == POSIX_TLS_ERR_WANT_WRITE, rem > 50 ? 50 : rem);
         } else {
             const char* detail = posix_tls_get_last_error(conn);
             err_msg = detail ? detail : posix_tls_strerror(rc);
             return rc;
         }
     }
-    err_msg = "Handshake overall deadline exceeded";
+    err_msg = "Handshake deadline exceeded";
     return POSIX_TLS_ERR_IO_FAILED;
 }
 
@@ -120,12 +141,10 @@ int write_all_tls(posix_tls_connection_t* conn, int fd, const unsigned char* dat
         int rc = posix_tls_write(conn, data + written_total, total - written_total, &n);
         if (rc == POSIX_TLS_OK) {
             written_total += n;
-        } else if (rc == POSIX_TLS_ERR_WANT_READ) {
+        } else if (rc == POSIX_TLS_ERR_WANT_READ || rc == POSIX_TLS_ERR_WANT_WRITE) {
             int rem = static_cast<int>(deadline - get_time_ms());
-            if (rem <= 0 || !wait_fd(fd, false, rem > 50 ? 50 : rem)) return POSIX_TLS_ERR_IO_FAILED;
-        } else if (rc == POSIX_TLS_ERR_WANT_WRITE) {
-            int rem = static_cast<int>(deadline - get_time_ms());
-            if (rem <= 0 || !wait_fd(fd, true, rem > 50 ? 50 : rem)) return POSIX_TLS_ERR_IO_FAILED;
+            if (rem <= 0) return POSIX_TLS_ERR_IO_FAILED;
+            wait_fd(fd, rc == POSIX_TLS_ERR_WANT_WRITE, rem > 50 ? 50 : rem);
         } else {
             return rc;
         }
@@ -143,12 +162,10 @@ int read_exact_tls(posix_tls_connection_t* conn, int fd, unsigned char* buf, siz
         if (rc == POSIX_TLS_OK) {
             if (n == 0) return POSIX_TLS_ERR_CLOSED;
             read_total += n;
-        } else if (rc == POSIX_TLS_ERR_WANT_READ) {
+        } else if (rc == POSIX_TLS_ERR_WANT_READ || rc == POSIX_TLS_ERR_WANT_WRITE) {
             int rem = static_cast<int>(deadline - get_time_ms());
-            if (rem <= 0 || !wait_fd(fd, false, rem > 50 ? 50 : rem)) return POSIX_TLS_ERR_IO_FAILED;
-        } else if (rc == POSIX_TLS_ERR_WANT_WRITE) {
-            int rem = static_cast<int>(deadline - get_time_ms());
-            if (rem <= 0 || !wait_fd(fd, true, rem > 50 ? 50 : rem)) return POSIX_TLS_ERR_IO_FAILED;
+            if (rem <= 0) return POSIX_TLS_ERR_IO_FAILED;
+            wait_fd(fd, rc == POSIX_TLS_ERR_WANT_WRITE, rem > 50 ? 50 : rem);
         } else {
             return rc;
         }
@@ -210,25 +227,22 @@ int cmd_generate_identity(int argc, char** argv) {
         return 1;
     }
 
-    std::ofstream cert_out(cert_file.c_str(), std::ios::out | std::ios::binary);
-    if (!cert_out.is_open()) {
-        std::cerr << "Error: could not write certificate to " << cert_file << std::endl;
+    // Safely write certificate with mode 0644
+    if (!safe_write_file(cert_file, cert_pem, cert_len, 0644)) {
+        std::cerr << "Error: failed to write certificate to " << cert_file << " (" << ::strerror(errno) << ")" << std::endl;
         posix_tls_free_string(cert_pem);
         posix_tls_free_string(key_pem);
         return 1;
     }
-    cert_out.write(cert_pem, cert_len);
-    cert_out.close();
 
-    std::ofstream key_out(key_file.c_str(), std::ios::out | std::ios::binary);
-    if (!key_out.is_open()) {
-        std::cerr << "Error: could not write private key to " << key_file << std::endl;
+    // Safely write private key with owner-only mode 0600
+    if (!safe_write_file(key_file, key_pem, key_len, 0600)) {
+        std::cerr << "Error: failed to write private key to " << key_file << " (" << ::strerror(errno) << ")" << std::endl;
+        unlink(cert_file.c_str());
         posix_tls_free_string(cert_pem);
         posix_tls_free_string(key_pem);
         return 1;
     }
-    key_out.write(key_pem, key_len);
-    key_out.close();
 
     char fingerprint[65];
     rc = posix_tls_calculate_cert_fingerprint(cert_pem, cert_len, fingerprint);
@@ -237,6 +251,8 @@ int cmd_generate_identity(int argc, char** argv) {
 
     if (rc != POSIX_TLS_OK) {
         std::cerr << "Error calculating certificate fingerprint: " << posix_tls_strerror(rc) << std::endl;
+        unlink(cert_file.c_str());
+        unlink(key_file.c_str());
         return 1;
     }
 
@@ -308,7 +324,7 @@ int cmd_server(int argc, char** argv) {
     // Create listening socket
     int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_fd < 0) {
-        std::cerr << "Error creating socket: " << strerror(errno) << std::endl;
+        std::cerr << "Error creating socket: " << ::strerror(errno) << std::endl;
         return 1;
     }
 
@@ -322,13 +338,13 @@ int cmd_server(int argc, char** argv) {
     saddr.sin_port = htons(static_cast<uint16_t>(port));
 
     if (bind(listen_fd, reinterpret_cast<struct sockaddr*>(&saddr), sizeof(saddr)) < 0) {
-        std::cerr << "Error binding to port " << port << ": " << strerror(errno) << std::endl;
+        std::cerr << "Error binding to port " << port << ": " << ::strerror(errno) << std::endl;
         close(listen_fd);
         return 1;
     }
 
     if (listen(listen_fd, 5) < 0) {
-        std::cerr << "Error listening on socket: " << strerror(errno) << std::endl;
+        std::cerr << "Error listening on socket: " << ::strerror(errno) << std::endl;
         close(listen_fd);
         return 1;
     }
@@ -349,7 +365,7 @@ int cmd_server(int argc, char** argv) {
     close(listen_fd); // We only serve one connection in demo mode
 
     if (client_fd < 0) {
-        std::cerr << "Error accepting connection: " << strerror(errno) << std::endl;
+        std::cerr << "Error accepting connection: " << ::strerror(errno) << std::endl;
         return 1;
     }
 
@@ -391,6 +407,8 @@ int cmd_server(int argc, char** argv) {
         close(client_fd);
         return 1;
     }
+    // Note: Once posix_tls_connection_create succeeds, conn owns client_fd.
+    // Do NOT close client_fd manually on cleanup paths; posix_tls_connection_destroy handles it.
 
     // TLS Accept Handshake
     double t_start = get_time_ms();
@@ -401,7 +419,6 @@ int cmd_server(int argc, char** argv) {
     if (rc != POSIX_TLS_OK) {
         std::cerr << "Server TLS handshake failed: " << err_msg << " (rc=" << rc << ")" << std::endl;
         posix_tls_connection_destroy(conn);
-        close(client_fd);
         posix_tls_context_destroy(ctx);
         return (rc == POSIX_TLS_ERR_PIN_MISMATCH) ? 6 : 2;
     }
@@ -422,7 +439,6 @@ int cmd_server(int argc, char** argv) {
         std::cerr << "Error reading transfer header: " << posix_tls_strerror(rc) << std::endl;
         posix_tls_shutdown(conn);
         posix_tls_connection_destroy(conn);
-        close(client_fd);
         posix_tls_context_destroy(ctx);
         return 2;
     }
@@ -431,7 +447,6 @@ int cmd_server(int argc, char** argv) {
         std::cerr << "Error: invalid magic bytes in header" << std::endl;
         posix_tls_shutdown(conn);
         posix_tls_connection_destroy(conn);
-        close(client_fd);
         posix_tls_context_destroy(ctx);
         return 2;
     }
@@ -439,23 +454,38 @@ int cmd_server(int argc, char** argv) {
     unsigned long long expected_bytes = unpack_u64_be(header_buf + 4);
     std::string expected_sha256(reinterpret_cast<const char*>(header_buf + 12), 64);
 
-    // Read payload into temporary file
-    std::string tmp_output = output_file + ".tmp";
-    std::ofstream ofs(tmp_output.c_str(), std::ios::out | std::ios::binary);
-    if (!ofs.is_open()) {
-        std::cerr << "Error creating temporary output file: " << tmp_output << std::endl;
+    // Create an exclusive, secure temporary regular file using mkstemp in output directory
+    std::string dir = ".";
+    size_t last_slash = output_file.rfind('/');
+    if (last_slash != std::string::npos) {
+        dir = output_file.substr(0, last_slash);
+        if (dir.empty()) dir = "/";
+    }
+    std::string tmpl = dir + "/.lssd_recv_XXXXXX";
+    std::vector<char> tmpl_buf(tmpl.begin(), tmpl.end());
+    tmpl_buf.push_back('\0');
+    int tmp_fd = mkstemp(&tmpl_buf[0]);
+    if (tmp_fd < 0) {
+        std::cerr << "Error creating temporary file in " << dir << ": " << ::strerror(errno) << std::endl;
         posix_tls_shutdown(conn);
         posix_tls_connection_destroy(conn);
-        close(client_fd);
         posix_tls_context_destroy(ctx);
         return 1;
     }
+    std::string tmp_output = &tmpl_buf[0];
 
     unsigned char chunk[16384];
     unsigned long long received_bytes = 0;
     bool aborted = false;
+    double deadline = get_time_ms() + static_cast<double>(timeout_ms);
 
     while (received_bytes < expected_bytes) {
+        if (get_time_ms() >= deadline) {
+            std::cerr << "Timeout waiting for payload data" << std::endl;
+            aborted = true;
+            break;
+        }
+
         size_t to_read = sizeof(chunk);
         if (expected_bytes - received_bytes < static_cast<unsigned long long>(to_read)) {
             to_read = static_cast<size_t>(expected_bytes - received_bytes);
@@ -469,7 +499,12 @@ int cmd_server(int argc, char** argv) {
                 aborted = true;
                 break;
             }
-            ofs.write(reinterpret_cast<const char*>(chunk), n);
+            ssize_t wn = write(tmp_fd, chunk, n);
+            if (wn != static_cast<ssize_t>(n)) {
+                std::cerr << "Error writing payload to temporary file: " << ::strerror(errno) << std::endl;
+                aborted = true;
+                break;
+            }
             received_bytes += n;
 
             if (disconnect_after > 0 && received_bytes >= disconnect_after) {
@@ -477,31 +512,27 @@ int cmd_server(int argc, char** argv) {
                 aborted = true;
                 break;
             }
-        } else if (rc == POSIX_TLS_ERR_WANT_READ) {
-            if (!wait_fd(client_fd, false, timeout_ms)) {
-                std::cerr << "Timeout waiting for payload data" << std::endl;
+        } else if (rc == POSIX_TLS_ERR_WANT_READ || rc == POSIX_TLS_ERR_WANT_WRITE) {
+            int rem = static_cast<int>(deadline - get_time_ms());
+            if (rem <= 0) {
+                std::cerr << "Timeout waiting for socket I/O" << std::endl;
                 aborted = true;
                 break;
             }
-        } else if (rc == POSIX_TLS_ERR_WANT_WRITE) {
-            if (!wait_fd(client_fd, true, timeout_ms)) {
-                std::cerr << "Timeout waiting for socket writability" << std::endl;
-                aborted = true;
-                break;
-            }
+            wait_fd(client_fd, rc == POSIX_TLS_ERR_WANT_WRITE, rem > 50 ? 50 : rem);
         } else {
             std::cerr << "Error reading payload data: " << posix_tls_strerror(rc) << std::endl;
             aborted = true;
             break;
         }
     }
-    ofs.close();
+    fsync(tmp_fd);
+    close(tmp_fd);
 
     if (aborted || received_bytes != expected_bytes) {
         unlink(tmp_output.c_str());
         posix_tls_shutdown(conn);
         posix_tls_connection_destroy(conn);
-        close(client_fd);
         posix_tls_context_destroy(ctx);
         return 4; // Transfer aborted / disconnected
     }
@@ -517,32 +548,38 @@ int cmd_server(int argc, char** argv) {
         write_all_tls(conn, client_fd, reinterpret_cast<const unsigned char*>(nak.data()), nak.size(), timeout_ms);
         posix_tls_shutdown(conn);
         posix_tls_connection_destroy(conn);
-        close(client_fd);
         posix_tls_context_destroy(ctx);
         return 3;
     }
 
+    // If destination output_file exists and is a symlink, unlink it so output is guaranteed a regular file
+    struct stat st;
+    if (lstat(output_file.c_str(), &st) == 0 && S_ISLNK(st.st_mode)) {
+        unlink(output_file.c_str());
+    }
+
     // Atomic commit to target output file
     if (std::rename(tmp_output.c_str(), output_file.c_str()) != 0) {
-        std::cerr << "Error renaming temporary file to " << output_file << ": " << strerror(errno) << std::endl;
+        std::cerr << "Error renaming temporary file to " << output_file << ": " << ::strerror(errno) << std::endl;
         unlink(tmp_output.c_str());
         posix_tls_shutdown(conn);
         posix_tls_connection_destroy(conn);
-        close(client_fd);
         posix_tls_context_destroy(ctx);
         return 1;
     }
 
-    // Send ACK to client
+    // Send ACK to client and check transmission result
     std::string ack = "OK: SHA256 MATCH " + std::string(actual_sha256) + "\n";
-    write_all_tls(conn, client_fd, reinterpret_cast<const unsigned char*>(ack.data()), ack.size(), timeout_ms);
+    rc = write_all_tls(conn, client_fd, reinterpret_cast<const unsigned char*>(ack.data()), ack.size(), timeout_ms);
+    if (rc != POSIX_TLS_OK) {
+        std::cerr << "Warning: failed to deliver ACK to client (rc=" << rc << ")" << std::endl;
+    }
 
     std::cout << "TRANSFER_OK bytes=" << received_bytes << " sha256=" << actual_sha256 << " output=" << output_file << std::endl;
     std::cout.flush();
 
     posix_tls_shutdown(conn);
     posix_tls_connection_destroy(conn);
-    close(client_fd);
     posix_tls_context_destroy(ctx);
     return 0;
 }
@@ -592,7 +629,7 @@ int cmd_client(int argc, char** argv) {
     // Create client TCP socket
     int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_fd < 0) {
-        std::cerr << "Error creating socket: " << strerror(errno) << std::endl;
+        std::cerr << "Error creating socket: " << ::strerror(errno) << std::endl;
         return 1;
     }
 
@@ -610,13 +647,28 @@ int cmd_client(int argc, char** argv) {
         std::memcpy(&saddr.sin_addr, he->h_addr_list[0], he->h_length);
     }
 
-    if (connect(sock_fd, reinterpret_cast<struct sockaddr*>(&saddr), sizeof(saddr)) < 0) {
-        std::cerr << "Error connecting to " << host << ":" << port << ": " << strerror(errno) << std::endl;
-        close(sock_fd);
-        return 1;
-    }
-
+    // Set non-blocking before connect to enforce finite connect timeout
     set_nonblocking(sock_fd);
+    if (connect(sock_fd, reinterpret_cast<struct sockaddr*>(&saddr), sizeof(saddr)) < 0) {
+        if (errno != EINPROGRESS) {
+            std::cerr << "Error connecting to " << host << ":" << port << ": " << ::strerror(errno) << std::endl;
+            close(sock_fd);
+            return 1;
+        }
+        if (!wait_fd(sock_fd, true, timeout_ms)) {
+            std::cerr << "Timeout connecting to " << host << ":" << port << std::endl;
+            close(sock_fd);
+            return 1;
+        }
+        int so_err = 0;
+        socklen_t len = sizeof(so_err);
+        if (getsockopt(sock_fd, SOL_SOCKET, SO_ERROR, &so_err, &len) < 0 || so_err != 0) {
+            std::cerr << "Error connecting to " << host << ":" << port << ": "
+                      << ::strerror(so_err != 0 ? so_err : errno) << std::endl;
+            close(sock_fd);
+            return 1;
+        }
+    }
 
     // Initialize posix_tls context
     posix_tls_context_t* ctx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
@@ -656,6 +708,8 @@ int cmd_client(int argc, char** argv) {
         close(sock_fd);
         return 1;
     }
+    // Note: Once posix_tls_connection_create succeeds, conn owns sock_fd.
+    // Do NOT close sock_fd manually on cleanup paths; posix_tls_connection_destroy handles it.
 
     // TLS Connect Handshake
     double t_start = get_time_ms();
@@ -668,13 +722,11 @@ int cmd_client(int argc, char** argv) {
             std::cerr << "ERROR: PIN_MISMATCH (posix_tls_connect failed with POSIX_TLS_ERR_PIN_MISMATCH: "
                       << err_msg << ")" << std::endl;
             posix_tls_connection_destroy(conn);
-            close(sock_fd);
             posix_tls_context_destroy(ctx);
             return 6; // Distinct code 6 for POSIX_TLS_ERR_PIN_MISMATCH
         }
         std::cerr << "Client TLS handshake failed: " << err_msg << " (rc=" << rc << ")" << std::endl;
         posix_tls_connection_destroy(conn);
-        close(sock_fd);
         posix_tls_context_destroy(ctx);
         return 2;
     }
@@ -702,7 +754,6 @@ int cmd_client(int argc, char** argv) {
         std::cerr << "Error sending transfer header: " << posix_tls_strerror(rc) << std::endl;
         posix_tls_shutdown(conn);
         posix_tls_connection_destroy(conn);
-        close(sock_fd);
         posix_tls_context_destroy(ctx);
         return 2;
     }
@@ -739,18 +790,41 @@ int cmd_client(int argc, char** argv) {
 
     if (aborted) {
         posix_tls_connection_destroy(conn);
-        close(sock_fd);
         posix_tls_context_destroy(ctx);
         return 4; // Transfer aborted / disconnected
     }
 
-    // Read acknowledgment response from server
-    char ack_buf[256] = {0};
-    size_t ack_read = 0;
-    rc = posix_tls_read(conn, ack_buf, sizeof(ack_buf) - 1, &ack_read);
-    while (rc == POSIX_TLS_ERR_WANT_READ || rc == POSIX_TLS_ERR_WANT_WRITE) {
-        wait_fd(sock_fd, rc == POSIX_TLS_ERR_WANT_WRITE, timeout_ms);
-        rc = posix_tls_read(conn, ack_buf, sizeof(ack_buf) - 1, &ack_read);
+    // Read acknowledgment response from server under strict timeout budget
+    std::string ack_str;
+    double ack_deadline = get_time_ms() + static_cast<double>(timeout_ms);
+    bool ack_complete = false;
+
+    while (get_time_ms() < ack_deadline && ack_str.size() < 256) {
+        char ack_chunk[64];
+        size_t n = 0;
+        rc = posix_tls_read(conn, ack_chunk, sizeof(ack_chunk), &n);
+        if (rc == POSIX_TLS_OK) {
+            if (n == 0) break;
+            ack_str.append(ack_chunk, n);
+            if (ack_str.find('\n') != std::string::npos) {
+                ack_complete = true;
+                break;
+            }
+        } else if (rc == POSIX_TLS_ERR_WANT_READ || rc == POSIX_TLS_ERR_WANT_WRITE) {
+            int rem = static_cast<int>(ack_deadline - get_time_ms());
+            if (rem <= 0) break;
+            wait_fd(sock_fd, rc == POSIX_TLS_ERR_WANT_WRITE, rem > 50 ? 50 : rem);
+        } else {
+            break;
+        }
+    }
+
+    if (!ack_complete) {
+        std::cerr << "Timeout or incomplete ACK received from server: " << ack_str << std::endl;
+        posix_tls_shutdown(conn);
+        posix_tls_connection_destroy(conn);
+        posix_tls_context_destroy(ctx);
+        return 3;
     }
 
     double t_transfer_end = get_time_ms();
@@ -758,30 +832,37 @@ int cmd_client(int argc, char** argv) {
     double throughput_mb_s = (transfer_duration_ms > 0.0) ?
         (static_cast<double>(sent_bytes) / (1024.0 * 1024.0)) / (transfer_duration_ms / 1000.0) : 0.0;
 
-    std::string ack_str(ack_buf, ack_read);
-    if (ack_str.find("OK: SHA256 MATCH") == std::string::npos) {
-        std::cerr << "Server reported error or invalid acknowledgment: " << ack_str << std::endl;
+    // Validate ACK structure and exact digest match
+    std::string clean_ack = ack_str;
+    while (!clean_ack.empty() && (clean_ack[clean_ack.size() - 1] == '\n' || clean_ack[clean_ack.size() - 1] == '\r')) {
+        clean_ack.erase(clean_ack.size() - 1);
+    }
+
+    std::string expected_ack_prefix = "OK: SHA256 MATCH ";
+    if (clean_ack.compare(0, expected_ack_prefix.size(), expected_ack_prefix) != 0) {
+        std::cerr << "Server reported error or invalid acknowledgment: " << clean_ack << std::endl;
         posix_tls_shutdown(conn);
         posix_tls_connection_destroy(conn);
-        close(sock_fd);
         posix_tls_context_destroy(ctx);
         return 3;
     }
 
-    // Clean acknowledgment received
-    // Trim trailing newline for clean output
-    while (!ack_str.empty() && (ack_str[ack_str.size() - 1] == '\n' || ack_str[ack_str.size() - 1] == '\r')) {
-        ack_str.erase(ack_str.size() - 1);
+    std::string confirmed_digest = clean_ack.substr(expected_ack_prefix.size());
+    if (confirmed_digest != file_sha256) {
+        std::cerr << "ACK digest mismatch! Expected " << file_sha256 << " but server confirmed " << confirmed_digest << std::endl;
+        posix_tls_shutdown(conn);
+        posix_tls_connection_destroy(conn);
+        posix_tls_context_destroy(ctx);
+        return 3;
     }
 
     std::cout << "TRANSFER_OK bytes=" << sent_bytes
               << " duration_ms=" << std::fixed << std::setprecision(2) << transfer_duration_ms
               << " throughput_mb_s=" << std::fixed << std::setprecision(2) << throughput_mb_s
-              << " ack=\"" << ack_str << "\"" << std::endl;
+              << " ack=\"" << clean_ack << "\"" << std::endl;
 
     posix_tls_shutdown(conn);
     posix_tls_connection_destroy(conn);
-    close(sock_fd);
     posix_tls_context_destroy(ctx);
     return 0;
 }

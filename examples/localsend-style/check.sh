@@ -20,8 +20,10 @@ ROOT_DIR="$(cd ../.. && pwd)"
 CHECK_SYM="${ROOT_DIR}/../posix-tls/scripts/check-symbol-isolation.py"
 
 file build-qnx/localsend_style_demo
-if [ -f "${CHECK_SYM}" ]; then
-    python3 "${CHECK_SYM}" build-qnx/localsend_style_demo
+if [ ! -f "${CHECK_SYM}" ]; then
+    echo "ERROR: required symbol isolation checker not found at ${CHECK_SYM}" >&2
+    exit 2
 fi
+python3 "${CHECK_SYM}" build-qnx/localsend_style_demo
 
 echo "OK: LocalSend-style integration gate passed (all checks green)"
