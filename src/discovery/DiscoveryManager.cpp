@@ -327,6 +327,16 @@ void DiscoveryManager::registerPeer(const QHostAddress &address, quint16 port)
     if (!dgram.isEmpty() && m_udpSocket && (m_udpSocket->isValid() || m_udpSocket->isOpen())) {
         m_udpSocket->writeDatagram(dgram, address, port > 0 ? port : DEFAULT_PORT);
     }
+
+    // If peer is already known and uses HTTPS protocol, do not send plaintext HTTP to TLS port
+    for (QMap<QString, PeerDevice>::const_iterator it = m_peers.begin(); it != m_peers.end(); ++it) {
+        if (it.value().address == address && (port == 0 || it.value().info.port == port)) {
+            if (it.value().info.protocol.toLower() == "https") {
+                return;
+            }
+        }
+    }
+
     sendHttpRegister(address, port);
 }
 

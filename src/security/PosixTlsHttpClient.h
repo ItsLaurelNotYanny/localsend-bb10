@@ -88,6 +88,7 @@ private:
     void cleanupSocket();
     void pumpStream();
     void parseResponse();
+    bool decodeChunkedBody(const QByteArray &input, QByteArray *output, bool *complete);
     void finishSuccess();
     void finishError(int code, const QString &msg);
 
@@ -95,6 +96,7 @@ private:
     posix_tls_context_t *m_ctx;
     PosixTlsSocket *m_socket;
     QTimer *m_timer;
+    int m_timeoutMs;
 
     State m_state;
     QString m_method;
@@ -113,9 +115,11 @@ private:
     QMap<QString, QString> m_responseHeaders;
     QByteArray m_readBuffer;
     QByteArray m_responseBody;
+    QByteArray m_rawChunkBuffer;
     qint64 m_contentLength;
     bool m_headersParsed;
     bool m_chunkedResponse;
+    bool m_chunkedComplete;
     bool m_pumpingStream;
 
     int m_lastTlsError;

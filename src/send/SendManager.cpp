@@ -78,6 +78,9 @@ void SendManager::transitionState(SendState newState)
 
 void SendManager::fail(const QString &reason, FailureReason failureCode)
 {
+    if (m_state == State_Failed || m_state == State_Cancelled || m_state == State_Completed) {
+        return;
+    }
     m_failureReason = failureCode;
     QString reqId = m_requestId;
 
@@ -169,6 +172,9 @@ bool SendManager::sendFile(const PeerDevice &peer, const QString &filePath, QStr
     m_fileId = CryptoUtil::randomHex(8);
 
     transitionState(State_Preparing);
+    if (m_state != State_Preparing) {
+        return false;
+    }
 
     PrepareUploadRequest req;
     req.info = m_app ? m_app->localInfo() : DeviceInfo();
@@ -208,7 +214,9 @@ bool SendManager::sendFile(const PeerDevice &peer, const QString &filePath, QStr
             if (error) {
                 *error = "Failed to initiate HTTPS prepare-upload request";
             }
-            fail("Failed to initiate HTTPS prepare-upload request", Failure_NetworkError);
+            if (m_state != State_Failed && m_state != State_Cancelled) {
+                fail("Failed to initiate HTTPS prepare-upload request", Failure_NetworkError);
+            }
             return false;
         }
 

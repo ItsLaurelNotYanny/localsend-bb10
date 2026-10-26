@@ -25,6 +25,7 @@ PosixTlsHttpClient::PosixTlsHttpClient(const LocalIdentity &identity, QObject *p
     , m_ctx(0)
     , m_socket(0)
     , m_timer(new QTimer(this))
+    , m_timeoutMs(0)
     , m_state(State_Idle)
     , m_port(0)
     , m_bodyStream(0)
@@ -34,6 +35,7 @@ PosixTlsHttpClient::PosixTlsHttpClient(const LocalIdentity &identity, QObject *p
     , m_contentLength(-1)
     , m_headersParsed(false)
     , m_chunkedResponse(false)
+    , m_chunkedComplete(false)
     , m_pumpingStream(false)
     , m_lastTlsError(POSIX_TLS_OK)
 {
@@ -129,10 +131,13 @@ bool PosixTlsHttpClient::sendStreamRequest(const QString &method,
     m_responseHeaders.clear();
     m_readBuffer.clear();
     m_responseBody.clear();
+    m_rawChunkBuffer.clear();
     m_contentLength = -1;
     m_headersParsed = false;
     m_chunkedResponse = false;
+    m_chunkedComplete = false;
     m_pumpingStream = false;
+    m_timeoutMs = timeoutMs;
     m_lastTlsError = POSIX_TLS_OK;
     m_errorString.clear();
     m_peerFingerprint.clear();
@@ -263,11 +268,20 @@ void PosixTlsHttpClient::pumpStream()
     m_pumpingStream = true;
 
     const qint64 CHUNK_SIZE = 65536; // 64 KiB bounded chunks
-    while (m_state == State_Sending && m_socket && m_bodyBytesWritten < m_bodySize &&
-           m_socket->bytesToWrite() < PosixTlsSocket::MAX_WRITE_BUFFER_CAP) {
+    while (m_state == State_Sending && m_socket && m_bodyBytesWritten < m_bodySize) {
+        qint64 buffered = m_socket->bytesToWrite();
+        if (buffered + CHUNK_SIZE > PosixTlsSocket::MAX_WRITE_BUFFER_CAP) {
+            break; // Backpressure: wait for socket writes to drain before queuing more
+        }
+
         qint64 toRead = qMin(CHUNK_SIZE, m_bodySize - m_bodyBytesWritten);
         QByteArray chunk = m_bodyStream->read(toRead);
         if (chunk.isEmpty()) {
+            if (m_bodyBytesWritten < m_bodySize) {
+                m_pumpingStream = false;
+                finishError(POSIX_TLS_ERR_IO_FAILED, "Stream ended prematurely before expected body size was sent");
+                return;
+            }
             break;
         }
 
@@ -288,14 +302,17 @@ void PosixTlsHttpClient::pumpStream()
         }
 
         // Reset inactivity timer on progress
-        if (m_timer && m_timer->isActive()) {
-            m_timer->start(30000);
+        if (m_timer && m_timer->isActive() && m_timeoutMs > 0) {
+            m_timer->start(m_timeoutMs);
         }
     }
 
     if (m_state == State_Sending && m_socket && m_bodyBytesWritten >= m_bodySize) {
         m_socket->flush();
         m_state = State_AwaitingResponse;
+        if (m_timer && m_timeoutMs > 0) {
+            m_timer->start(m_timeoutMs);
+        }
     }
 
     m_pumpingStream = false;
@@ -354,9 +371,18 @@ void PosixTlsHttpClient::parseResponse()
 
         // Parse status line: HTTP/1.1 <statusCode> <statusText>
         QString statusLine = lines.first();
+        if (!statusLine.startsWith("HTTP/")) {
+            finishError(POSIX_TLS_ERR_IO_FAILED, "Malformed HTTP status line: " + statusLine);
+            return;
+        }
         QStringList parts = statusLine.split(' ');
         if (parts.size() >= 2) {
-            m_statusCode = parts.at(1).toInt();
+            bool statusOk = false;
+            m_statusCode = parts.at(1).toInt(&statusOk);
+            if (!statusOk || m_statusCode < 100 || m_statusCode > 599) {
+                finishError(POSIX_TLS_ERR_IO_FAILED, "Malformed HTTP status code: " + parts.at(1));
+                return;
+            }
             if (parts.size() >= 3) {
                 QStringList rest(parts.mid(2));
                 m_statusText = rest.join(" ");
@@ -371,12 +397,14 @@ void PosixTlsHttpClient::parseResponse()
         if (m_statusCode >= 100 && m_statusCode < 200) {
             m_readBuffer = m_responseBody;
             m_responseBody.clear();
+            m_rawChunkBuffer.clear();
             m_statusCode = 0;
             m_statusText.clear();
             m_responseHeaders.clear();
             m_headersParsed = false;
             m_contentLength = -1;
             m_chunkedResponse = false;
+            m_chunkedComplete = false;
             if (!m_readBuffer.isEmpty()) {
                 parseResponse();
             }
@@ -393,7 +421,12 @@ void PosixTlsHttpClient::parseResponse()
                 m_responseHeaders.insert(name, val);
 
                 if (name == "content-length") {
-                    m_contentLength = val.toLongLong();
+                    bool ok = false;
+                    m_contentLength = val.toLongLong(&ok);
+                    if (!ok || m_contentLength < 0) {
+                        finishError(POSIX_TLS_ERR_IO_FAILED, "Invalid Content-Length header: " + val);
+                        return;
+                    }
                 } else if (name == "transfer-encoding" && val.toLower().contains("chunked")) {
                     m_chunkedResponse = true;
                 }
@@ -406,11 +439,43 @@ void PosixTlsHttpClient::parseResponse()
             finishError(POSIX_TLS_ERR_IO_FAILED, "HTTP response Content-Length exceeds allowable limit (4 MiB)");
             return;
         }
+
+        if (m_chunkedResponse) {
+            m_rawChunkBuffer = m_responseBody;
+            m_responseBody.clear();
+        }
     } else {
         // Headers already parsed, m_readBuffer has extra body data
         if (!m_readBuffer.isEmpty()) {
-            m_responseBody.append(m_readBuffer);
+            if (m_chunkedResponse) {
+                m_rawChunkBuffer.append(m_readBuffer);
+            } else {
+                m_responseBody.append(m_readBuffer);
+            }
             m_readBuffer.clear();
+        }
+    }
+
+    if (m_chunkedResponse) {
+        QByteArray decoded;
+        bool complete = false;
+        if (!decodeChunkedBody(m_rawChunkBuffer, &decoded, &complete)) {
+            finishError(POSIX_TLS_ERR_IO_FAILED, "Malformed chunked transfer encoding");
+            return;
+        }
+        m_responseBody = decoded;
+        m_chunkedComplete = complete;
+        if (m_responseBody.size() > MAX_RESPONSE_BODY_SIZE) {
+            finishError(POSIX_TLS_ERR_IO_FAILED, "HTTP response body exceeds allowable limit (4 MiB)");
+            return;
+        }
+        if (complete) {
+            if (m_bodyStream && m_bodyBytesWritten < m_bodySize) {
+                finishError(POSIX_TLS_ERR_IO_FAILED, "Server responded before request body was fully sent");
+                return;
+            }
+            finishSuccess();
+            return;
         }
     }
 
@@ -425,23 +490,74 @@ void PosixTlsHttpClient::parseResponse()
             if (m_responseBody.size() > m_contentLength) {
                 m_responseBody.truncate(static_cast<int>(m_contentLength));
             }
-            finishSuccess();
-        }
-    } else if (m_chunkedResponse) {
-        // Handle chunked body termination if present (ending with 0\r\n\r\n)
-        if (m_responseBody.endsWith("0\r\n\r\n") || m_responseBody.endsWith("0\n\n")) {
+            if (m_bodyStream && m_bodyBytesWritten < m_bodySize) {
+                finishError(POSIX_TLS_ERR_IO_FAILED, "Server responded before request body was fully sent");
+                return;
+            }
             finishSuccess();
         }
     }
 }
 
+bool PosixTlsHttpClient::decodeChunkedBody(const QByteArray &input, QByteArray *output, bool *complete)
+{
+    if (complete) *complete = false;
+    if (output) output->clear();
+    int pos = 0;
+    while (pos < input.size()) {
+        int lineEnd = input.indexOf("\r\n", pos);
+        int headerLen = 2;
+        if (lineEnd < 0) {
+            lineEnd = input.indexOf("\n", pos);
+            headerLen = 1;
+            if (lineEnd < 0) {
+                return true; // Incomplete chunk header, wait for more data
+            }
+        }
+        QByteArray sizeHex = input.mid(pos, lineEnd - pos).trimmed();
+        int semi = sizeHex.indexOf(';');
+        if (semi >= 0) {
+            sizeHex = sizeHex.left(semi).trimmed();
+        }
+        bool ok = false;
+        int chunkSize = sizeHex.toInt(&ok, 16);
+        if (!ok || chunkSize < 0) {
+            return false; // Malformed chunk size
+        }
+        pos = lineEnd + headerLen;
+        if (chunkSize == 0) {
+            if (complete) *complete = true;
+            return true;
+        }
+        if (pos + chunkSize > input.size()) {
+            return true; // Incomplete chunk data, wait for more
+        }
+        if (output) {
+            output->append(input.mid(pos, chunkSize));
+        }
+        pos += chunkSize;
+        if (pos + 1 < input.size() && input.at(pos) == '\r' && input.at(pos + 1) == '\n') {
+            pos += 2;
+        } else if (pos < input.size() && input.at(pos) == '\n') {
+            pos += 1;
+        }
+    }
+    return true;
+}
+
 void PosixTlsHttpClient::onSocketDisconnected()
 {
     if (m_state == State_AwaitingResponse) {
-        if (m_headersParsed) {
-            finishSuccess();
-        } else {
+        if (!m_headersParsed) {
             finishError(POSIX_TLS_ERR_CLOSED, "Connection closed before HTTP response received");
+        } else if (m_contentLength >= 0 && m_responseBody.size() < m_contentLength) {
+            finishError(POSIX_TLS_ERR_CLOSED, "Connection closed before complete HTTP response body received");
+        } else if (m_chunkedResponse && !m_chunkedComplete) {
+            finishError(POSIX_TLS_ERR_CLOSED, "Connection closed before chunked HTTP response completed");
+        } else if (m_bodyStream && m_bodyBytesWritten < m_bodySize) {
+            finishError(POSIX_TLS_ERR_CLOSED, "Connection closed before request body upload completed");
+        } else {
+            finishSuccess();
         }
     } else if (m_state == State_Connecting || m_state == State_Sending) {
         finishError(POSIX_TLS_ERR_CLOSED, "Connection prematurely closed by peer");
