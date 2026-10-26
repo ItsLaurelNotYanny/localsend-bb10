@@ -14,6 +14,7 @@
 
 namespace localsend {
 class Application;
+class PosixTlsHttpClient;
 }
 
 class SendManager : public QObject {
@@ -56,6 +57,8 @@ public:
 
     QString activeRequestId() const { return m_requestId; }
     QString activeSessionId() const { return m_sessionId; }
+    QString activePin() const { return m_activePin; }
+    bool isHttps() const { return m_isHttps; }
 
 public slots:
     void handleRemoteCancel(const QString &sessionId, const QHostAddress &peer);
@@ -75,11 +78,19 @@ private slots:
     void onConsentTimeout();
     void onInactivityTimeout();
 
+    // Outgoing HTTPS slots (posix-tls client)
+    void onHttpsPrepareFinished(int statusCode, const QByteArray &responseBody);
+    void onHttpsPrepareFailed(int tlsErrorCode, const QString &errorMessage);
+    void onHttpsUploadFinished(int statusCode, const QByteArray &responseBody);
+    void onHttpsUploadFailed(int tlsErrorCode, const QString &errorMessage);
+    void onHttpsUploadProgress(qint64 bytesSent, qint64 totalBytes);
+
 private:
     void transitionState(SendState newState);
     void fail(const QString &reason, FailureReason failureCode);
     void cleanup(bool releaseSlot);
     void sendRemoteCancel(const PeerDevice &peer, const QString &sessionId);
+    void sendRemoteCancelHttps(const PeerDevice &peer, const QString &sessionId, const QString &pin);
 
     localsend::Application *m_app;
     QNetworkAccessManager *m_nam;
@@ -95,6 +106,12 @@ private:
     PeerDevice m_peer;
     QString m_filePath;
     qint64 m_fileSize;
+
+    QString m_activePin;
+    bool m_isHttps;
+    localsend::PosixTlsHttpClient *m_httpsPrepareClient;
+    localsend::PosixTlsHttpClient *m_httpsUploadClient;
+    localsend::PosixTlsHttpClient *m_httpsCancelClient;
 
     QFile *m_file;
     QNetworkReply *m_prepareReply;

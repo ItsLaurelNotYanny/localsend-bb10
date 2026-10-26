@@ -6,6 +6,8 @@
 #include "app/Application.h"
 #include "protocol/ProtocolJson.h"
 #include "protocol/CryptoUtil.h"
+#include "security/LocalIdentity.h"
+#include "security/PosixTlsHttpClient.h"
 
 SendManager::SendManager(localsend::Application *app,
                          QNetworkAccessManager *nam,
@@ -16,6 +18,10 @@ SendManager::SendManager(localsend::Application *app,
     , m_state(State_Idle)
     , m_failureReason(Failure_None)
     , m_fileSize(0)
+    , m_isHttps(false)
+    , m_httpsPrepareClient(0)
+    , m_httpsUploadClient(0)
+    , m_httpsCancelClient(0)
     , m_file(0)
     , m_prepareReply(0)
     , m_uploadReply(0)
@@ -94,12 +100,30 @@ bool SendManager::sendFile(const PeerDevice &peer, const QString &filePath, QStr
         return false;
     }
 
-    // Reject HTTPS peer before sending plaintext
-    if (peer.info.protocol.toLower() == "https") {
+    // Check protocol: http or https
+    QString proto = peer.info.protocol.toLower();
+    if (proto != "http" && proto != "https") {
+        m_failureReason = Failure_ProtocolError;
         if (error) {
-            *error = "Sending to HTTPS peer is unsupported";
+            *error = "Unsupported transfer protocol: " + peer.info.protocol;
         }
         return false;
+    }
+
+    if (proto == "https") {
+        QString normPin = localsend::LocalIdentity::normalizeFingerprint(peer.info.fingerprint);
+        if (normPin.isEmpty() || normPin.length() != 64) {
+            m_failureReason = Failure_PeerPinRequired;
+            if (error) {
+                *error = "Valid peer certificate fingerprint is required for HTTPS transfer";
+            }
+            return false;
+        }
+        m_activePin = normPin;
+        m_isHttps = true;
+    } else {
+        m_activePin.clear();
+        m_isHttps = false;
     }
 
     QFileInfo fi(filePath);
@@ -165,6 +189,33 @@ bool SendManager::sendFile(const PeerDevice &peer, const QString &filePath, QStr
         }
         fail("Failed to encode prepare-upload JSON", Failure_ProtocolError);
         return false;
+    }
+
+    if (m_isHttps) {
+        m_httpsPrepareClient = new localsend::PosixTlsHttpClient(
+            m_app ? m_app->localIdentity() : localsend::LocalIdentity(), this);
+        connect(m_httpsPrepareClient, SIGNAL(finished(int,QByteArray)),
+                this, SLOT(onHttpsPrepareFinished(int,QByteArray)));
+        connect(m_httpsPrepareClient, SIGNAL(failed(int,QString)),
+                this, SLOT(onHttpsPrepareFailed(int,QString)));
+
+        QMap<QString, QString> headers;
+        headers.insert("Content-Type", "application/json");
+
+        if (!m_httpsPrepareClient->sendRequest("POST", peer.address, peer.info.port,
+                                               "/api/localsend/v2/prepare-upload",
+                                               m_activePin, headers, body, 120000)) {
+            if (error) {
+                *error = "Failed to initiate HTTPS prepare-upload request";
+            }
+            fail("Failed to initiate HTTPS prepare-upload request", Failure_NetworkError);
+            return false;
+        }
+
+        m_consentTimer->start(120000); // 120s consent timeout
+        qDebug() << "[SendManager] Sent HTTPS /prepare-upload to" << peer.address.toString() << ":" << peer.info.port
+                 << "with frozen pin" << m_activePin << "awaiting consent (timeout 120s)...";
+        return true;
     }
 
     QUrl url;
@@ -356,6 +407,175 @@ void SendManager::onUploadReplyFinished()
     }
 }
 
+void SendManager::onHttpsPrepareFinished(int status, const QByteArray &body)
+{
+    m_consentTimer->stop();
+
+    if (!m_httpsPrepareClient) {
+        return;
+    }
+
+    m_httpsPrepareClient->disconnect(this);
+    m_httpsPrepareClient->deleteLater();
+    m_httpsPrepareClient = 0;
+
+    if (status == 204) {
+        qDebug() << "[SendManager] Peer returned 204 No Content (transfer skipped)";
+        QString reqId = m_requestId;
+        transitionState(State_Completed);
+        emit sendFinished(reqId);
+        cleanup(true);
+        return;
+    }
+
+    if (status == 403) {
+        fail("Transfer rejected by remote peer (HTTP 403)", Failure_PeerRejected);
+        return;
+    }
+
+    if (status == 409) {
+        fail("Remote peer is busy (HTTP 409)", Failure_PeerBusy);
+        return;
+    }
+
+    if (status == 401) {
+        fail("Remote peer requires PIN (HTTP 401 unsupported)", Failure_PeerPinRequired);
+        return;
+    }
+
+    if (status == 429) {
+        fail("Remote peer rate-limited requests (HTTP 429)", Failure_NetworkError);
+        return;
+    }
+
+    if (status >= 500) {
+        fail(QString("Peer server error during prepare (HTTP %1)").arg(status), Failure_NetworkError);
+        return;
+    }
+
+    if (status > 0 && status != 200) {
+        fail(QString("Prepare request failed with HTTP %1").arg(status), Failure_ProtocolError);
+        return;
+    }
+
+    PrepareUploadResponse resp;
+    QString err;
+    if (!ProtocolJson::decodePrepareResponse(body, &resp, &err)) {
+        fail("Malformed prepare response JSON: " + err, Failure_ProtocolError);
+        return;
+    }
+
+    if (!resp.fileTokens.contains(m_fileId)) {
+        fail("File was not accepted by peer (no token returned for fileId)", Failure_PeerRejected);
+        return;
+    }
+
+    m_sessionId = resp.sessionId;
+    m_token = resp.fileTokens.value(m_fileId);
+
+    // Open file for streaming - QFile is kept alive for the duration of the upload
+    m_file = new QFile(m_filePath, this);
+    if (!m_file->open(QIODevice::ReadOnly)) {
+        fail("Failed to open local file for reading: " + m_file->errorString(), Failure_LocalFileNotFound);
+        return;
+    }
+
+    QString uploadPath = QString("/api/localsend/v2/upload?sessionId=%1&fileId=%2&token=%3")
+        .arg(m_sessionId).arg(m_fileId).arg(m_token);
+
+    QMap<QString, QString> uploadHeaders;
+    uploadHeaders.insert("Content-Type", "application/octet-stream");
+
+    m_httpsUploadClient = new localsend::PosixTlsHttpClient(
+        m_app ? m_app->localIdentity() : localsend::LocalIdentity(), this);
+    connect(m_httpsUploadClient, SIGNAL(uploadProgress(qint64,qint64)),
+            this, SLOT(onHttpsUploadProgress(qint64,qint64)));
+    connect(m_httpsUploadClient, SIGNAL(finished(int,QByteArray)),
+            this, SLOT(onHttpsUploadFinished(int,QByteArray)));
+    connect(m_httpsUploadClient, SIGNAL(failed(int,QString)),
+            this, SLOT(onHttpsUploadFailed(int,QString)));
+
+    if (!m_httpsUploadClient->sendStreamRequest("POST", m_peer.address, m_peer.info.port,
+                                                uploadPath, m_activePin, uploadHeaders,
+                                                m_file, m_fileSize, 30000)) {
+        fail("Failed to initiate HTTPS streaming upload", Failure_NetworkError);
+        return;
+    }
+
+    transitionState(State_Uploading);
+    m_inactivityTimer->start(30000); // 30s inactivity timeout
+    qDebug() << "[SendManager] Starting HTTPS streaming upload to" << m_peer.address.toString()
+             << "frozen pin:" << m_activePin << "total bytes:" << m_fileSize;
+}
+
+void SendManager::onHttpsPrepareFailed(int tlsErrorCode, const QString &errorMessage)
+{
+    m_consentTimer->stop();
+    if (m_httpsPrepareClient) {
+        m_httpsPrepareClient->disconnect(this);
+        m_httpsPrepareClient->deleteLater();
+        m_httpsPrepareClient = 0;
+    }
+
+    if (tlsErrorCode == POSIX_TLS_ERR_PIN_MISMATCH || tlsErrorCode == POSIX_TLS_ERR_INVALID_PIN) {
+        fail("Peer certificate pin verification failed during prepare: " + errorMessage, Failure_PeerPinRequired);
+    } else {
+        fail("HTTPS prepare connection failed: " + errorMessage, Failure_NetworkError);
+    }
+}
+
+void SendManager::onHttpsUploadProgress(qint64 bytesSent, qint64 totalBytes)
+{
+    onUploadProgress(bytesSent, totalBytes);
+}
+
+void SendManager::onHttpsUploadFinished(int status, const QByteArray &body)
+{
+    Q_UNUSED(body);
+    m_inactivityTimer->stop();
+
+    if (!m_httpsUploadClient) {
+        return;
+    }
+
+    m_httpsUploadClient->disconnect(this);
+    m_httpsUploadClient->deleteLater();
+    m_httpsUploadClient = 0;
+
+    QString reqId = m_requestId;
+
+    if (status == 200) {
+        qDebug() << "[SendManager] HTTPS upload completed and acknowledged by peer (HTTP 200)";
+        transitionState(State_Completed);
+        emit sendFinished(reqId);
+        cleanup(true);
+    } else if (status == 422) {
+        fail("Peer reported SHA-256 checksum mismatch (HTTP 422)", Failure_ChecksumMismatch);
+    } else if (status >= 500) {
+        fail(QString("Peer server error during upload (HTTP %1)").arg(status), Failure_NetworkError);
+    } else if (status > 0) {
+        fail(QString("Upload rejected by peer (HTTP %1)").arg(status), Failure_ProtocolError);
+    } else {
+        fail("Upload failed without valid HTTP acknowledgment", Failure_NetworkError);
+    }
+}
+
+void SendManager::onHttpsUploadFailed(int tlsErrorCode, const QString &errorMessage)
+{
+    m_inactivityTimer->stop();
+    if (m_httpsUploadClient) {
+        m_httpsUploadClient->disconnect(this);
+        m_httpsUploadClient->deleteLater();
+        m_httpsUploadClient = 0;
+    }
+
+    if (tlsErrorCode == POSIX_TLS_ERR_PIN_MISMATCH || tlsErrorCode == POSIX_TLS_ERR_INVALID_PIN) {
+        fail("Peer certificate pin verification failed during upload: " + errorMessage, Failure_PeerPinRequired);
+    } else {
+        fail("HTTPS streaming upload network error: " + errorMessage, Failure_NetworkError);
+    }
+}
+
 void SendManager::cancel()
 {
     if (m_state != State_Preparing && m_state != State_Uploading) {
@@ -365,13 +585,19 @@ void SendManager::cancel()
     QString reqId = m_requestId;
     QString sessId = m_sessionId;
     PeerDevice peer = m_peer;
+    QString pin = m_activePin;
+    bool isHttps = m_isHttps;
 
     qDebug() << "[SendManager] Cancelling active transfer requestId:" << reqId;
     transitionState(State_Cancelled);
     cleanup(true);
 
     if (!sessId.isEmpty()) {
-        sendRemoteCancel(peer, sessId);
+        if (isHttps) {
+            sendRemoteCancelHttps(peer, sessId, pin);
+        } else {
+            sendRemoteCancel(peer, sessId);
+        }
     }
 }
 
@@ -423,6 +649,20 @@ void SendManager::cleanup(bool releaseSlot)
         m_uploadReply = 0;
     }
 
+    if (m_httpsPrepareClient) {
+        m_httpsPrepareClient->disconnect(this);
+        m_httpsPrepareClient->abort();
+        m_httpsPrepareClient->deleteLater();
+        m_httpsPrepareClient = 0;
+    }
+
+    if (m_httpsUploadClient) {
+        m_httpsUploadClient->disconnect(this);
+        m_httpsUploadClient->abort();
+        m_httpsUploadClient->deleteLater();
+        m_httpsUploadClient = 0;
+    }
+
     if (m_file) {
         m_file->close();
         m_file->deleteLater();
@@ -441,10 +681,30 @@ void SendManager::cleanup(bool releaseSlot)
     m_token.clear();
     m_filePath.clear();
     m_fileSize = 0;
+    m_activePin.clear();
+    m_isHttps = false;
 
     if (releaseSlot && m_app && !reqId.isEmpty()) {
         m_app->endTransfer(reqId);
     }
+}
+
+void SendManager::sendRemoteCancelHttps(const PeerDevice &peer, const QString &sessionId, const QString &pin)
+{
+    if (sessionId.isEmpty() || pin.isEmpty()) {
+        return;
+    }
+
+    localsend::PosixTlsHttpClient *cancelClient = new localsend::PosixTlsHttpClient(
+        m_app ? m_app->localIdentity() : localsend::LocalIdentity(), this);
+    connect(cancelClient, SIGNAL(finished(int,QByteArray)), cancelClient, SLOT(deleteLater()));
+    connect(cancelClient, SIGNAL(failed(int,QString)), cancelClient, SLOT(deleteLater()));
+
+    QString cancelPath = QString("/api/localsend/v2/cancel?sessionId=%1").arg(sessionId);
+    QMap<QString, QString> headers;
+    headers.insert("Content-Type", "application/json");
+
+    cancelClient->sendRequest("POST", peer.address, peer.info.port, cancelPath, pin, headers, QByteArray(), 3000);
 }
 
 void SendManager::sendRemoteCancel(const PeerDevice &peer, const QString &sessionId)

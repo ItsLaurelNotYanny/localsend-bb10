@@ -22,6 +22,7 @@ set(LOCALSEND_SOURCES
     src/protocol/CryptoUtil.cpp
     src/security/LocalIdentity.cpp
     src/security/PosixTlsSocket.cpp
+    src/security/PosixTlsHttpClient.cpp
     src/receive/HttpConnection.cpp
     src/receive/HttpServer.cpp
     src/receive/ReceiveServer.cpp
@@ -34,6 +35,7 @@ set(LOCALSEND_SOURCES
 
 set(LOCALSEND_MOC_HEADERS
     src/security/PosixTlsSocket.h
+    src/security/PosixTlsHttpClient.h
     src/receive/HttpConnection.h
     src/receive/HttpServer.h
     src/receive/ReceiveServer.h

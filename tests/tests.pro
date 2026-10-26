@@ -23,6 +23,7 @@ SOURCES += \
     ../src/protocol/CryptoUtil.cpp \
     ../src/security/LocalIdentity.cpp \
     ../src/security/PosixTlsSocket.cpp \
+    ../src/security/PosixTlsHttpClient.cpp \
     ../src/receive/HttpConnection.cpp \
     ../src/receive/HttpServer.cpp \
     ../src/receive/ReceiveServer.cpp \
@@ -37,6 +38,7 @@ HEADERS += \
     ../src/protocol/CryptoUtil.h \
     ../src/security/LocalIdentity.h \
     ../src/security/PosixTlsSocket.h \
+    ../src/security/PosixTlsHttpClient.h \
     ../src/receive/HttpConnection.h \
     ../src/receive/HttpServer.h \
     ../src/receive/ReceiveServer.h \

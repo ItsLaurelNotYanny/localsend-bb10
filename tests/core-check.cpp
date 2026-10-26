@@ -3,6 +3,7 @@
 #include "protocol/CryptoUtil.h"
 #include "security/LocalIdentity.h"
 #include "security/PosixTlsSocket.h"
+#include "security/PosixTlsHttpClient.h"
 #include "receive/HttpServer.h"
 #include "receive/HttpConnection.h"
 #include "receive/ReceiveServer.h"
@@ -15,6 +16,7 @@
 #include <QTemporaryFile>
 #include <QDir>
 #include <QFile>
+#include <QBuffer>
 
 #include <QCoreApplication>
 #include <QTime>
@@ -4625,6 +4627,617 @@ void testLocalIdentityFifoRejectionH2E()
     TEST_PASS();
 }
 
+// -------------------------------------------------------------
+// Milestone H3: Outgoing HTTPS with Frozen Peer Pin Mock & Tests
+// -------------------------------------------------------------
+
+class MockHttpsServer : public RawAcceptServer {
+    Q_OBJECT
+public:
+    localsend::LocalIdentity identity;
+    posix_tls_context_t *serverCtx;
+    QList<localsend::PosixTlsSocket*> activeSockets;
+    QMap<localsend::PosixTlsSocket*, QByteArray> readBuffers;
+    QMap<localsend::PosixTlsSocket*, qint64> expectedBodyLens;
+    QMap<localsend::PosixTlsSocket*, QString> activePaths;
+
+    int prepareStatusCode;
+    int uploadStatusCode;
+    bool holdUpload;
+    QByteArray receivedUploadData;
+    QString lastCancelSessionId;
+    int connectionsCount;
+
+    MockHttpsServer(QObject *parent = 0)
+        : RawAcceptServer(parent)
+        , serverCtx(0)
+        , prepareStatusCode(200)
+        , uploadStatusCode(200)
+        , holdUpload(false)
+        , connectionsCount(0)
+    {
+    }
+
+    virtual ~MockHttpsServer()
+    {
+        stop();
+    }
+
+    void stop()
+    {
+        closeAll();
+        for (int i = 0; i < activeSockets.size(); ++i) {
+            localsend::PosixTlsSocket *s = activeSockets.at(i);
+            s->disconnect(this);
+            s->abort();
+            delete s;
+        }
+        activeSockets.clear();
+        readBuffers.clear();
+        expectedBodyLens.clear();
+        activePaths.clear();
+        QCoreApplication::sendPostedEvents(0, QEvent::DeferredDelete);
+        QCoreApplication::processEvents(QEventLoop::AllEvents);
+        if (serverCtx) {
+            posix_tls_context_destroy(serverCtx);
+            serverCtx = 0;
+        }
+    }
+
+    bool init(const QString &storageDir)
+    {
+        QDir(storageDir).removeRecursively();
+        QString err;
+        if (!localsend::LocalIdentity::loadOrCreate(storageDir, &identity, &err)) {
+            return false;
+        }
+        serverCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+        if (!serverCtx) return false;
+        if (posix_tls_context_set_credentials(serverCtx,
+                identity.certPem().constData(), static_cast<size_t>(identity.certPem().size()),
+                identity.keyPem().constData(), static_cast<size_t>(identity.keyPem().size())) != POSIX_TLS_OK) {
+            return false;
+        }
+        return start();
+    }
+
+public slots:
+    void onAccept()
+    {
+        if (listenFd < 0) return;
+        struct sockaddr_in peer;
+        socklen_t len = sizeof(peer);
+        int fd = ::accept(listenFd, reinterpret_cast<struct sockaddr*>(&peer), &len);
+        if (fd < 0) return;
+
+        connectionsCount++;
+        localsend::PosixTlsSocket *sock = new localsend::PosixTlsSocket(serverCtx, this);
+        activeSockets.append(sock);
+        readBuffers.insert(sock, QByteArray());
+        expectedBodyLens.insert(sock, -1);
+
+        connect(sock, SIGNAL(readyRead()), this, SLOT(onClientReadyRead()));
+        connect(sock, SIGNAL(disconnected()), this, SLOT(onClientDisconnected()));
+
+        sock->startServerEncryption(fd);
+    }
+
+    void onClientReadyRead()
+    {
+        localsend::PosixTlsSocket *sock = qobject_cast<localsend::PosixTlsSocket*>(sender());
+        if (!sock) return;
+
+        QByteArray data = sock->readAll();
+        QByteArray &buf = readBuffers[sock];
+        buf.append(data);
+
+        if (expectedBodyLens[sock] < 0) {
+            int idx = buf.indexOf("\r\n\r\n");
+            if (idx >= 0) {
+                QByteArray headerBlock = buf.left(idx);
+                buf = buf.mid(idx + 4);
+
+                QString headerText = QString::fromLatin1(headerBlock.constData(), headerBlock.size());
+                QStringList lines = headerText.split(QRegExp("\r?\n"));
+                QString reqLine = lines.first();
+                QStringList reqParts = reqLine.split(' ');
+                QString path = reqParts.size() >= 2 ? reqParts.at(1) : "";
+                activePaths[sock] = path;
+
+                qint64 contentLen = 0;
+                for (int i = 1; i < lines.size(); ++i) {
+                    const QString &l = lines.at(i);
+                    int cIdx = l.indexOf(':');
+                    if (cIdx > 0 && l.left(cIdx).trimmed().compare("content-length", Qt::CaseInsensitive) == 0) {
+                        contentLen = l.mid(cIdx + 1).trimmed().toLongLong();
+                    }
+                }
+                expectedBodyLens[sock] = contentLen;
+            }
+        }
+
+        qint64 expected = expectedBodyLens[sock];
+        if (expected >= 0 && buf.size() >= expected) {
+            QString path = activePaths[sock];
+            if (path.startsWith("/api/localsend/v2/prepare-upload")) {
+                if (prepareStatusCode == 200) {
+                    PrepareUploadRequest prepReq;
+                    QString pErr;
+                    ProtocolJson::decodePrepareRequest(buf.left(expected), &prepReq, &pErr);
+                    PrepareUploadResponse resp;
+                    resp.sessionId = "https-sess-1";
+                    if (!prepReq.files.isEmpty()) {
+                        resp.fileTokens.insert(prepReq.files.keys().first(), "https-tok-1");
+                    }
+                    QByteArray resBody = ProtocolJson::encodePrepareResponse(resp, &pErr);
+                    QByteArray reply = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: "
+                                     + QByteArray::number(resBody.size()) + "\r\n\r\n" + resBody;
+                    sock->write(reply);
+                    sock->flush();
+                } else if (prepareStatusCode == 204) {
+                    sock->write("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    sock->flush();
+                } else {
+                    sock->write(QString("HTTP/1.1 %1 Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").arg(prepareStatusCode).toLatin1());
+                    sock->flush();
+                }
+            } else if (path.startsWith("/api/localsend/v2/upload")) {
+                receivedUploadData = buf.left(expected);
+                if (!holdUpload) {
+                    if (uploadStatusCode == 200) {
+                        sock->write("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        sock->flush();
+                    } else {
+                        sock->write(QString("HTTP/1.1 %1 Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").arg(uploadStatusCode).toLatin1());
+                        sock->flush();
+                    }
+                }
+            } else if (path.startsWith("/api/localsend/v2/cancel")) {
+                int qIdx = path.indexOf("sessionId=");
+                if (qIdx > 0) {
+                    lastCancelSessionId = path.mid(qIdx + 10).split('&').first();
+                }
+                sock->write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                sock->flush();
+            }
+        }
+    }
+
+    void onClientDisconnected()
+    {
+        localsend::PosixTlsSocket *sock = qobject_cast<localsend::PosixTlsSocket*>(sender());
+        if (sock) {
+            activeSockets.removeAll(sock);
+            readBuffers.remove(sock);
+            expectedBodyLens.remove(sock);
+            activePaths.remove(sock);
+            sock->deleteLater();
+        }
+    }
+};
+
+void testSendHttpsPeerMissingPinRejectedH3()
+{
+    TEST_CASE("H3 - Sender rejects HTTPS peer with missing or empty certificate fingerprint");
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = 53317;
+    peer.info.protocol = "https";
+    peer.info.fingerprint = ""; // Missing PIN
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "temporary file open failed");
+    tmpFile.write("payload");
+    tmpFile.flush();
+
+    QString err;
+    bool ok = sm.sendFile(peer, tmpFile.fileName(), &err);
+    ASSERT_FALSE(ok, "sendFile must reject HTTPS peer without fingerprint");
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_PeerPinRequired,
+                "failure reason must be Failure_PeerPinRequired");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must remain free");
+    TEST_PASS();
+}
+
+void testSendHttpsPeerInvalidPinFormatH3()
+{
+    TEST_CASE("H3 - Sender rejects HTTPS peer with invalid hex pin format");
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = 53317;
+    peer.info.protocol = "https";
+    peer.info.fingerprint = "not_a_valid_64_hex_fingerprint_too_short";
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "temporary file open failed");
+    tmpFile.write("payload");
+    tmpFile.flush();
+
+    QString err;
+    bool ok = sm.sendFile(peer, tmpFile.fileName(), &err);
+    ASSERT_FALSE(ok, "sendFile must reject malformed fingerprint");
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_PeerPinRequired,
+                "failure reason must be Failure_PeerPinRequired");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must remain free");
+    TEST_PASS();
+}
+
+void testSendHttpsPinMismatchRejectionH3()
+{
+    TEST_CASE("H3 - Single hex digit pin mismatch aborts during TLS handshake before sending payload");
+    MockHttpsServer mockServer;
+    ASSERT_TRUE(mockServer.init("/tmp/localsend_h3_mismatch_srv"), "mock server init failed");
+
+    QString validPin = mockServer.identity.fingerprint();
+    QString tamperedPin = validPin;
+    tamperedPin[0] = (validPin[0] == 'a') ? 'b' : 'a';
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    TestSendTracker tracker;
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+    QObject::connect(&sm, SIGNAL(sendFailedWithReason(QString,QString,int)), &tracker, SLOT(onFailedWithReason(QString,QString,int)));
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = mockServer.port;
+    peer.info.protocol = "https";
+    peer.info.fingerprint = tamperedPin;
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "temporary file open failed");
+    tmpFile.write("strictly confidential payload");
+    tmpFile.flush();
+
+    QString err;
+    bool ok = sm.sendFile(peer, tmpFile.fileName(), &err);
+    ASSERT_TRUE(ok, "sendFile accepted valid request format");
+
+    QTime t;
+    t.start();
+    while (tracker.failedReason.isEmpty() && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(sm.state() == SendManager::State_Failed, "state must transition to Failed on pin mismatch");
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_PeerPinRequired,
+                "failure reason must be Failure_PeerPinRequired on pin mismatch");
+    ASSERT_TRUE(mockServer.receivedUploadData.isEmpty(),
+                "server must not receive any upload data on pin mismatch");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must be released cleanly");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testSendHttpsSuccessfulUploadAndAckH3()
+{
+    TEST_CASE("H3 - Outgoing HTTPS prepare 200, streaming upload, and peer 200 acknowledgment with Chinese filename");
+    MockHttpsServer mockServer;
+    ASSERT_TRUE(mockServer.init("/tmp/localsend_h3_success_srv"), "mock server init failed");
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    TestSendTracker tracker;
+    QObject::connect(&sm, SIGNAL(sendStateChanged(QString,QString)), &tracker, SLOT(onStateChanged(QString,QString)));
+    QObject::connect(&sm, SIGNAL(sendProgress(QString,qint64,qint64)), &tracker, SLOT(onProgress(QString,qint64,qint64)));
+    QObject::connect(&sm, SIGNAL(sendFinished(QString)), &tracker, SLOT(onFinished(QString)));
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = mockServer.port;
+    peer.info.protocol = "https";
+    peer.info.fingerprint = mockServer.identity.fingerprint();
+
+    QByteArray payload(32768, 'X'); // 32 KiB binary payload
+    QString testFilePath = "/tmp/localsend_h3_测试文件.bin";
+    QFile f(testFilePath);
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly), "create test file failed");
+    f.write(payload);
+    f.close();
+
+    QString err;
+    bool ok = sm.sendFile(peer, testFilePath, &err);
+    ASSERT_TRUE(ok, "sendFile failed to start HTTPS transfer");
+
+    QTime t;
+    t.start();
+    while (!tracker.finished && tracker.failedReason.isEmpty() && t.elapsed() < 5000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(tracker.finished, "sendFinished must be emitted");
+    ASSERT_TRUE(tracker.failedReason.isEmpty(), "send must not fail");
+    ASSERT_TRUE(sm.state() == SendManager::State_Completed, "state must be Completed");
+    ASSERT_TRUE(mockServer.receivedUploadData == payload, "uploaded data on server must match exact payload");
+    ASSERT_TRUE(tracker.lastProgressDone == 32768, "progress done must reach 32768");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must be released after completion");
+
+    f.remove();
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testSendHttpsActivePinStabilityH3()
+{
+    TEST_CASE("H3 - Active pin stability: announcement mutation during transfer cannot alter frozen pin");
+    MockHttpsServer mockServer;
+    ASSERT_TRUE(mockServer.init("/tmp/localsend_h3_pin_stability"), "mock server init failed");
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    TestSendTracker tracker;
+    QObject::connect(&sm, SIGNAL(sendFinished(QString)), &tracker, SLOT(onFinished(QString)));
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &tracker, SLOT(onFailed(QString,QString)));
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = mockServer.port;
+    peer.info.protocol = "https";
+    peer.info.fingerprint = mockServer.identity.fingerprint();
+
+    QByteArray payload(8192, 'S');
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "create temp file failed");
+    tmpFile.write(payload);
+    tmpFile.flush();
+
+    QString err;
+    bool ok = sm.sendFile(peer, tmpFile.fileName(), &err);
+    ASSERT_TRUE(ok, "sendFile start");
+
+    // Frozen pin must match server identity
+    ASSERT_TRUE(sm.activePin() == mockServer.identity.fingerprint(), "activePin must be frozen from target peer");
+
+    // Simulate concurrent discovery mutation attempt with different pin
+    peer.info.fingerprint = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    // Active transfer pin must stay completely unaffected
+    ASSERT_TRUE(sm.activePin() == mockServer.identity.fingerprint(),
+                "activePin must not be corrupted by external peer modification");
+
+    QTime t;
+    t.start();
+    while (!tracker.finished && tracker.failedReason.isEmpty() && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(tracker.finished, "transfer must succeed with frozen pin");
+    ASSERT_TRUE(sm.state() == SendManager::State_Completed, "state must reach Completed");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testSendHttpsLocalCancellationAndRemoteCancelH3()
+{
+    TEST_CASE("H3 - Outgoing HTTPS local cancellation, remote cancel delivery, and clean recovery");
+    MockHttpsServer mockServer;
+    ASSERT_TRUE(mockServer.init("/tmp/localsend_h3_cancel_srv"), "mock server init failed");
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = mockServer.port;
+    peer.info.protocol = "https";
+    peer.info.fingerprint = mockServer.identity.fingerprint();
+
+    QByteArray bigPayload(262144, 'C'); // 256 KiB
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "create temp file failed");
+    tmpFile.write(bigPayload);
+    tmpFile.flush();
+
+    mockServer.holdUpload = true;
+    QString err;
+    bool ok = sm.sendFile(peer, tmpFile.fileName(), &err);
+    ASSERT_TRUE(ok, "sendFile start");
+
+    QTime t;
+    t.start();
+    while (sm.state() != SendManager::State_Uploading && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(sm.state() == SendManager::State_Uploading, "state must reach Uploading");
+    QString activeSessionId = sm.activeSessionId();
+
+    // Cancel locally during active upload
+    sm.cancel();
+    ASSERT_TRUE(sm.state() == SendManager::State_Cancelled, "state must transition to Cancelled");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot must be released immediately on cancel");
+
+    // Pump events for remote cancel HTTP delivery
+    t.restart();
+    while (mockServer.lastCancelSessionId.isEmpty() && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(mockServer.lastCancelSessionId == "https-sess-1",
+                "remote peer must receive cancel request with active sessionId");
+
+    // Recovery test: immediately start a new valid transfer; verify it succeeds completely
+    mockServer.holdUpload = false;
+    TestSendTracker recoveryTracker;
+    QObject::connect(&sm, SIGNAL(sendFinished(QString)), &recoveryTracker, SLOT(onFinished(QString)));
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &recoveryTracker, SLOT(onFailed(QString,QString)));
+
+    QByteArray recoveryPayload(4096, 'R');
+    QTemporaryFile recoveryFile;
+    ASSERT_TRUE(recoveryFile.open(), "recovery file open");
+    recoveryFile.write(recoveryPayload);
+    recoveryFile.flush();
+
+    ok = sm.sendFile(peer, recoveryFile.fileName(), &err);
+    ASSERT_TRUE(ok, "recovery transfer start must succeed");
+
+    t.restart();
+    while (!recoveryTracker.finished && recoveryTracker.failedReason.isEmpty() && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(recoveryTracker.finished, "recovery transfer must finish successfully");
+    ASSERT_TRUE(sm.state() == SendManager::State_Completed, "recovery transfer state must be Completed");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testSendHttpsFailureStatusResponsesH3()
+{
+    TEST_CASE("H3 - Outgoing HTTPS server failure responses (403, 409, 422) map to distinct failure reasons");
+    MockHttpsServer mockServer;
+    ASSERT_TRUE(mockServer.init("/tmp/localsend_h3_fail_srv"), "mock server init failed");
+
+    localsend::Application app;
+    QNetworkAccessManager nam;
+    SendManager sm(&app, &nam);
+
+    PeerDevice peer;
+    peer.address = QHostAddress::LocalHost;
+    peer.info.port = mockServer.port;
+    peer.info.protocol = "https";
+    peer.info.fingerprint = mockServer.identity.fingerprint();
+
+    QTemporaryFile tmpFile;
+    ASSERT_TRUE(tmpFile.open(), "create temp file");
+    tmpFile.write("test_payload");
+    tmpFile.flush();
+
+    // 1. Prepare 403 Forbidden -> Failure_PeerRejected
+    mockServer.prepareStatusCode = 403;
+    TestSendTracker t1;
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &t1, SLOT(onFailed(QString,QString)));
+    sm.sendFile(peer, tmpFile.fileName());
+
+    QTime t;
+    t.start();
+    while (t1.failedReason.isEmpty() && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_PeerRejected, "prepare 403 must yield Failure_PeerRejected");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot released");
+
+    // 2. Prepare 409 Conflict -> Failure_PeerBusy
+    mockServer.prepareStatusCode = 409;
+    TestSendTracker t2;
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &t2, SLOT(onFailed(QString,QString)));
+    sm.sendFile(peer, tmpFile.fileName());
+
+    t.restart();
+    while (t2.failedReason.isEmpty() && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_PeerBusy, "prepare 409 must yield Failure_PeerBusy");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot released");
+
+    // 3. Upload 422 Unprocessable Entity -> Failure_ChecksumMismatch
+    mockServer.prepareStatusCode = 200;
+    mockServer.uploadStatusCode = 422;
+    TestSendTracker t3;
+    QObject::connect(&sm, SIGNAL(sendFailed(QString,QString)), &t3, SLOT(onFailed(QString,QString)));
+    sm.sendFile(peer, tmpFile.fileName());
+
+    t.restart();
+    while (t3.failedReason.isEmpty() && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(sm.failureReason() == SendManager::Failure_ChecksumMismatch,
+                "upload 422 must yield Failure_ChecksumMismatch");
+    ASSERT_TRUE(!app.isTransferActive(), "transfer slot released");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
+class StreamWatcher : public QObject {
+    Q_OBJECT
+public:
+    bool *fin;
+    int *code;
+    qint64 *prog;
+    StreamWatcher(bool *f, int *c, qint64 *p, QObject *parent = 0)
+        : QObject(parent), fin(f), code(c), prog(p) {}
+
+public slots:
+    void onProgress(qint64 done, qint64 total) { Q_UNUSED(total); if (prog) *prog = done; }
+    void onFinished(int c, const QByteArray &b) { Q_UNUSED(b); if (fin) *fin = true; if (code) *code = c; }
+};
+
+void testPosixTlsHttpClientBoundedStreamingH3()
+{
+    TEST_CASE("H3 - PosixTlsHttpClient non-blocking bounded streaming and progress tracking");
+    MockHttpsServer mockServer;
+    ASSERT_TRUE(mockServer.init("/tmp/localsend_h3_client_stream_srv"), "mock server init failed");
+
+    localsend::PosixTlsHttpClient client;
+
+    QByteArray streamData(131072, 'Z'); // 128 KiB
+    QBuffer buffer(&streamData);
+    ASSERT_TRUE(buffer.open(QIODevice::ReadOnly), "buffer open");
+
+    QMap<QString, QString> headers;
+    headers.insert("Content-Type", "application/octet-stream");
+
+    bool finished = false;
+    int respCode = 0;
+    qint64 lastProgress = 0;
+
+    StreamWatcher watcher(&finished, &respCode, &lastProgress);
+
+    QObject::connect(&client, SIGNAL(uploadProgress(qint64,qint64)),
+                     &watcher, SLOT(onProgress(qint64,qint64)));
+    QObject::connect(&client, SIGNAL(finished(int,QByteArray)),
+                     &watcher, SLOT(onFinished(int,QByteArray)));
+
+    bool ok = client.sendStreamRequest("POST", QHostAddress::LocalHost, mockServer.port,
+                                       "/api/localsend/v2/upload",
+                                       mockServer.identity.fingerprint(),
+                                       headers, &buffer, streamData.size(), 5000);
+    ASSERT_TRUE(ok, "sendStreamRequest start");
+
+    QTime t;
+    t.start();
+    while (!finished && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(finished, "client streaming request must complete");
+    ASSERT_TRUE(respCode == 200, "client response code must be 200");
+    ASSERT_TRUE(lastProgress == streamData.size(), "progress must reach total stream size");
+    ASSERT_TRUE(mockServer.receivedUploadData == streamData, "server must receive exact stream bytes");
+
+    mockServer.stop();
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -4722,6 +5335,16 @@ int main(int argc, char **argv)
     testPosixTlsSocketFlushTimeoutAndShutdownH2C();
     testPosixTlsSocketWriteProgressDeadlineH2D();
     testLocalIdentityFifoRejectionH2E();
+
+    // H3 Outgoing HTTPS with Frozen Peer Pin Tests
+    testSendHttpsPeerMissingPinRejectedH3();
+    testSendHttpsPeerInvalidPinFormatH3();
+    testSendHttpsPinMismatchRejectionH3();
+    testSendHttpsSuccessfulUploadAndAckH3();
+    testSendHttpsActivePinStabilityH3();
+    testSendHttpsLocalCancellationAndRemoteCancelH3();
+    testSendHttpsFailureStatusResponsesH3();
+    testPosixTlsHttpClientBoundedStreamingH3();
 
     std::cout << "================================================" << std::endl;
     std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;
