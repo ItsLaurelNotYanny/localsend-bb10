@@ -92,13 +92,14 @@ To calculate the fingerprint of an existing certificate:
 
 ## Running Automated Verification
 
-Run the comprehensive 6-case test suite covering:
-1. Self-signed identity generation, owner-only mode 0600 on keys, `/dev/full` failure rejection, and independent OpenSSL leaf DER SHA-256 fingerprint verification.
+Run the comprehensive 7-case test suite covering:
+1. Self-signed identity generation, owner-only mode 0600 on keys, `/dev/full` failure rejection, existing identity preservation on replacement failure, and independent OpenSSL leaf DER SHA-256 fingerprint verification.
 2. Real loopback TCP transfer under TLS 1.3 with SHA-256 payload integrity check.
 3. Single-hex-digit fingerprint tampering rejection (`POSIX_TLS_ERR_PIN_MISMATCH`).
-4. Robustness & edge cases: delayed header handling within deadline, bounded ACK wait timeout, fragmented ACK frame assembly, wrong-digest ACK rejection, temporary file isolation (symlink protection via `mkstemp`), and clean recovery transfer.
+4. Robustness & edge cases: delayed header handling within deadline, bounded ACK wait timeout, fragmented ACK frame assembly, wrong-digest ACK rejection, mid-payload disconnect rejection with temp file cleanup, checksum mismatch rejection with temp cleanup, temporary file isolation (symlink protection via `mkstemp`), and clean recovery transfer.
 5. Socket descriptor ownership verification via `strace` (verifying 0 `EBADF` double-close calls).
-6. Performance benchmark over 5 iterations per payload, system environment reporting, and explicit demarcation of unmeasured device metrics.
+6. Fault injection and backpressure: injected `fsync`/`close` aborts without committing, injected `rename` failure preserves preexisting destination symlink and victim data, injected ACK socket `EPIPE` failure reports non-zero exit (`TRANSFER_COMMITTED_BUT_ACK_FAILED`) and suppresses `TRANSFER_OK` while preserving committed file, and forced write backpressure (`SO_SNDBUF=4096`) triggers nonblocking `EAGAIN` retry with successful transfer and digest match.
+7. Performance benchmark over 5 iterations per payload, host CPU/RAM and RSS memory reporting, ELF section breakdown, and explicit demarcation of unmeasured device metrics.
 
 ```bash
 python3 tests/test_localsend_style.py

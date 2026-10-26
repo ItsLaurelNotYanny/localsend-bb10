@@ -80,14 +80,21 @@ std::string read_file_string(const std::string& path) {
     return ss.str();
 }
 
-bool safe_write_file(const std::string& path, const char* data, size_t len, mode_t mode) {
+bool safe_write_file(const std::string& path, const char* data, size_t len, mode_t mode, bool* created_out = NULL) {
+    if (created_out) *created_out = false;
     if (path.empty()) return false;
-    // O_NOFOLLOW prevents following pre-existing symlinks
-    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, mode);
+    // O_CREAT | O_EXCL rejects preexisting identity files; O_NOFOLLOW prevents symlink traversal
+    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, mode);
     if (fd < 0) return false;
+    if (created_out) *created_out = true;
 
-    // Explicitly enforce mode regardless of ambient umask
-    fchmod(fd, mode);
+    // Explicitly enforce mode regardless of ambient umask and verify result
+    if (fchmod(fd, mode) != 0) {
+        close(fd);
+        unlink(path.c_str());
+        if (created_out) *created_out = false;
+        return false;
+    }
 
     size_t written = 0;
     while (written < len) {
@@ -96,6 +103,7 @@ bool safe_write_file(const std::string& path, const char* data, size_t len, mode
             if (n < 0 && (errno == EINTR || errno == EAGAIN)) continue;
             close(fd);
             unlink(path.c_str());
+            if (created_out) *created_out = false;
             return false;
         }
         written += static_cast<size_t>(n);
@@ -103,10 +111,12 @@ bool safe_write_file(const std::string& path, const char* data, size_t len, mode
     if (fsync(fd) < 0) {
         close(fd);
         unlink(path.c_str());
+        if (created_out) *created_out = false;
         return false;
     }
     if (close(fd) < 0) {
         unlink(path.c_str());
+        if (created_out) *created_out = false;
         return false;
     }
     return true;
@@ -227,8 +237,11 @@ int cmd_generate_identity(int argc, char** argv) {
         return 1;
     }
 
+    bool cert_created = false;
+    bool key_created = false;
+
     // Safely write certificate with mode 0644
-    if (!safe_write_file(cert_file, cert_pem, cert_len, 0644)) {
+    if (!safe_write_file(cert_file, cert_pem, cert_len, 0644, &cert_created)) {
         std::cerr << "Error: failed to write certificate to " << cert_file << " (" << ::strerror(errno) << ")" << std::endl;
         posix_tls_free_string(cert_pem);
         posix_tls_free_string(key_pem);
@@ -236,9 +249,9 @@ int cmd_generate_identity(int argc, char** argv) {
     }
 
     // Safely write private key with owner-only mode 0600
-    if (!safe_write_file(key_file, key_pem, key_len, 0600)) {
+    if (!safe_write_file(key_file, key_pem, key_len, 0600, &key_created)) {
         std::cerr << "Error: failed to write private key to " << key_file << " (" << ::strerror(errno) << ")" << std::endl;
-        unlink(cert_file.c_str());
+        if (cert_created) unlink(cert_file.c_str());
         posix_tls_free_string(cert_pem);
         posix_tls_free_string(key_pem);
         return 1;
@@ -251,8 +264,8 @@ int cmd_generate_identity(int argc, char** argv) {
 
     if (rc != POSIX_TLS_OK) {
         std::cerr << "Error calculating certificate fingerprint: " << posix_tls_strerror(rc) << std::endl;
-        unlink(cert_file.c_str());
-        unlink(key_file.c_str());
+        if (cert_created) unlink(cert_file.c_str());
+        if (key_created) unlink(key_file.c_str());
         return 1;
     }
 
@@ -526,15 +539,32 @@ int cmd_server(int argc, char** argv) {
             break;
         }
     }
-    fsync(tmp_fd);
-    close(tmp_fd);
-
     if (aborted || received_bytes != expected_bytes) {
+        close(tmp_fd);
         unlink(tmp_output.c_str());
         posix_tls_shutdown(conn);
         posix_tls_connection_destroy(conn);
         posix_tls_context_destroy(ctx);
         return 4; // Transfer aborted / disconnected
+    }
+
+    if (fsync(tmp_fd) != 0) {
+        std::cerr << "Error syncing temporary file: " << ::strerror(errno) << std::endl;
+        close(tmp_fd);
+        unlink(tmp_output.c_str());
+        posix_tls_shutdown(conn);
+        posix_tls_connection_destroy(conn);
+        posix_tls_context_destroy(ctx);
+        return 1;
+    }
+
+    if (close(tmp_fd) != 0) {
+        std::cerr << "Error closing temporary file: " << ::strerror(errno) << std::endl;
+        unlink(tmp_output.c_str());
+        posix_tls_shutdown(conn);
+        posix_tls_connection_destroy(conn);
+        posix_tls_context_destroy(ctx);
+        return 1;
     }
 
     // Verify SHA-256 of received file
@@ -552,13 +582,7 @@ int cmd_server(int argc, char** argv) {
         return 3;
     }
 
-    // If destination output_file exists and is a symlink, unlink it so output is guaranteed a regular file
-    struct stat st;
-    if (lstat(output_file.c_str(), &st) == 0 && S_ISLNK(st.st_mode)) {
-        unlink(output_file.c_str());
-    }
-
-    // Atomic commit to target output file
+    // Atomic commit to target output file (POSIX rename atomically overwrites destination symlink without following)
     if (std::rename(tmp_output.c_str(), output_file.c_str()) != 0) {
         std::cerr << "Error renaming temporary file to " << output_file << ": " << ::strerror(errno) << std::endl;
         unlink(tmp_output.c_str());
@@ -572,7 +596,11 @@ int cmd_server(int argc, char** argv) {
     std::string ack = "OK: SHA256 MATCH " + std::string(actual_sha256) + "\n";
     rc = write_all_tls(conn, client_fd, reinterpret_cast<const unsigned char*>(ack.data()), ack.size(), timeout_ms);
     if (rc != POSIX_TLS_OK) {
-        std::cerr << "Warning: failed to deliver ACK to client (rc=" << rc << ")" << std::endl;
+        std::cerr << "TRANSFER_COMMITTED_BUT_ACK_FAILED reason=ack_delivery_failed rc=" << rc << " output=" << output_file << std::endl;
+        posix_tls_shutdown(conn);
+        posix_tls_connection_destroy(conn);
+        posix_tls_context_destroy(ctx);
+        return 5;
     }
 
     std::cout << "TRANSFER_OK bytes=" << received_bytes << " sha256=" << actual_sha256 << " output=" << output_file << std::endl;
