@@ -70,9 +70,11 @@ void Application::setIdentityStorageDirectory(const QString &path)
         m_localInfo.fingerprint = m_identity.fingerprint();
         if (m_settings) {
             m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
+        m_discovery->setLocalIdentity(m_identity);
             m_settings->sync();
         }
         m_discovery->updateLocalInfo(m_localInfo);
+        m_discovery->setLocalIdentity(m_identity);
         emit localInfoChanged(m_localInfo);
     }
 }
@@ -85,6 +87,7 @@ void Application::initSettings()
     if (LocalIdentity::loadOrCreate(idDir, &m_identity, &m_identityInitError)) {
         m_localInfo.fingerprint = m_identity.fingerprint();
         m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
+        m_discovery->setLocalIdentity(m_identity);
     } else {
         QString fp = m_settings->value("device/fingerprint").toString();
         m_localInfo.fingerprint = fp;
@@ -147,6 +150,7 @@ bool Application::start(QString *error)
         }
         m_localInfo.fingerprint = m_identity.fingerprint();
         m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
+        m_discovery->setLocalIdentity(m_identity);
         m_settings->sync();
     }
 

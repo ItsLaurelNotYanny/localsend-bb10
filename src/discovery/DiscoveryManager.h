@@ -11,6 +11,8 @@
 #include <QTimer>
 
 #include "protocol/ProtocolTypes.h"
+#include "security/LocalIdentity.h"
+#include "security/PosixTlsHttpClient.h"
 
 class DiscoveryManager : public QObject {
     Q_OBJECT
@@ -27,6 +29,8 @@ public:
     void refresh();
     void registerPeer(const QHostAddress &address, quint16 port);
     void handleIncomingRegister(const DeviceInfo &info, const QHostAddress &peerAddress);
+
+    void setLocalIdentity(const localsend::LocalIdentity &identity) { m_localIdentity = identity; }
 
     QList<PeerDevice> peers() const;
     PeerDevice findPeer(const QString &fingerprint) const;
@@ -55,9 +59,10 @@ signals:
 private slots:
     void onUdpReadyRead();
     void onRegisterReplyFinished();
+    void onHttpsRegisterFinished(int status, const QByteArray &responseBody);
+    void onHttpsRegisterFailed(int code, const QString &msg);
     void onAnnounceTimeout();
     void onProbeReplyFinished();
-    void onHttpsProbeReplyFinished();
     void pumpScanQueue();
     void cancelSubnetScan();
     void pumpUdpSweep();
@@ -66,11 +71,12 @@ private:
     bool selectPrimaryInterface(QNetworkInterface *outIface, QNetworkAddressEntry *outEntry) const;
     void sendUdpAnnouncement(bool announce);
     void sendHttpRegister(const QHostAddress &address, quint16 port);
+    void sendHttpsRegister(const QHostAddress &address, quint16 port, const QString &pin);
     void startSubnetScan();
-    void probeHttpsHost(const QHostAddress &addr);
     void setSocketBuffers();
     QList<QHostAddress> loadArpCacheIps() const;
 
+    localsend::LocalIdentity m_localIdentity;
     QNetworkAccessManager *m_nam;
     QUdpSocket *m_udpSocket;
     QTimer *m_announceTimer;
@@ -83,6 +89,7 @@ private:
 
     QMap<QString, PeerDevice> m_peers; // Keyed by fingerprint
     QMap<QNetworkReply*, PeerDevice> m_pendingRegisters; // Explicit manual register replies
+    QMap<localsend::PosixTlsHttpClient*, PeerDevice> m_pendingHttpsRegisters; // Outgoing HTTPS register requests
 
     // Historical peers and prioritized targets
     QList<QHostAddress> m_historicalPeers;
@@ -95,7 +102,6 @@ private:
     bool m_isScanning;
     QList<QHostAddress> m_scanQueue;
     QMap<QNetworkReply*, QHostAddress> m_activeProbes;
-    QMap<QNetworkReply*, QHostAddress> m_activeHttpsProbes;
 };
 
 #endif // DISCOVERY_MANAGER_H

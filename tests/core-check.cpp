@@ -4819,6 +4819,22 @@ public slots:
                 }
                 sock->write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                 sock->flush();
+            } else if (path.startsWith("/api/localsend/v2/register")) {
+                DeviceInfo regInfo;
+                QString rErr;
+                ProtocolJson::decodeRegisterRequest(buf.left(expected), &regInfo, &rErr);
+                DeviceInfo myInfo;
+                myInfo.alias = "Mock HTTPS Host";
+                myInfo.deviceModel = "QNX BB10";
+                myInfo.fingerprint = identity.fingerprint();
+                myInfo.port = port;
+                myInfo.protocol = "https";
+                myInfo.version = "2.2";
+                QByteArray resBody = ProtocolJson::encodeDeviceResponse(myInfo, &rErr);
+                QByteArray reply = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: "
+                                 + QByteArray::number(resBody.size()) + "\r\n\r\n" + resBody;
+                sock->write(reply);
+                sock->flush();
             }
         }
     }
@@ -5210,6 +5226,24 @@ public slots:
     void onFinished(int c, const QByteArray &b) { Q_UNUSED(b); if (fin) *fin = true; if (code) *code = c; }
 };
 
+class RegisterPeerWatcher : public QObject {
+    Q_OBJECT
+public:
+    bool *called;
+    PeerDevice *outPeer;
+    quint16 port;
+    RegisterPeerWatcher(bool *c, PeerDevice *p, quint16 pt, QObject *parent = 0)
+        : QObject(parent), called(c), outPeer(p), port(pt) {}
+
+public slots:
+    void onPeerUpdated(const PeerDevice &peer) {
+        if (peer.address == QHostAddress::LocalHost && peer.info.port == port) {
+            *called = true;
+            *outPeer = peer;
+        }
+    }
+};
+
 void testPosixTlsHttpClientBoundedStreamingH3()
 {
     TEST_CASE("H3 - PosixTlsHttpClient non-blocking bounded streaming and progress tracking");
@@ -5254,6 +5288,71 @@ void testPosixTlsHttpClientBoundedStreamingH3()
     ASSERT_TRUE(lastProgress == streamData.size(), "progress must reach total stream size");
     ASSERT_TRUE(mockServer.receivedUploadData == streamData, "server must receive exact stream bytes");
 
+    mockServer.stop();
+    TEST_PASS();
+}
+
+void testDiscoveryManagerOutgoingHttpsRegisterH3()
+{
+    TEST_CASE("H3 - DiscoveryManager outgoing HTTPS register with pinned posix-tls and pin verification");
+    MockHttpsServer mockServer;
+    ASSERT_TRUE(mockServer.init("/tmp/localsend_h3_dm_https_srv"), "mock server init failed");
+
+    QNetworkAccessManager nam;
+    DiscoveryManager dm(&nam);
+    DeviceInfo localInfo;
+    localInfo.alias = "Sender Device";
+    localInfo.port = 53317;
+    localInfo.fingerprint = QString(64, '1');
+    dm.start(localInfo);
+
+    // 1. Peer advertised as HTTPS with valid matching pin
+    DeviceInfo peerInfo;
+    peerInfo.alias = "Advertised Peer";
+    peerInfo.port = mockServer.port;
+    peerInfo.protocol = "https";
+    peerInfo.fingerprint = mockServer.identity.fingerprint();
+    dm.handleIncomingRegister(peerInfo, QHostAddress::LocalHost);
+
+    bool peerUpdatedCalled = false;
+    PeerDevice updatedPeer;
+    RegisterPeerWatcher handler(&peerUpdatedCalled, &updatedPeer, mockServer.port);
+    QObject::connect(&dm, SIGNAL(peerUpdated(PeerDevice)), &handler, SLOT(onPeerUpdated(PeerDevice)));
+
+    dm.registerPeer(QHostAddress::LocalHost, mockServer.port);
+
+    QElapsedTimer t;
+    t.start();
+    while (!peerUpdatedCalled && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(1000);
+    }
+
+    ASSERT_TRUE(peerUpdatedCalled, "peerUpdated must be emitted after HTTPS register success");
+    ASSERT_TRUE(updatedPeer.info.alias == "Mock HTTPS Host", "alias received from mock server");
+    ASSERT_TRUE(updatedPeer.info.protocol == "https", "protocol preserved as https");
+
+    // 2. Peer with mismatched pin must reject TLS and NOT fallback to HTTP
+    quint16 altPort = mockServer.port;
+    QString wrongPin = mockServer.identity.fingerprint();
+    wrongPin[0] = (wrongPin[0] == '0') ? '1' : '0';
+    DeviceInfo wrongPeerInfo;
+    wrongPeerInfo.alias = "Mismatch Peer";
+    wrongPeerInfo.port = altPort;
+    wrongPeerInfo.protocol = "https";
+    wrongPeerInfo.fingerprint = wrongPin;
+    dm.handleIncomingRegister(wrongPeerInfo, QHostAddress::LocalHost);
+
+    peerUpdatedCalled = false;
+    dm.registerPeer(QHostAddress::LocalHost, altPort);
+    t.restart();
+    while (t.elapsed() < 500) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(1000);
+    }
+    ASSERT_FALSE(peerUpdatedCalled, "pin mismatch must fail without updating peer");
+
+    dm.stop();
     mockServer.stop();
     TEST_PASS();
 }
@@ -5365,6 +5464,7 @@ int main(int argc, char **argv)
     testSendHttpsLocalCancellationAndRemoteCancelH3();
     testSendHttpsFailureStatusResponsesH3();
     testPosixTlsHttpClientBoundedStreamingH3();
+    testDiscoveryManagerOutgoingHttpsRegisterH3();
 
     std::cout << "================================================" << std::endl;
     std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;

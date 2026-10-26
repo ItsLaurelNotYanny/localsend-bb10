@@ -328,16 +328,109 @@ void DiscoveryManager::registerPeer(const QHostAddress &address, quint16 port)
         m_udpSocket->writeDatagram(dgram, address, port > 0 ? port : DEFAULT_PORT);
     }
 
-    // If peer is already known and uses HTTPS protocol, do not send plaintext HTTP to TLS port
+    // If peer is already known and uses HTTPS protocol, send HTTPS register using frozen pin
     for (QMap<QString, PeerDevice>::const_iterator it = m_peers.begin(); it != m_peers.end(); ++it) {
         if (it.value().address == address && (port == 0 || it.value().info.port == port)) {
             if (it.value().info.protocol.toLower() == "https") {
+                QString pin = it.value().info.fingerprint;
+                if (!pin.isEmpty() && pin.length() == 64) {
+                    sendHttpsRegister(address, port > 0 ? port : it.value().info.port, pin);
+                    return;
+                }
+                // Unknown-pin bootstrap policy: do not send plaintext HTTP to TLS port
                 return;
             }
         }
     }
 
     sendHttpRegister(address, port);
+}
+
+void DiscoveryManager::sendHttpsRegister(const QHostAddress &address, quint16 port, const QString &pin)
+{
+    // Prevent duplicate pending registers to the same endpoint
+    for (QMap<localsend::PosixTlsHttpClient*, PeerDevice>::const_iterator it = m_pendingHttpsRegisters.begin();
+         it != m_pendingHttpsRegisters.end(); ++it) {
+        if (it.value().address == address && it.value().info.port == port) {
+            return;
+        }
+    }
+
+    QString normPin = localsend::LocalIdentity::normalizeFingerprint(pin);
+    if (normPin.isEmpty() || normPin.length() != 64) {
+        qWarning() << "[Discovery] Missing or invalid peer pin for HTTPS register:" << address << port;
+        return;
+    }
+
+    localsend::PosixTlsHttpClient *client = new localsend::PosixTlsHttpClient(m_localIdentity, this);
+    connect(client, SIGNAL(finished(int,QByteArray)), this, SLOT(onHttpsRegisterFinished(int,QByteArray)));
+    connect(client, SIGNAL(failed(int,QString)), this, SLOT(onHttpsRegisterFailed(int,QString)));
+
+    QMap<QString, QString> headers;
+    headers.insert("Content-Type", "application/json");
+
+    QString err;
+    QByteArray body = ProtocolJson::encodeRegisterRequest(m_localInfo, &err);
+    if (body.isEmpty()) {
+        client->deleteLater();
+        return;
+    }
+
+    PeerDevice target;
+    target.address = address;
+    target.info.port = port;
+    target.info.protocol = "https";
+    target.info.fingerprint = normPin;
+    m_pendingHttpsRegisters.insert(client, target);
+
+    if (!client->sendRequest("POST", address, port, "/api/localsend/v2/register", normPin, headers, body, 5000)) {
+        m_pendingHttpsRegisters.remove(client);
+        client->deleteLater();
+    }
+}
+
+void DiscoveryManager::onHttpsRegisterFinished(int status, const QByteArray &responseBody)
+{
+    localsend::PosixTlsHttpClient *client = qobject_cast<localsend::PosixTlsHttpClient*>(sender());
+    if (!client || !m_pendingHttpsRegisters.contains(client)) {
+        return;
+    }
+
+    PeerDevice target = m_pendingHttpsRegisters.take(client);
+    client->deleteLater();
+
+    if (status == 200) {
+        PeerDevice peer;
+        QString err;
+        if (ProtocolJson::decodeRegisterResponse(responseBody, target, &peer, &err)) {
+            if (peer.info.fingerprint != m_localInfo.fingerprint) {
+                peer.lastSeen = QDateTime::currentDateTime();
+                m_peers.insert(peer.info.fingerprint, peer);
+                qDebug() << "[Discovery] Peer updated via HTTPS register:" << peer.info.alias
+                         << "(" << peer.info.deviceModel << ")"
+                         << target.address.toString() << ":" << peer.info.port << "protocol:" << peer.info.protocol;
+                emit peerUpdated(peer);
+            }
+        } else {
+            qWarning() << "[Discovery] HTTPS register response decode failed:" << err;
+        }
+    } else {
+        qWarning() << "[Discovery] HTTPS register returned non-200 status:" << status;
+    }
+}
+
+void DiscoveryManager::onHttpsRegisterFailed(int code, const QString &msg)
+{
+    localsend::PosixTlsHttpClient *client = qobject_cast<localsend::PosixTlsHttpClient*>(sender());
+    if (!client || !m_pendingHttpsRegisters.contains(client)) {
+        return;
+    }
+
+    PeerDevice target = m_pendingHttpsRegisters.take(client);
+    client->deleteLater();
+
+    qWarning() << "[Discovery] Outgoing HTTPS register failed code:" << code << "msg:" << msg
+               << "target:" << target.address.toString() << ":" << target.info.port;
 }
 
 void DiscoveryManager::sendHttpRegister(const QHostAddress &address, quint16 port)
@@ -414,15 +507,8 @@ void DiscoveryManager::onRegisterReplyFinished()
             }
         }
 
-        // If HTTP register failed due to TLS handshake/protocol mismatch, probe HTTPS fallback
-        if (reply->error() == QNetworkReply::RemoteHostClosedError ||
-            reply->error() == QNetworkReply::ProtocolUnknownError ||
-            reply->error() == QNetworkReply::SslHandshakeFailedError) {
-            probeHttpsHost(target.address);
-        } else {
-            // Fallback to multicast response with announce:false
-            sendUdpAnnouncement(false);
-        }
+        // Fallback to multicast response with announce:false
+        sendUdpAnnouncement(false);
         reply->deleteLater();
         return;
     }
@@ -931,17 +1017,6 @@ void DiscoveryManager::cancelSubnetScan()
         }
     }
 
-    QList<QNetworkReply*> httpsReplies = m_activeHttpsProbes.keys();
-    m_activeHttpsProbes.clear();
-    for (int i = 0; i < httpsReplies.size(); ++i) {
-        QNetworkReply *reply = httpsReplies.at(i);
-        if (reply) {
-            reply->disconnect(this);
-            reply->abort();
-            reply->deleteLater();
-        }
-    }
-
     if (m_isScanning) {
         m_isScanning = false;
         emit scanningChanged(false);
@@ -954,7 +1029,7 @@ void DiscoveryManager::pumpUdpSweep()
         if (m_udpSweepTimer) {
             m_udpSweepTimer->stop();
         }
-        if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
+        if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty()) {
             if (m_scanDeadlineTimer) {
                 m_scanDeadlineTimer->stop();
             }
@@ -1035,7 +1110,7 @@ void DiscoveryManager::pumpUdpSweep()
             m_udpSweepTimer->stop();
         }
         qDebug() << "[Discovery] UDP sweep completed successfully";
-        if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty()) {
+        if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty()) {
             if (m_scanDeadlineTimer) {
                 m_scanDeadlineTimer->stop();
             }
@@ -1101,7 +1176,7 @@ void DiscoveryManager::pumpScanQueue()
         }
     }
 
-    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty() && m_udpSweepQueue.isEmpty()) {
+    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_udpSweepQueue.isEmpty()) {
         if (m_scanDeadlineTimer) {
             m_scanDeadlineTimer->stop();
         }
@@ -1152,110 +1227,10 @@ void DiscoveryManager::onProbeReplyFinished()
             }
         }
     } else {
-        // If HTTP probe failed, route fallback UDP announcement through paced sweep queue (P2)
-        // avoiding sudden unpaced UDP bursts when concurrent probes time out simultaneously.
         queueUdpSweepTarget(targetAddr);
-
-        // If HTTP failed (e.g. RemoteHostClosedError or TLS reset on port 53317), probe HTTPS as fallback
-        if (reply->error() == QNetworkReply::RemoteHostClosedError ||
-            reply->error() == QNetworkReply::ProtocolUnknownError ||
-            reply->error() == QNetworkReply::SslHandshakeFailedError) {
-            probeHttpsHost(targetAddr);
-        }
     }
 
     reply->deleteLater();
 
     pumpScanQueue();
-}
-
-void DiscoveryManager::probeHttpsHost(const QHostAddress &addr)
-{
-    if (!m_nam) {
-        return;
-    }
-
-    for (QMap<QString, PeerDevice>::const_iterator it = m_peers.begin(); it != m_peers.end(); ++it) {
-        if (it.value().address == addr) {
-            return;
-        }
-    }
-
-    QUrl url;
-    url.setScheme("https");
-    url.setHost(addr.toString());
-    url.setPort(DEFAULT_PORT);
-    url.setPath("/api/localsend/v2/register");
-
-    QNetworkRequest req(url);
-    req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    QString err;
-    QByteArray body = ProtocolJson::encodeRegisterRequest(m_localInfo, &err);
-    if (body.isEmpty()) {
-        return;
-    }
-
-    QNetworkReply *reply = m_nam->post(req, body);
-    if (reply) {
-        reply->ignoreSslErrors();
-        m_activeHttpsProbes.insert(reply, addr);
-        connect(reply, SIGNAL(finished()), this, SLOT(onHttpsProbeReplyFinished()));
-        connect(reply, SIGNAL(sslErrors(QList<QSslError>)), reply, SLOT(ignoreSslErrors()));
-
-        QTimer *timer = new QTimer(reply);
-        timer->setSingleShot(true);
-        connect(timer, SIGNAL(timeout()), reply, SLOT(abort()));
-        timer->start(450);
-    }
-}
-
-void DiscoveryManager::onHttpsProbeReplyFinished()
-{
-    QNetworkReply *reply = qobject_cast<QNetworkReply*>(sender());
-    if (!reply) {
-        return;
-    }
-
-    if (!m_activeHttpsProbes.contains(reply)) {
-        reply->deleteLater();
-        return;
-    }
-
-    QHostAddress targetAddr = m_activeHttpsProbes.take(reply);
-
-    if (reply->error() == QNetworkReply::NoError) {
-        int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-        if (statusCode == 200) {
-            QByteArray respData = reply->readAll();
-            PeerDevice target;
-            target.address = targetAddr;
-            target.info.port = DEFAULT_PORT;
-            target.info.protocol = "https";
-
-            PeerDevice peer;
-            QString err;
-            if (ProtocolJson::decodeRegisterResponse(respData, target, &peer, &err)) {
-                if (peer.info.fingerprint != m_localInfo.fingerprint) {
-                    peer.info.protocol = "https";
-                    addHistoricalPeer(peer.address);
-                    m_peers.insert(peer.info.fingerprint, peer);
-                    emit peerUpdated(peer);
-                }
-            }
-        }
-    }
-
-    reply->deleteLater();
-
-    if (m_scanQueue.isEmpty() && m_activeProbes.isEmpty() && m_activeHttpsProbes.isEmpty() && m_udpSweepQueue.isEmpty()) {
-        if (m_scanDeadlineTimer) {
-            m_scanDeadlineTimer->stop();
-        }
-        if (m_isScanning) {
-            m_isScanning = false;
-            m_udpSweepAttempts.clear();
-            emit scanningChanged(false);
-        }
-    }
 }
