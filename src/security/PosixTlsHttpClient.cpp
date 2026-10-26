@@ -590,14 +590,20 @@ bool PosixTlsHttpClient::decodeChunkedBody(const QByteArray &input, QByteArray *
 
         if (chunkSize == 0) {
             // Final chunk: must be followed by CRLF or LF (empty line) or trailer fields ending with empty line
+            if (pos >= inputSize) {
+                return true; // Delimiter/trailer has not arrived yet, wait for more data
+            }
+
             if (pos + 1 < inputSize && input.at(static_cast<int>(pos)) == '\r' && input.at(static_cast<int>(pos) + 1) == '\n') {
                 if (complete) *complete = true;
                 return true;
-            } else if (pos < inputSize && input.at(static_cast<int>(pos)) == '\n') {
+            } else if (input.at(static_cast<int>(pos)) == '\n') {
                 if (complete) *complete = true;
                 return true;
+            } else if (pos + 1 == inputSize && input.at(static_cast<int>(pos)) == '\r') {
+                return true; // Partial CRLF terminator: wait for \n
             } else {
-                // Check for trailers ending with \r\n\r\n or \n\n
+                // Trailer fields ending with \r\n\r\n or \n\n
                 int trailerEnd = input.indexOf("\r\n\r\n", static_cast<int>(pos));
                 if (trailerEnd >= 0) {
                     if (complete) *complete = true;
@@ -608,8 +614,7 @@ bool PosixTlsHttpClient::decodeChunkedBody(const QByteArray &input, QByteArray *
                     if (complete) *complete = true;
                     return true;
                 }
-                // Lacks the complete ending / trailer terminator
-                return false;
+                return true; // Incomplete trailer fields, wait for more data
             }
         }
 
@@ -635,6 +640,8 @@ bool PosixTlsHttpClient::decodeChunkedBody(const QByteArray &input, QByteArray *
             pos += 2;
         } else if (input.at(static_cast<int>(pos)) == '\n') {
             pos += 1;
+        } else if (pos + 1 == inputSize && input.at(static_cast<int>(pos)) == '\r') {
+            return true; // Partial CRLF separator: wait for \n
         } else {
             return false; // Invalid chunk data separator
         }
