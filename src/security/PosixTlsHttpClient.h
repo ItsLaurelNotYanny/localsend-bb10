@@ -34,6 +34,9 @@ public:
         State_Aborted
     };
 
+    static const int MAX_HEADER_SIZE = 65536;           // 64 KiB header limit
+    static const int MAX_RESPONSE_BODY_SIZE = 4194304;  // 4 MiB response limit
+
     explicit PosixTlsHttpClient(const LocalIdentity &identity = LocalIdentity(), QObject *parent = 0);
     virtual ~PosixTlsHttpClient();
 
@@ -113,6 +116,7 @@ private:
     qint64 m_contentLength;
     bool m_headersParsed;
     bool m_chunkedResponse;
+    bool m_pumpingStream;
 
     int m_lastTlsError;
     QString m_errorString;

@@ -34,6 +34,7 @@ PosixTlsHttpClient::PosixTlsHttpClient(const LocalIdentity &identity, QObject *p
     , m_contentLength(-1)
     , m_headersParsed(false)
     , m_chunkedResponse(false)
+    , m_pumpingStream(false)
     , m_lastTlsError(POSIX_TLS_OK)
 {
     m_timer->setSingleShot(true);
@@ -131,6 +132,7 @@ bool PosixTlsHttpClient::sendStreamRequest(const QString &method,
     m_contentLength = -1;
     m_headersParsed = false;
     m_chunkedResponse = false;
+    m_pumpingStream = false;
     m_lastTlsError = POSIX_TLS_OK;
     m_errorString.clear();
     m_peerFingerprint.clear();
@@ -235,8 +237,10 @@ void PosixTlsHttpClient::onSocketEncrypted()
             finishError(POSIX_TLS_ERR_IO_FAILED, "Failed to write HTTP request to socket");
             return;
         }
-        m_socket->flush();
-        m_state = State_AwaitingResponse;
+        if (m_state == State_Sending && m_socket) {
+            m_socket->flush();
+            m_state = State_AwaitingResponse;
+        }
     } else {
         // Streaming request: send header first, then stream body
         qint64 written = m_socket->write(headerBlock);
@@ -244,18 +248,22 @@ void PosixTlsHttpClient::onSocketEncrypted()
             finishError(POSIX_TLS_ERR_IO_FAILED, "Failed to write HTTP headers to socket");
             return;
         }
-        pumpStream();
+        if (m_state == State_Sending && m_socket) {
+            pumpStream();
+        }
     }
 }
 
 void PosixTlsHttpClient::pumpStream()
 {
-    if (!m_bodyStream || m_state != State_Sending || !m_socket) {
+    if (m_pumpingStream || !m_bodyStream || m_state != State_Sending || !m_socket) {
         return;
     }
 
+    m_pumpingStream = true;
+
     const qint64 CHUNK_SIZE = 65536; // 64 KiB bounded chunks
-    while (m_bodyBytesWritten < m_bodySize &&
+    while (m_state == State_Sending && m_socket && m_bodyBytesWritten < m_bodySize &&
            m_socket->bytesToWrite() < PosixTlsSocket::MAX_WRITE_BUFFER_CAP) {
         qint64 toRead = qMin(CHUNK_SIZE, m_bodySize - m_bodyBytesWritten);
         QByteArray chunk = m_bodyStream->read(toRead);
@@ -265,6 +273,7 @@ void PosixTlsHttpClient::pumpStream()
 
         qint64 written = m_socket->write(chunk);
         if (written < 0) {
+            m_pumpingStream = false;
             finishError(POSIX_TLS_ERR_IO_FAILED, "Socket write failure during streaming upload");
             return;
         }
@@ -272,16 +281,24 @@ void PosixTlsHttpClient::pumpStream()
         m_bodyBytesWritten += chunk.size();
         emit uploadProgress(m_bodyBytesWritten, m_bodySize);
 
+        // Upload progress slot may invoke abort() or finish
+        if (m_state != State_Sending || !m_socket) {
+            m_pumpingStream = false;
+            return;
+        }
+
         // Reset inactivity timer on progress
         if (m_timer && m_timer->isActive()) {
             m_timer->start(30000);
         }
     }
 
-    if (m_bodyBytesWritten >= m_bodySize) {
+    if (m_state == State_Sending && m_socket && m_bodyBytesWritten >= m_bodySize) {
         m_socket->flush();
         m_state = State_AwaitingResponse;
     }
+
+    m_pumpingStream = false;
 }
 
 void PosixTlsHttpClient::onSocketBytesWritten(qint64 bytes)
@@ -313,7 +330,15 @@ void PosixTlsHttpClient::parseResponse()
         }
 
         if (headerEnd < 0) {
+            if (m_readBuffer.size() > MAX_HEADER_SIZE) {
+                finishError(POSIX_TLS_ERR_IO_FAILED, "HTTP response headers exceed maximum allowable size (64 KiB)");
+            }
             return; // Headers not complete yet
+        }
+
+        if (headerEnd > MAX_HEADER_SIZE) {
+            finishError(POSIX_TLS_ERR_IO_FAILED, "HTTP response headers exceed maximum allowable size (64 KiB)");
+            return;
         }
 
         QByteArray headerBytes = m_readBuffer.left(headerEnd);
@@ -341,6 +366,23 @@ void PosixTlsHttpClient::parseResponse()
             return;
         }
 
+        // Handle 1xx informational responses (e.g. 100 Continue):
+        // Discard 1xx interim status and re-parse remainder for the final response.
+        if (m_statusCode >= 100 && m_statusCode < 200) {
+            m_readBuffer = m_responseBody;
+            m_responseBody.clear();
+            m_statusCode = 0;
+            m_statusText.clear();
+            m_responseHeaders.clear();
+            m_headersParsed = false;
+            m_contentLength = -1;
+            m_chunkedResponse = false;
+            if (!m_readBuffer.isEmpty()) {
+                parseResponse();
+            }
+            return;
+        }
+
         // Parse headers
         for (int i = 1; i < lines.size(); ++i) {
             const QString &line = lines.at(i);
@@ -359,12 +401,22 @@ void PosixTlsHttpClient::parseResponse()
         }
 
         m_headersParsed = true;
+
+        if (m_contentLength > MAX_RESPONSE_BODY_SIZE) {
+            finishError(POSIX_TLS_ERR_IO_FAILED, "HTTP response Content-Length exceeds allowable limit (4 MiB)");
+            return;
+        }
     } else {
         // Headers already parsed, m_readBuffer has extra body data
         if (!m_readBuffer.isEmpty()) {
             m_responseBody.append(m_readBuffer);
             m_readBuffer.clear();
         }
+    }
+
+    if (m_responseBody.size() > MAX_RESPONSE_BODY_SIZE) {
+        finishError(POSIX_TLS_ERR_IO_FAILED, "HTTP response body exceeds allowable limit (4 MiB)");
+        return;
     }
 
     // Check completion condition

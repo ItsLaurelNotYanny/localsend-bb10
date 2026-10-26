@@ -334,8 +334,12 @@ void SendManager::onPrepareReplyFinished()
     uploadUrl.setHost(m_peer.address.toString());
     uploadUrl.setPort(m_peer.info.port);
     uploadUrl.setPath("/api/localsend/v2/upload");
-    setUrlQueryString(uploadUrl, QString("sessionId=%1&fileId=%2&token=%3")
-        .arg(m_sessionId).arg(m_fileId).arg(m_token));
+    setUrlQueryString(uploadUrl, "sessionId=" +
+        QString::fromLatin1(QUrl::toPercentEncoding(m_sessionId)) +
+        "&fileId=" +
+        QString::fromLatin1(QUrl::toPercentEncoding(m_fileId)) +
+        "&token=" +
+        QString::fromLatin1(QUrl::toPercentEncoding(m_token)));
 
     QNetworkRequest uploadReq(uploadUrl);
     uploadReq.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
@@ -480,8 +484,12 @@ void SendManager::onHttpsPrepareFinished(int status, const QByteArray &body)
         return;
     }
 
-    QString uploadPath = QString("/api/localsend/v2/upload?sessionId=%1&fileId=%2&token=%3")
-        .arg(m_sessionId).arg(m_fileId).arg(m_token);
+    QString uploadPath = "/api/localsend/v2/upload?sessionId=" +
+        QString::fromLatin1(QUrl::toPercentEncoding(m_sessionId)) +
+        "&fileId=" +
+        QString::fromLatin1(QUrl::toPercentEncoding(m_fileId)) +
+        "&token=" +
+        QString::fromLatin1(QUrl::toPercentEncoding(m_token));
 
     QMap<QString, QString> uploadHeaders;
     uploadHeaders.insert("Content-Type", "application/octet-stream");
@@ -700,7 +708,8 @@ void SendManager::sendRemoteCancelHttps(const PeerDevice &peer, const QString &s
     connect(cancelClient, SIGNAL(finished(int,QByteArray)), cancelClient, SLOT(deleteLater()));
     connect(cancelClient, SIGNAL(failed(int,QString)), cancelClient, SLOT(deleteLater()));
 
-    QString cancelPath = QString("/api/localsend/v2/cancel?sessionId=%1").arg(sessionId);
+    QString cancelPath = "/api/localsend/v2/cancel?sessionId=" +
+        QString::fromLatin1(QUrl::toPercentEncoding(sessionId));
     QMap<QString, QString> headers;
     headers.insert("Content-Type", "application/json");
 
@@ -718,7 +727,8 @@ void SendManager::sendRemoteCancel(const PeerDevice &peer, const QString &sessio
     cancelUrl.setHost(peer.address.toString());
     cancelUrl.setPort(peer.info.port);
     cancelUrl.setPath("/api/localsend/v2/cancel");
-    setUrlQueryString(cancelUrl, QString("sessionId=%1").arg(sessionId));
+    setUrlQueryString(cancelUrl, "sessionId=" +
+        QString::fromLatin1(QUrl::toPercentEncoding(sessionId)));
 
     QNetworkRequest req(cancelUrl);
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
