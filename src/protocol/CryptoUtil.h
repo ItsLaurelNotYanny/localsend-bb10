@@ -3,7 +3,6 @@
 
 #include <QString>
 #include <QByteArray>
-#include <openssl/sha.h>
 
 class CryptoUtil {
 public:
@@ -23,9 +22,15 @@ public:
     QString finalHex();
 
 private:
-    SHA256_CTX m_ctx;
+    unsigned int m_state[8];
+    unsigned long long m_bitLen;
+    unsigned char m_buffer[64];
+    unsigned int m_bufferLen;
     bool m_finalized;
     QString m_digest;
+
+    void transform(const unsigned char block[64]);
 };
 
 #endif // CRYPTO_UTIL_H
+

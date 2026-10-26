@@ -67,12 +67,16 @@ check_privacy_boundaries() {
 
 run "privacy-boundary-check" check_privacy_boundaries
 
+POSIX_TLS_HOST_SDK="$(cd ../posix-tls/build/sdk-host && pwd)"
+
 if [ "$FAST" -eq 1 ]; then
-    run "build-host-tests" docker run --rm -v "$(pwd):/workspace:z" "$CONTAINER_IMAGE" bash -c "cd /workspace/tests && qmake && make -j\$(nproc)"
+    run "build-host-tests" docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$(pwd):/workspace:z" -v "${POSIX_TLS_HOST_SDK}:/sdk-host:ro" "$CONTAINER_IMAGE" bash -c "cd /workspace/tests && qmake POSIX_TLS_SDK_DIR=/sdk-host && make -j\$(nproc)"
+    run "build-qnx-armv7" bash scripts/build_qnx.sh
     run "build-localsend-style" bash examples/localsend-style/scripts/build_host.sh
 else
-    run "build-host-tests" docker run --rm -v "$(pwd):/workspace:z" "$CONTAINER_IMAGE" bash -c "cd /workspace/tests && qmake && make -j\$(nproc)"
-    run "run-host-tests" docker run --rm -v "$(pwd):/workspace:z" "$CONTAINER_IMAGE" bash -c "cd /workspace/tests && ./core-check"
+    run "build-host-tests" docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$(pwd):/workspace:z" -v "${POSIX_TLS_HOST_SDK}:/sdk-host:ro" "$CONTAINER_IMAGE" bash -c "cd /workspace/tests && qmake POSIX_TLS_SDK_DIR=/sdk-host && make -j\$(nproc)"
+    run "run-host-tests" docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$(pwd):/workspace:z" -v "${POSIX_TLS_HOST_SDK}:/sdk-host:ro" "$CONTAINER_IMAGE" bash -c "cd /workspace/tests && ./core-check"
+    run "build-and-verify-qnx-armv7" bash scripts/build_qnx.sh
     run "run-localsend-style-gate" bash examples/localsend-style/check.sh
 fi
 

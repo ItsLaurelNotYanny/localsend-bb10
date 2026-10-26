@@ -27,16 +27,23 @@ Run the standard project gate before commits and releases:
 ./check.sh
 ```
 
-All 66 core protocol, state-machine, HTTP parser, and discovery unit tests run automatically without external network access.
+All 71 core protocol, state-machine, HTTP parser, discovery, persistent local TLS identity, and non-blocking `PosixTlsSocket` unit tests run automatically without external network access.
 
 ## 2. Cross-Compilation for BlackBerry 10
 
-The project uses `localsend-bb10.pro` and `bar-descriptor.xml` at the repository root.
+The project uses `CMakeLists.txt`, `localsend-bb10.pro`, and `bar-descriptor.xml` at the repository root, linking against the sibling `posix-tls` SDK (`POSIX_TLS_SDK_DIR`).
 
 ### BlackBerry 10 Target Architecture
 - OS Version: BlackBerry 10 OS 10.3.x
 - Architecture: ARMv7le (`armle-v7`)
 - UI Framework: BlackBerry 10 Cascades / Qt 4.8.5
+
+### Verifying QNX ARMv7 Cross-Compilation and Symbol Isolation
+To cross-compile the main `localsend-bb10` executable for QNX ARMv7 and verify that zero private OpenSSL symbols leak into `.dynsym`:
+
+```bash
+./scripts/build_qnx.sh
+```
 
 ### Building the BAR Application Package
 To build and package the native application into a deployable `.bar` archive:

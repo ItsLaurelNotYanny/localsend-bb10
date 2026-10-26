@@ -1,6 +1,8 @@
 #include "protocol/ProtocolTypes.h"
 #include "protocol/ProtocolJson.h"
 #include "protocol/CryptoUtil.h"
+#include "security/LocalIdentity.h"
+#include "security/PosixTlsSocket.h"
 #include "receive/HttpServer.h"
 #include "receive/HttpConnection.h"
 #include "receive/ReceiveServer.h"
@@ -23,6 +25,12 @@
 #include <cstdlib>
 #include <cassert>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 static int g_testCount = 0;
 static int g_passCount = 0;
@@ -3696,6 +3704,626 @@ void testDiscoveryActiveInterfaceResolutionR025()
     TEST_PASS();
 }
 
+// ==========================================
+// H2 TLS Transport & LocalIdentity Tests
+// ==========================================
+
+class TlsSocketSpy : public QObject {
+    Q_OBJECT
+public:
+    bool encryptedReceived;
+    bool disconnectedReceived;
+    bool errorReceived;
+    int lastErrorCode;
+    QString lastErrorMsg;
+    int readyReadCount;
+    qint64 totalBytesWritten;
+
+    TlsSocketSpy(localsend::PosixTlsSocket *sock, QObject *parent = 0)
+        : QObject(parent)
+        , encryptedReceived(false)
+        , disconnectedReceived(false)
+        , errorReceived(false)
+        , lastErrorCode(POSIX_TLS_OK)
+        , readyReadCount(0)
+        , totalBytesWritten(0)
+    {
+        connect(sock, SIGNAL(encrypted()), this, SLOT(onEncrypted()));
+        connect(sock, SIGNAL(disconnected()), this, SLOT(onDisconnected()));
+        connect(sock, SIGNAL(tlsError(int,QString)), this, SLOT(onTlsError(int,QString)));
+        connect(sock, SIGNAL(readyRead()), this, SLOT(onReadyRead()));
+        connect(sock, SIGNAL(bytesWritten(qint64)), this, SLOT(onBytesWritten(qint64)));
+    }
+
+public slots:
+    void onEncrypted() { encryptedReceived = true; }
+    void onDisconnected() { disconnectedReceived = true; }
+    void onTlsError(int code, const QString &msg) {
+        errorReceived = true;
+        lastErrorCode = code;
+        lastErrorMsg = msg;
+    }
+    void onReadyRead() { readyReadCount++; }
+    void onBytesWritten(qint64 n) { totalBytesWritten += n; }
+};
+
+class RawAcceptServer : public QObject {
+    Q_OBJECT
+public:
+    int listenFd;
+    quint16 port;
+    int acceptedFd;
+    QSocketNotifier *notifier;
+
+    RawAcceptServer(QObject *parent = 0)
+        : QObject(parent), listenFd(-1), port(0), acceptedFd(-1), notifier(0)
+    {
+    }
+
+    ~RawAcceptServer()
+    {
+        closeAll();
+    }
+
+    bool start()
+    {
+        listenFd = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (listenFd < 0) return false;
+        int opt = 1;
+        ::setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        int flags = ::fcntl(listenFd, F_GETFL, 0);
+        ::fcntl(listenFd, F_SETFL, flags | O_NONBLOCK);
+
+        struct sockaddr_in addr;
+        ::memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        addr.sin_port = 0;
+        if (::bind(listenFd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) != 0) {
+            return false;
+        }
+        if (::listen(listenFd, 4) != 0) {
+            return false;
+        }
+        socklen_t len = sizeof(addr);
+        if (::getsockname(listenFd, reinterpret_cast<struct sockaddr*>(&addr), &len) != 0) {
+            return false;
+        }
+        port = ntohs(addr.sin_port);
+        notifier = new QSocketNotifier(listenFd, QSocketNotifier::Read, this);
+        connect(notifier, SIGNAL(activated(int)), this, SLOT(onAccept()));
+        return true;
+    }
+
+    int takeAcceptedFd()
+    {
+        int fd = acceptedFd;
+        acceptedFd = -1;
+        return fd;
+    }
+
+    void closeAll()
+    {
+        if (notifier) {
+            notifier->setEnabled(false);
+            delete notifier;
+            notifier = 0;
+        }
+        if (acceptedFd >= 0) {
+            ::close(acceptedFd);
+            acceptedFd = -1;
+        }
+        if (listenFd >= 0) {
+            ::close(listenFd);
+            listenFd = -1;
+        }
+    }
+
+public slots:
+    void onAccept()
+    {
+        if (acceptedFd >= 0 || listenFd < 0) return;
+        struct sockaddr_in peer;
+        socklen_t len = sizeof(peer);
+        int fd = ::accept(listenFd, reinterpret_cast<struct sockaddr*>(&peer), &len);
+        if (fd >= 0) {
+            acceptedFd = fd;
+            if (notifier) notifier->setEnabled(false);
+        }
+    }
+};
+
+void testLocalIdentityPersistenceAndSecurityH2()
+{
+    TEST_CASE("H2 - LocalIdentity generation, 0600 permissions, fingerprint persistence, and corrupt/partial state rejection");
+
+    QString baseDir = "/tmp/localsend_h2_identity_test";
+    QDir(baseDir).removeRecursively();
+
+    // 1. Fresh generation and permission verification
+    QString dir1 = baseDir + "/fresh";
+    localsend::LocalIdentity id1;
+    QString err;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(dir1, &id1, &err), "fresh loadOrCreate must succeed");
+    ASSERT_TRUE(id1.isValid(), "generated identity must be valid");
+    ASSERT_TRUE(id1.fingerprint().length() == 64, "fingerprint must be 64 hex chars");
+    ASSERT_TRUE(localsend::LocalIdentity::normalizeFingerprint(id1.fingerprint()) == id1.fingerprint(),
+                "fingerprint must be normalized lowercase hex");
+
+    struct stat keySt;
+    ASSERT_TRUE(::stat(QFile::encodeName(id1.keyPath()).constData(), &keySt) == 0, "stat private key must succeed");
+    ASSERT_TRUE((keySt.st_mode & 0777) == 0600, "private key file permissions must be strictly 0600");
+
+    // Verify independent fingerprint calculation matches
+    QString calcErr;
+    QString calcFp = localsend::LocalIdentity::calculateFingerprint(id1.certPem(), &calcErr);
+    ASSERT_TRUE(calcFp == id1.fingerprint(), "calculateFingerprint must match persisted identity fingerprint");
+
+    // 2. Reload from disk preserves exact PEMs and fingerprint
+    localsend::LocalIdentity idReload;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(dir1, &idReload, &err), "reload loadOrCreate must succeed");
+    ASSERT_TRUE(idReload.fingerprint() == id1.fingerprint(), "reloaded fingerprint must be identical");
+    ASSERT_TRUE(idReload.certPem() == id1.certPem(), "reloaded certPem must be identical");
+    ASSERT_TRUE(idReload.keyPem() == id1.keyPem(), "reloaded keyPem must be identical");
+
+    // 3. Fingerprint normalization helper tests
+    QString upperWithColons = id1.fingerprint().toUpper().left(2) + ":" + id1.fingerprint().toUpper().mid(2);
+    ASSERT_TRUE(localsend::LocalIdentity::normalizeFingerprint(upperWithColons) == id1.fingerprint(),
+                "normalizeFingerprint handles uppercase and colons");
+    ASSERT_TRUE(localsend::LocalIdentity::normalizeFingerprint("deadbeef").isEmpty(),
+                "normalizeFingerprint rejects short strings");
+    QString nonHex = id1.fingerprint();
+    nonHex[10] = QChar('g');
+    ASSERT_TRUE(localsend::LocalIdentity::normalizeFingerprint(nonHex).isEmpty(),
+                "normalizeFingerprint rejects non-hex characters");
+
+    // 4. Partial state (missing key) must fail visibly and preserve existing cert
+    QString dirPartial = baseDir + "/partial";
+    QDir().mkpath(dirPartial);
+    QFile partialCert(dirPartial + "/device_cert.pem");
+    ASSERT_TRUE(partialCert.open(QIODevice::WriteOnly), "create partial cert");
+    partialCert.write(id1.certPem());
+    partialCert.close();
+
+    localsend::LocalIdentity idPartial;
+    QString partialErr;
+    ASSERT_FALSE(localsend::LocalIdentity::loadOrCreate(dirPartial, &idPartial, &partialErr),
+                 "partial state (cert without key) must fail");
+    ASSERT_TRUE(partialErr.contains("partial"), "error message reports partial state");
+    ASSERT_TRUE(QFile::exists(dirPartial + "/device_cert.pem"), "existing cert must not be deleted on partial failure");
+    ASSERT_FALSE(QFile::exists(dirPartial + "/device_key.pem"), "key must not be silently generated on partial failure");
+
+    // 5. Insecure key permissions (0644) must fail visibly without overwriting
+    QString dirInsecure = baseDir + "/insecure";
+    localsend::LocalIdentity idInsecureInit;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(dirInsecure, &idInsecureInit, &err), "create insecure test dir");
+    ASSERT_TRUE(::chmod(QFile::encodeName(idInsecureInit.keyPath()).constData(), 0644) == 0, "chmod 0644 key");
+
+    localsend::LocalIdentity idInsecureReload;
+    QString insecureErr;
+    ASSERT_FALSE(localsend::LocalIdentity::loadOrCreate(dirInsecure, &idInsecureReload, &insecureErr),
+                 "group/world readable private key must be rejected");
+    ASSERT_TRUE(insecureErr.contains("0600"), "error message reports required 0600 permissions");
+
+    // Restore 0600 and verify it loads again with the same fingerprint
+    ASSERT_TRUE(::chmod(QFile::encodeName(idInsecureInit.keyPath()).constData(), 0600) == 0, "restore chmod 0600");
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(dirInsecure, &idInsecureReload, &insecureErr),
+                "restoring 0600 allows loading original identity");
+    ASSERT_TRUE(idInsecureReload.fingerprint() == idInsecureInit.fingerprint(),
+                "original identity was preserved without replacement");
+
+    // 6. Mismatched cert and key pair must fail visibly without overwriting
+    QFile mismatchKey(idInsecureInit.keyPath());
+    ASSERT_TRUE(mismatchKey.open(QIODevice::WriteOnly | QIODevice::Truncate), "open key for mismatch");
+    mismatchKey.write(id1.keyPem());
+    mismatchKey.close();
+    ::chmod(QFile::encodeName(idInsecureInit.keyPath()).constData(), 0600);
+
+    localsend::LocalIdentity idMismatch;
+    QString mismatchErr;
+    ASSERT_FALSE(localsend::LocalIdentity::loadOrCreate(dirInsecure, &idMismatch, &mismatchErr),
+                 "mismatched cert and key must fail validation");
+    ASSERT_TRUE(!mismatchErr.isEmpty(), "mismatch error reported");
+
+    QDir(baseDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testPosixTlsSocketLoopbackHandshakeAndTransferH2()
+{
+    TEST_CASE("H2 - PosixTlsSocket non-blocking TLS 1.3 loopback handshake, pinning, and bidirectional transfer");
+
+    QString idDir = "/tmp/localsend_h2_loopback_id";
+    QDir(idDir).removeRecursively();
+    localsend::LocalIdentity serverId;
+    QString err;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(idDir, &serverId, &err), "server identity creation failed");
+
+    posix_tls_context_t *serverCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    ASSERT_TRUE(serverCtx != 0, "serverCtx create");
+    ASSERT_TRUE(posix_tls_context_set_credentials(serverCtx,
+                    serverId.certPem().constData(), static_cast<size_t>(serverId.certPem().size()),
+                    serverId.keyPem().constData(), static_cast<size_t>(serverId.keyPem().size())) == POSIX_TLS_OK,
+                "serverCtx set credentials");
+
+    posix_tls_context_t *clientCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    ASSERT_TRUE(clientCtx != 0, "clientCtx create");
+    QByteArray pinAscii = serverId.fingerprint().toLatin1();
+    ASSERT_TRUE(posix_tls_context_set_expected_fingerprint(clientCtx, pinAscii.constData()) == POSIX_TLS_OK,
+                "clientCtx set expected fingerprint");
+
+    RawAcceptServer rawServer;
+    ASSERT_TRUE(rawServer.start(), "rawServer start");
+
+    localsend::PosixTlsSocket clientSock(clientCtx);
+    TlsSocketSpy clientSpy(&clientSock);
+    ASSERT_TRUE(clientSock.connectToHostEncrypted(QHostAddress::LocalHost, rawServer.port),
+                "client connectToHostEncrypted start");
+
+    QTime t;
+    t.start();
+    while (rawServer.acceptedFd < 0 && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(rawServer.acceptedFd >= 0, "server accepted TCP connection");
+
+    localsend::PosixTlsSocket serverSock(serverCtx);
+    TlsSocketSpy serverSpy(&serverSock);
+    ASSERT_TRUE(serverSock.startServerEncryption(rawServer.takeAcceptedFd()),
+                "server startServerEncryption");
+
+    t.restart();
+    while ((!clientSpy.encryptedReceived || !serverSpy.encryptedReceived) &&
+           !clientSpy.errorReceived && !serverSpy.errorReceived && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(clientSpy.encryptedReceived && serverSpy.encryptedReceived, "both client and server must complete TLS handshake");
+    ASSERT_TRUE(clientSock.negotiatedTlsVersion() == "TLSv1.3", "negotiated protocol must be TLSv1.3");
+    ASSERT_TRUE(serverSock.negotiatedTlsVersion() == "TLSv1.3", "server negotiated protocol must be TLSv1.3");
+    ASSERT_TRUE(!clientSock.negotiatedCipher().isEmpty(), "negotiated cipher must not be empty");
+    ASSERT_TRUE(clientSock.peerFingerprint() == serverId.fingerprint(), "client peerFingerprint must match server fingerprint");
+
+    // Bidirectional multi-chunk payload transfer
+    QByteArray clientToServer(131072, 0);
+    for (int i = 0; i < clientToServer.size(); ++i) {
+        clientToServer[i] = static_cast<char>((i * 31 + 7) & 0xFF);
+    }
+    QByteArray serverToClient(65536, 0);
+    for (int i = 0; i < serverToClient.size(); ++i) {
+        serverToClient[i] = static_cast<char>((i * 17 + 3) & 0xFF);
+    }
+
+    ASSERT_TRUE(clientSock.write(clientToServer) == clientToServer.size(), "client write 128 KiB");
+    ASSERT_TRUE(serverSock.write(serverToClient) == serverToClient.size(), "server write 64 KiB");
+
+    QByteArray rxByServer;
+    QByteArray rxByClient;
+    t.restart();
+    while ((rxByServer.size() < clientToServer.size() || rxByClient.size() < serverToClient.size()) && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        if (serverSock.bytesAvailable() > 0) {
+            rxByServer.append(serverSock.readAll());
+        }
+        if (clientSock.bytesAvailable() > 0) {
+            rxByClient.append(clientSock.readAll());
+        }
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(rxByServer == clientToServer, "server received exact 128 KiB payload");
+    ASSERT_TRUE(rxByClient == serverToClient, "client received exact 64 KiB payload");
+
+    clientSock.disconnectFromHost();
+    t.restart();
+    while ((!clientSpy.disconnectedReceived || !serverSpy.disconnectedReceived) && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        if (serverSock.bytesAvailable() > 0) rxByServer.append(serverSock.readAll());
+        if (clientSock.bytesAvailable() > 0) rxByClient.append(clientSock.readAll());
+        usleep(2000);
+    }
+    ASSERT_TRUE(clientSpy.disconnectedReceived && serverSpy.disconnectedReceived, "clean TLS shutdown completed on both ends");
+
+    posix_tls_context_destroy(clientCtx);
+    posix_tls_context_destroy(serverCtx);
+    QDir(idDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testPosixTlsSocketPinMismatchRejectionH2()
+{
+    TEST_CASE("H2 - PosixTlsSocket single-hex-digit pin mismatch rejects before any application payload");
+
+    QString idDir = "/tmp/localsend_h2_pinmismatch_id";
+    QDir(idDir).removeRecursively();
+    localsend::LocalIdentity serverId;
+    QString err;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(idDir, &serverId, &err), "server identity creation");
+
+    posix_tls_context_t *serverCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    ASSERT_TRUE(posix_tls_context_set_credentials(serverCtx,
+                    serverId.certPem().constData(), static_cast<size_t>(serverId.certPem().size()),
+                    serverId.keyPem().constData(), static_cast<size_t>(serverId.keyPem().size())) == POSIX_TLS_OK,
+                "serverCtx set credentials");
+
+    // Flip the last hex digit of the expected fingerprint
+    QString wrongPin = serverId.fingerprint();
+    QChar last = wrongPin.at(63);
+    wrongPin[63] = (last == QChar('0')) ? QChar('1') : QChar('0');
+
+    posix_tls_context_t *clientCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    QByteArray wrongPinAscii = wrongPin.toLatin1();
+    ASSERT_TRUE(posix_tls_context_set_expected_fingerprint(clientCtx, wrongPinAscii.constData()) == POSIX_TLS_OK,
+                "clientCtx set tampered fingerprint");
+
+    RawAcceptServer rawServer;
+    ASSERT_TRUE(rawServer.start(), "rawServer start");
+
+    localsend::PosixTlsSocket clientSock(clientCtx);
+    TlsSocketSpy clientSpy(&clientSock);
+    ASSERT_TRUE(clientSock.connectToHostEncrypted(QHostAddress::LocalHost, rawServer.port),
+                "client connectToHostEncrypted start");
+
+    QTime t;
+    t.start();
+    while (rawServer.acceptedFd < 0 && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(rawServer.acceptedFd >= 0, "server accepted TCP connection");
+
+    localsend::PosixTlsSocket serverSock(serverCtx);
+    TlsSocketSpy serverSpy(&serverSock);
+    ASSERT_TRUE(serverSock.startServerEncryption(rawServer.takeAcceptedFd()), "server startServerEncryption");
+
+    t.restart();
+    while (!clientSpy.errorReceived && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(clientSpy.errorReceived, "client must emit tlsError on pin mismatch");
+    ASSERT_FALSE(clientSpy.encryptedReceived, "client must NEVER emit encrypted on pin mismatch");
+    ASSERT_TRUE(clientSock.lastTlsErrorCode() == POSIX_TLS_ERR_PIN_MISMATCH,
+                "error code must be POSIX_TLS_ERR_PIN_MISMATCH");
+    ASSERT_TRUE(clientSock.peerFingerprint() == serverId.fingerprint(),
+                "client records actual peer fingerprint on mismatch");
+    ASSERT_TRUE(clientSock.write("secret-payload", 14) == -1,
+                "writing after pin mismatch failure must be rejected (-1)");
+    ASSERT_TRUE(serverSock.bytesAvailable() == 0,
+                "server must receive 0 application bytes when client rejects pin");
+
+    posix_tls_context_destroy(clientCtx);
+    posix_tls_context_destroy(serverCtx);
+    QDir(idDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testPosixTlsSocketBackpressureAndExactWriteRetryH2()
+{
+    TEST_CASE("H2 - PosixTlsSocket WANT_WRITE exact buffer retry, read buffer cap backpressure, and multi-frame drain");
+
+    QString idDir = "/tmp/localsend_h2_backpressure_id";
+    QDir(idDir).removeRecursively();
+    localsend::LocalIdentity serverId;
+    QString err;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(idDir, &serverId, &err), "server identity creation");
+
+    posix_tls_context_t *serverCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    posix_tls_context_set_credentials(serverCtx,
+        serverId.certPem().constData(), static_cast<size_t>(serverId.certPem().size()),
+        serverId.keyPem().constData(), static_cast<size_t>(serverId.keyPem().size()));
+
+    posix_tls_context_t *clientCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    QByteArray pinAscii = serverId.fingerprint().toLatin1();
+    posix_tls_context_set_expected_fingerprint(clientCtx, pinAscii.constData());
+
+    RawAcceptServer rawServer;
+    ASSERT_TRUE(rawServer.start(), "rawServer start");
+
+    localsend::PosixTlsSocket clientSock(clientCtx);
+    TlsSocketSpy clientSpy(&clientSock);
+    ASSERT_TRUE(clientSock.connectToHostEncrypted(QHostAddress::LocalHost, rawServer.port), "client connect");
+
+    QTime t;
+    t.start();
+    while (rawServer.acceptedFd < 0 && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(rawServer.acceptedFd >= 0, "server accepted");
+
+    int sfd = rawServer.takeAcceptedFd();
+    int cfd = clientSock.socketDescriptor();
+    int smallBuf = 65536;
+    ::setsockopt(sfd, SOL_SOCKET, SO_RCVBUF, &smallBuf, sizeof(smallBuf));
+    ::setsockopt(sfd, SOL_SOCKET, SO_SNDBUF, &smallBuf, sizeof(smallBuf));
+    if (cfd >= 0) {
+        ::setsockopt(cfd, SOL_SOCKET, SO_SNDBUF, &smallBuf, sizeof(smallBuf));
+        ::setsockopt(cfd, SOL_SOCKET, SO_RCVBUF, &smallBuf, sizeof(smallBuf));
+    }
+
+    localsend::PosixTlsSocket serverSock(serverCtx);
+    // Cap server decrypted read buffer at 32 KiB to enforce read backpressure
+    serverSock.setReadBufferSize(32768);
+    TlsSocketSpy serverSpy(&serverSock);
+    ASSERT_TRUE(serverSock.startServerEncryption(sfd), "server startServerEncryption");
+
+    t.restart();
+    while ((!clientSpy.encryptedReceived || !serverSpy.encryptedReceived) && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+    ASSERT_TRUE(clientSpy.encryptedReceived && serverSpy.encryptedReceived, "handshake completed");
+
+    // Queue 768 KiB on client without draining server yet
+    const int payloadSize = 768 * 1024;
+    QByteArray payload(payloadSize, 0);
+    for (int i = 0; i < payloadSize; ++i) {
+        payload[i] = static_cast<char>((i * 73 + 19) & 0xFF);
+    }
+    Sha256Context txSha;
+    txSha.update(payload);
+    QString expectedSha = txSha.finalHex();
+
+    ASSERT_TRUE(clientSock.write(payload) == payloadSize, "client queued 768 KiB payload");
+
+    // Pump event loop without reading from serverSock until server buffer hits 32 KiB cap
+    t.restart();
+    while (serverSock.bytesAvailable() < 32768 && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(1000);
+    }
+
+    ASSERT_TRUE(serverSock.bytesAvailable() == 32768,
+                "server decrypted read buffer must respect 32 KiB readBufferSize cap under backpressure");
+    ASSERT_TRUE(clientSock.wantWriteCount() > 0,
+                "client must encounter POSIX_TLS_ERR_WANT_WRITE under backpressure");
+    ASSERT_TRUE(clientSock.bytesToWrite() > 0,
+                "client must still have pending bytesToWrite while backpressured");
+
+    // Now drain server in chunks; m_drainTimer (onDrainMore) and QSocketNotifier must drain all 768 KiB
+    QByteArray received;
+    received.reserve(payloadSize);
+    t.restart();
+    while (received.size() < payloadSize && t.elapsed() < 5000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        if (serverSock.bytesAvailable() > 0) {
+            received.append(serverSock.read(16384));
+        } else {
+            usleep(1000);
+        }
+    }
+
+    ASSERT_TRUE(received.size() == payloadSize, "all 768 KiB must be drained after backpressure release");
+    Sha256Context rxSha;
+    rxSha.update(received);
+    ASSERT_TRUE(rxSha.finalHex() == expectedSha, "SHA-256 of 768 KiB backpressured transfer must match");
+    ASSERT_TRUE(clientSock.writeRetrySameBufferCount() > 0,
+                "PosixTlsSocket must retry WANT_WRITE with the exact same buffer pointer and length");
+
+    clientSock.abort();
+    serverSock.abort();
+    posix_tls_context_destroy(clientCtx);
+    posix_tls_context_destroy(serverCtx);
+    QDir(idDir).removeRecursively();
+    TEST_PASS();
+}
+
+void testPosixTlsSocketHandshakeDeadlineAndCloseOwnershipH2()
+{
+    TEST_CASE("H2 - PosixTlsSocket handshake deadline timeout, graceful response flush, and single-close fd ownership");
+
+    QString idDir = "/tmp/localsend_h2_deadline_id";
+    QDir(idDir).removeRecursively();
+    localsend::LocalIdentity serverId;
+    QString err;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(idDir, &serverId, &err), "server identity creation");
+
+    posix_tls_context_t *serverCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    posix_tls_context_set_credentials(serverCtx,
+        serverId.certPem().constData(), static_cast<size_t>(serverId.certPem().size()),
+        serverId.keyPem().constData(), static_cast<size_t>(serverId.keyPem().size()));
+
+    posix_tls_context_t *clientCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    QByteArray pinAscii = serverId.fingerprint().toLatin1();
+    posix_tls_context_set_expected_fingerprint(clientCtx, pinAscii.constData());
+
+    // Part 1: Stalled peer triggers handshake timeout within deadline
+    {
+        RawAcceptServer stalledServer;
+        ASSERT_TRUE(stalledServer.start(), "stalledServer start");
+
+        localsend::PosixTlsSocket clientSock(clientCtx);
+        TlsSocketSpy clientSpy(&clientSock);
+        ASSERT_TRUE(clientSock.connectToHostEncrypted(QHostAddress::LocalHost, stalledServer.port, QString(), 200),
+                    "client connect with 200ms deadline");
+
+        QTime t;
+        t.start();
+        while (!clientSpy.errorReceived && t.elapsed() < 1500) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            usleep(5000);
+        }
+
+        ASSERT_TRUE(clientSpy.errorReceived, "stalled handshake must time out and emit tlsError");
+        ASSERT_TRUE(clientSpy.lastErrorMsg.contains("deadline"), "error message must report handshake deadline");
+        ASSERT_TRUE(clientSock.state() == localsend::PosixTlsSocket::State_Error, "socket state must be State_Error");
+    }
+
+    // Part 2: Graceful response flush before close_notify & single-close fd ownership (zero EBADF)
+    {
+        RawAcceptServer rawServer;
+        ASSERT_TRUE(rawServer.start(), "rawServer start");
+
+        localsend::PosixTlsSocket *clientSock = new localsend::PosixTlsSocket(clientCtx);
+        TlsSocketSpy clientSpy(clientSock);
+        ASSERT_TRUE(clientSock->connectToHostEncrypted(QHostAddress::LocalHost, rawServer.port), "client connect");
+
+        QTime t;
+        t.start();
+        while (rawServer.acceptedFd < 0 && t.elapsed() < 2000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            usleep(2000);
+        }
+        int sfd = rawServer.takeAcceptedFd();
+        ASSERT_TRUE(sfd >= 0, "accepted sfd valid");
+
+        localsend::PosixTlsSocket *serverSock = new localsend::PosixTlsSocket(serverCtx);
+        TlsSocketSpy serverSpy(serverSock);
+        ASSERT_TRUE(serverSock->startServerEncryption(sfd), "server startServerEncryption");
+
+        int cfd = clientSock->socketDescriptor();
+        ASSERT_TRUE(cfd >= 0, "client fd valid");
+        ASSERT_TRUE(::fcntl(sfd, F_GETFD) >= 0, "sfd open during handshake");
+        ASSERT_TRUE(::fcntl(cfd, F_GETFD) >= 0, "cfd open during handshake");
+
+        t.restart();
+        while ((!clientSpy.encryptedReceived || !serverSpy.encryptedReceived) && t.elapsed() < 3000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            usleep(2000);
+        }
+        ASSERT_TRUE(clientSpy.encryptedReceived && serverSpy.encryptedReceived, "encrypted");
+
+        // Server writes 64 KiB response and immediately calls disconnectFromHost()
+        QByteArray responseData(65536, 'R');
+        ASSERT_TRUE(serverSock->write(responseData) == responseData.size(), "server write 64 KiB response");
+        serverSock->disconnectFromHost();
+
+        QByteArray clientRead;
+        t.restart();
+        while ((clientRead.size() < responseData.size() || !clientSpy.disconnectedReceived) && t.elapsed() < 3000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            if (clientSock->bytesAvailable() > 0) {
+                clientRead.append(clientSock->readAll());
+            }
+            usleep(2000);
+        }
+
+        ASSERT_TRUE(clientRead == responseData, "client must receive complete 64 KiB response flushed before close_notify");
+        ASSERT_TRUE(clientSpy.disconnectedReceived, "client must observe clean disconnect after close_notify");
+
+        // Both descriptors must already be closed once by posix_tls_connection_destroy
+        errno = 0;
+        ASSERT_TRUE(::fcntl(sfd, F_GETFD) == -1 && errno == EBADF, "sfd must be closed after disconnect");
+        errno = 0;
+        ASSERT_TRUE(::fcntl(cfd, F_GETFD) == -1 && errno == EBADF, "cfd must be closed after disconnect");
+        ASSERT_TRUE(serverSock->socketDescriptor() == -1, "serverSock descriptor reset to -1");
+        ASSERT_TRUE(clientSock->socketDescriptor() == -1, "clientSock descriptor reset to -1");
+
+        // Deleting PosixTlsSocket objects must not attempt a second close
+        delete serverSock;
+        delete clientSock;
+    }
+
+    posix_tls_context_destroy(clientCtx);
+    posix_tls_context_destroy(serverCtx);
+    QDir(idDir).removeRecursively();
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -3781,6 +4409,13 @@ int main(int argc, char **argv)
     testUiControllerTransferActiveNotificationR015();
     testUiControllerMultiFileCandidateSelectionR016();
     testUiControllerCollisionRenamingAndSavedPathR017();
+
+    // H2 TLS Transport & LocalIdentity Tests
+    testLocalIdentityPersistenceAndSecurityH2();
+    testPosixTlsSocketLoopbackHandshakeAndTransferH2();
+    testPosixTlsSocketPinMismatchRejectionH2();
+    testPosixTlsSocketBackpressureAndExactWriteRetryH2();
+    testPosixTlsSocketHandshakeDeadlineAndCloseOwnershipH2();
 
     std::cout << "================================================" << std::endl;
     std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;

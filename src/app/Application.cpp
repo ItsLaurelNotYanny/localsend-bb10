@@ -2,6 +2,7 @@
 
 #include <QUuid>
 #include <QThread>
+#include <QFileInfo>
 
 #include "discovery/DiscoveryManager.h"
 #include "receive/ReceiveServer.h"
@@ -35,17 +36,59 @@ Application::~Application()
     }
 }
 
+QString Application::identityStorageDirectory() const
+{
+    if (!m_identityStorageDir.trimmed().isEmpty()) {
+        return m_identityStorageDir;
+    }
+    if (m_settings) {
+        QString customDir = m_settings->value("security/identityDir").toString().trimmed();
+        if (!customDir.isEmpty()) {
+            return customDir;
+        }
+        QFileInfo fi(m_settings->fileName());
+        QString baseDir = fi.absolutePath();
+        if (!baseDir.isEmpty()) {
+            return baseDir + "/localsend-identity";
+        }
+    }
+    return "data/identity";
+}
+
+void Application::setIdentityStorageDirectory(const QString &path)
+{
+    if (path.trimmed().isEmpty() || m_identityStorageDir == path) {
+        return;
+    }
+    m_identityStorageDir = path;
+    if (m_settings) {
+        m_settings->setValue("security/identityDir", path);
+        m_settings->sync();
+    }
+    m_identityInitError.clear();
+    if (LocalIdentity::loadOrCreate(m_identityStorageDir, &m_identity, &m_identityInitError)) {
+        m_localInfo.fingerprint = m_identity.fingerprint();
+        if (m_settings) {
+            m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
+            m_settings->sync();
+        }
+        m_discovery->updateLocalInfo(m_localInfo);
+        emit localInfoChanged(m_localInfo);
+    }
+}
+
 void Application::initSettings()
 {
-    // 1. Device fingerprint (persisted random identifier)
-    QString fp = m_settings->value("device/fingerprint").toString();
-    if (fp.trimmed().isEmpty()) {
-        fp = QUuid::createUuid().toString();
-        // Remove braces
-        fp.remove('{').remove('}');
-        m_settings->setValue("device/fingerprint", fp);
+    // 1. Device identity (persisted EC P-256 certificate & key + SHA-256 DER fingerprint)
+    m_identityInitError.clear();
+    QString idDir = identityStorageDirectory();
+    if (LocalIdentity::loadOrCreate(idDir, &m_identity, &m_identityInitError)) {
+        m_localInfo.fingerprint = m_identity.fingerprint();
+        m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
+    } else {
+        QString fp = m_settings->value("device/fingerprint").toString();
+        m_localInfo.fingerprint = fp;
     }
-    m_localInfo.fingerprint = fp;
 
     // 2. Device alias
     QString alias = m_settings->value("device/alias").toString();
@@ -93,6 +136,18 @@ bool Application::start(QString *error)
             *error = QString("Configuration storage error (status %1)").arg(m_settings->status());
         }
         return false;
+    }
+
+    if (!m_identityInitError.isEmpty() || !m_identity.isValid()) {
+        if (!LocalIdentity::loadOrCreate(identityStorageDirectory(), &m_identity, &m_identityInitError)) {
+            if (error) {
+                *error = QString("Local TLS identity error: %1").arg(m_identityInitError);
+            }
+            return false;
+        }
+        m_localInfo.fingerprint = m_identity.fingerprint();
+        m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
+        m_settings->sync();
     }
 
     // Ensure receive directory exists

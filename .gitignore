@@ -38,5 +38,7 @@ tests/*.pcap
 # Test scratch
 /tmp/localsend-*
 tests/fixtures/
+data/
+*.pem
 __pycache__/
 *.pyc

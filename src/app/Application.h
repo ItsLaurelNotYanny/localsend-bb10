@@ -9,6 +9,7 @@
 
 #include "protocol/ProtocolTypes.h"
 #include "receive/HttpServer.h"
+#include "security/LocalIdentity.h"
 
 class DiscoveryManager;
 class ReceiveServer;
@@ -34,6 +35,11 @@ public:
     void setReceiveDirectory(const QString &path);
     QString receiveDirectory() const { return m_receiveDirectory; }
 
+    void setIdentityStorageDirectory(const QString &path);
+    QString identityStorageDirectory() const;
+    const LocalIdentity &localIdentity() const { return m_identity; }
+    bool hasValidIdentity() const { return m_identity.isValid(); }
+
     // Shared single active transfer slot management
     bool beginTransfer(const QString &requestId);
     void endTransfer(const QString &requestId);
@@ -55,6 +61,9 @@ private:
     void initSettings();
 
     DeviceInfo m_localInfo;
+    LocalIdentity m_identity;
+    QString m_identityStorageDir;
+    QString m_identityInitError;
     QString m_receiveDirectory;
     QString m_activeTransferId;
 
