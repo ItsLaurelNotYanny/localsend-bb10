@@ -223,6 +223,11 @@ void ReceiveServer::handleRegisterRoute(HttpConnection *conn, const QByteArray &
 
 void ReceiveServer::handlePrepareUploadRoute(HttpConnection *conn, const QByteArray &body)
 {
+    if (conn->peerAddress().isNull()) {
+        conn->respond(403, "text/plain", "Unknown client source address");
+        return;
+    }
+
     PrepareUploadRequest req;
     QString err;
     if (!ProtocolJson::decodePrepareRequest(body, &req, &err)) {
@@ -417,7 +422,7 @@ bool ReceiveServer::beginUpload(const HttpRequestHead &head, int *httpStatus, QS
         return false;
     }
 
-    if (head.peerAddress != m_activeSession.peerAddress) {
+    if (head.peerAddress.isNull() || m_activeSession.peerAddress.isNull() || head.peerAddress != m_activeSession.peerAddress) {
         // Address mismatch
         if (httpStatus) *httpStatus = 403;
         if (error) *error = "Source IP mismatch";
@@ -587,7 +592,8 @@ void ReceiveServer::cancelLocal(const QString &requestId)
 
 void ReceiveServer::handleCancel(const QString &sessionId, const QHostAddress &peer)
 {
-    if (m_activeSession.sessionId == sessionId && m_activeSession.peerAddress == peer) {
+    if (!peer.isNull() && !m_activeSession.peerAddress.isNull() &&
+        m_activeSession.sessionId == sessionId && m_activeSession.peerAddress == peer) {
         QString sessId = m_activeSession.sessionId;
         HttpConnection *conn = m_activeSession.connection;
         cleanupActiveSession(false);

@@ -5457,6 +5457,7 @@ public:
     bool shouldAccept;
     QString requestId;
     QString fileId;
+    QHostAddress peerAddress;
     bool receiveFinishedEmitted;
     QString savedPath;
 
@@ -5465,7 +5466,7 @@ public:
 
 public slots:
     void onIncomingOffer(const QString &reqId, const PeerDevice &peer, const QList<FileMeta> &files) {
-        Q_UNUSED(peer);
+        peerAddress = peer.address;
         offerReceived = true;
         requestId = reqId;
         if (!files.isEmpty()) {
@@ -5668,6 +5669,8 @@ void testReceiveServerHttpsPrepareAndAsyncConsentH4()
     }
 
     ASSERT_TRUE(acceptWatcher.offerReceived, "incomingOffer must be emitted");
+    ASSERT_TRUE(!acceptWatcher.peerAddress.isNull(), "observed source address must not be null");
+    ASSERT_TRUE(acceptWatcher.peerAddress == QHostAddress("127.0.0.1"), "observed source address must be 127.0.0.1");
     ASSERT_TRUE(respWatcher1.finished, "prepare-upload request must complete");
     ASSERT_TRUE(respWatcher1.statusCode == 200, "prepare-upload accept must return 200");
 
@@ -6032,6 +6035,144 @@ void testHttpServerPlaintextFallbackWhenConfiguredH4()
     TEST_PASS();
 }
 
+void testReceiveServerHttpsSourceIpBindingAndCrossSourceIsolationH4A()
+{
+    TEST_CASE("H4-A - Inbound HTTPS peer IP binding, cross-source upload 403, and idempotent cancel isolation");
+    QString idDir = "/tmp/localsend_h4a_ip_bind_id";
+    QString rxDir = "/tmp/localsend_h4a_ip_bind_rx";
+    QDir(idDir).removeRecursively();
+    QDir(rxDir).removeRecursively();
+
+    localsend::Application app;
+    app.setIdentityStorageDirectory(idDir);
+    app.setReceiveDirectory(rxDir);
+    app.setPort(0);
+    QString startErr;
+    ASSERT_TRUE(app.start(&startErr), "app start failed");
+
+    quint16 srvPort = app.httpServer()->serverPort();
+    QString expectedPin = app.localIdentity().fingerprint();
+
+    ReceiveServerOfferWatcher offerWatcher(app.receiveServer(), true);
+    QObject::connect(app.receiveServer(), SIGNAL(incomingOffer(QString,PeerDevice,QList<FileMeta>)),
+                     &offerWatcher, SLOT(onIncomingOffer(QString,PeerDevice,QList<FileMeta>)));
+
+    DeviceInfo clientInfo;
+    clientInfo.alias = "Sender H4-A";
+    clientInfo.fingerprint = QString(64, 'a');
+    clientInfo.port = 53317;
+    clientInfo.protocol = "https";
+
+    QByteArray payload = "hello";
+    QString payloadSha = QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex();
+
+    FileMeta fm;
+    fm.id = "file-h4a-1";
+    fm.fileName = "hello.txt";
+    fm.size = payload.size();
+    fm.sha256 = payloadSha;
+    fm.fileType = "text/plain";
+
+    QString err;
+    QByteArray prepJson = ProtocolJson::encodePrepareRequest(clientInfo, fm, &err);
+
+    localsend::PosixTlsHttpClient client1;
+    ClientResponseWatcher respWatcher1;
+    QObject::connect(&client1, SIGNAL(finished(int,QByteArray)), &respWatcher1, SLOT(onFinished(int,QByteArray)));
+    QObject::connect(&client1, SIGNAL(failed(int,QString)), &respWatcher1, SLOT(onFailed(int,QString)));
+
+    QMap<QString, QString> headers;
+    headers.insert("Content-Type", "application/json");
+    client1.sendRequest("POST", QHostAddress::LocalHost, srvPort,
+                        "/api/localsend/v2/prepare-upload", expectedPin, headers, prepJson, 5000);
+
+    QElapsedTimer t;
+    t.start();
+    while (!respWatcher1.finished && !respWatcher1.failed && t.elapsed() < 3000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(respWatcher1.finished && respWatcher1.statusCode == 200, "prepare-upload accept must return 200");
+    ASSERT_TRUE(offerWatcher.offerReceived, "incomingOffer must be emitted");
+    ASSERT_TRUE(!offerWatcher.peerAddress.isNull(), "observed source address must not be null");
+    ASSERT_TRUE(offerWatcher.peerAddress == QHostAddress("127.0.0.1"), "observed source address must match 127.0.0.1");
+
+    PrepareUploadResponse prepResp;
+    ASSERT_TRUE(ProtocolJson::decodePrepareResponse(respWatcher1.body, &prepResp, &err), "decode prepare response");
+    QString sessionId = prepResp.sessionId;
+    QString token = prepResp.fileTokens.value(fm.id);
+
+    ASSERT_TRUE(app.receiveServer()->hasActiveSession(), "active session must exist");
+
+    // 1. Cross-source cancel with wrong source IP (127.0.0.2) must NOT cancel the session
+    app.receiveServer()->handleCancel(sessionId, QHostAddress("127.0.0.2"));
+    ASSERT_TRUE(app.receiveServer()->hasActiveSession(), "cross-source cancel must leave active session intact");
+    ASSERT_TRUE(app.isTransferActive(), "app transfer slot must remain active after cross-source cancel");
+
+    // 2. Cross-source upload with wrong source IP (127.0.0.2) must be rejected with 403 and NOT consume session
+    HttpRequestHead fakeHead;
+    fakeHead.method = "POST";
+    fakeHead.target = QUrl(QString("/api/localsend/v2/upload?sessionId=%1&fileId=%2&token=%3")
+                           .arg(sessionId).arg(fm.id).arg(token));
+    fakeHead.peerAddress = QHostAddress("127.0.0.2");
+    fakeHead.contentLength = payload.size();
+    fakeHead.isSecure = true;
+
+    int uploadStatus = 0;
+    QString uploadErr;
+    bool beginOk = app.receiveServer()->beginUpload(fakeHead, &uploadStatus, &uploadErr);
+    ASSERT_FALSE(beginOk, "beginUpload from cross-source IP must fail");
+    ASSERT_TRUE(uploadStatus == 403, "beginUpload status must be 403");
+    ASSERT_TRUE(uploadErr.contains("Source IP mismatch"), "error must report source IP mismatch");
+    ASSERT_TRUE(app.receiveServer()->hasActiveSession(), "cross-source upload must not consume session");
+
+    // 3. Wrong-token upload must return 403 and leave session active
+    HttpRequestHead wrongTokenHead = fakeHead;
+    wrongTokenHead.target = QUrl(QString("/api/localsend/v2/upload?sessionId=%1&fileId=%2&token=wrongtoken")
+                                 .arg(sessionId).arg(fm.id));
+    wrongTokenHead.peerAddress = QHostAddress("127.0.0.1");
+    beginOk = app.receiveServer()->beginUpload(wrongTokenHead, &uploadStatus, &uploadErr);
+    ASSERT_FALSE(beginOk, "beginUpload with wrong token must fail");
+    ASSERT_TRUE(uploadStatus == 403, "wrong token status must be 403");
+    ASSERT_TRUE(app.receiveServer()->hasActiveSession(), "wrong token upload must not consume session");
+
+    // 4. Legitimate upload from matching source IP (127.0.0.1) must succeed
+    QBuffer buffer(&payload);
+    ASSERT_TRUE(buffer.open(QIODevice::ReadOnly), "buffer open");
+
+    localsend::PosixTlsHttpClient uploadClient;
+    ClientResponseWatcher uploadRespWatcher;
+    QObject::connect(&uploadClient, SIGNAL(finished(int,QByteArray)), &uploadRespWatcher, SLOT(onFinished(int,QByteArray)));
+    QObject::connect(&uploadClient, SIGNAL(failed(int,QString)), &uploadRespWatcher, SLOT(onFailed(int,QString)));
+
+    QString uploadPath = QString("/api/localsend/v2/upload?sessionId=%1&fileId=%2&token=%3")
+                             .arg(sessionId).arg(fm.id).arg(token);
+
+    QMap<QString, QString> uploadHeaders;
+    uploadHeaders.insert("Content-Type", "application/octet-stream");
+    bool streamOk = uploadClient.sendStreamRequest("POST", QHostAddress::LocalHost, srvPort,
+                                                   uploadPath, expectedPin, uploadHeaders,
+                                                   &buffer, payload.size(), 8000);
+    ASSERT_TRUE(streamOk, "sendStreamRequest start");
+
+    t.restart();
+    while (!uploadRespWatcher.finished && !uploadRespWatcher.failed && t.elapsed() < 5000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(2000);
+    }
+
+    ASSERT_TRUE(uploadRespWatcher.finished, "upload must finish");
+    ASSERT_TRUE(uploadRespWatcher.statusCode == 200, "upload response must be 200 OK");
+    ASSERT_FALSE(app.receiveServer()->hasActiveSession(), "session must be cleared upon successful finish");
+    ASSERT_FALSE(app.isTransferActive(), "transfer slot must be released");
+
+    app.stop();
+    QDir(idDir).removeRecursively();
+    QDir(rxDir).removeRecursively();
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -6150,6 +6291,7 @@ int main(int argc, char **argv)
     testDiscoveryManagerHttpsBroadcastAndFingerprintH4();
     testUiControllerHttpsPeerSupportAndCertManagementH4();
     testHttpServerPlaintextFallbackWhenConfiguredH4();
+    testReceiveServerHttpsSourceIpBindingAndCrossSourceIsolationH4A();
 
     std::cout << "================================================" << std::endl;
     std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;

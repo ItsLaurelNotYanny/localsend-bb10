@@ -24,11 +24,45 @@ bool setFdNonBlocking(int fd)
 
 void queryPeerEndpoint(int fd, QHostAddress *outAddr, quint16 *outPort)
 {
-    struct sockaddr_in peer;
-    socklen_t len = sizeof(peer);
-    if (::getpeername(fd, reinterpret_cast<struct sockaddr*>(&peer), &len) == 0 && peer.sin_family == AF_INET) {
-        if (outAddr) *outAddr = QHostAddress(ntohl(peer.sin_addr.s_addr));
-        if (outPort) *outPort = ntohs(peer.sin_port);
+    struct sockaddr_storage ss;
+    socklen_t len = sizeof(ss);
+    if (::getpeername(fd, reinterpret_cast<struct sockaddr*>(&ss), &len) != 0) {
+        return;
+    }
+
+    if (ss.ss_family == AF_INET) {
+        const struct sockaddr_in *sin = reinterpret_cast<const struct sockaddr_in*>(&ss);
+        if (outAddr) {
+            *outAddr = QHostAddress(ntohl(sin->sin_addr.s_addr));
+        }
+        if (outPort) {
+            *outPort = ntohs(sin->sin_port);
+        }
+    } else if (ss.ss_family == AF_INET6) {
+        const struct sockaddr_in6 *sin6 = reinterpret_cast<const struct sockaddr_in6*>(&ss);
+        bool isV4Mapped = true;
+        for (int i = 0; i < 10; ++i) {
+            if (sin6->sin6_addr.s6_addr[i] != 0) {
+                isV4Mapped = false;
+                break;
+            }
+        }
+        if (isV4Mapped && sin6->sin6_addr.s6_addr[10] == 0xff && sin6->sin6_addr.s6_addr[11] == 0xff) {
+            quint32 ipv4 = (static_cast<quint32>(sin6->sin6_addr.s6_addr[12]) << 24) |
+                           (static_cast<quint32>(sin6->sin6_addr.s6_addr[13]) << 16) |
+                           (static_cast<quint32>(sin6->sin6_addr.s6_addr[14]) << 8)  |
+                           (static_cast<quint32>(sin6->sin6_addr.s6_addr[15]));
+            if (outAddr) {
+                *outAddr = QHostAddress(ipv4);
+            }
+        } else {
+            if (outAddr) {
+                *outAddr = QHostAddress(reinterpret_cast<const struct sockaddr*>(&ss));
+            }
+        }
+        if (outPort) {
+            *outPort = ntohs(sin6->sin6_port);
+        }
     }
 }
 

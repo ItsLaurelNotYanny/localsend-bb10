@@ -21,6 +21,12 @@ HttpConnection::HttpConnection(QTcpSocket *socket, QObject *parent)
         m_tcpSocket->setParent(this);
         m_tcpSocket->setReadBufferSize(MAX_BUFFER_CHUNK);
         m_peerAddress = m_tcpSocket->peerAddress();
+        if (m_peerAddress.protocol() == QAbstractSocket::IPv6Protocol) {
+            quint32 ipv4 = m_peerAddress.toIPv4Address();
+            if (ipv4 != 0) {
+                m_peerAddress = QHostAddress(ipv4);
+            }
+        }
         m_peerPort = m_tcpSocket->peerPort();
         m_head.peerAddress = m_peerAddress;
         m_head.isSecure = false;
@@ -50,6 +56,12 @@ HttpConnection::HttpConnection(localsend::PosixTlsSocket *socket, QObject *paren
         m_tlsSocket->setParent(this);
         m_tlsSocket->setReadBufferSize(MAX_BUFFER_CHUNK);
         m_peerAddress = m_tlsSocket->peerAddress();
+        if (m_peerAddress.protocol() == QAbstractSocket::IPv6Protocol) {
+            quint32 ipv4 = m_peerAddress.toIPv4Address();
+            if (ipv4 != 0) {
+                m_peerAddress = QHostAddress(ipv4);
+            }
+        }
         m_peerPort = m_tlsSocket->peerPort();
         m_head.peerAddress = m_peerAddress;
         m_head.isSecure = true;

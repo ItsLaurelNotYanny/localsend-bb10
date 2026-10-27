@@ -193,7 +193,12 @@ bool Application::start(QString *error)
     }
 
     // Start HTTP server on configured port
-    if (!m_httpServer->listen(QHostAddress::Any, m_localInfo.port, error)) {
+#if QT_VERSION >= 0x050000
+    QHostAddress bindAddr = QHostAddress::AnyIPv4;
+#else
+    QHostAddress bindAddr = QHostAddress::Any;
+#endif
+    if (!m_httpServer->listen(bindAddr, m_localInfo.port, error)) {
         return false;
     }
 
