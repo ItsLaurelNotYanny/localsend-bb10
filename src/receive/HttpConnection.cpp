@@ -16,7 +16,14 @@ HttpConnection::HttpConnection(QTcpSocket *socket, QObject *parent)
     , m_chunkState(Chunk_ReadSize)
     , m_currentChunkSize(0)
     , m_currentChunkRead(0)
+    , m_requestTimer(new QTimer(this))
+    , m_requestTimeoutMs(DEFAULT_REQUEST_TIMEOUT_MS)
+    , m_isUploadStream(false)
 {
+    m_requestTimer->setSingleShot(true);
+    m_requestTimer->setInterval(m_requestTimeoutMs);
+    connect(m_requestTimer, SIGNAL(timeout()), this, SLOT(onRequestTimeout()));
+
     if (m_tcpSocket) {
         m_tcpSocket->setParent(this);
         m_tcpSocket->setReadBufferSize(MAX_BUFFER_CHUNK);
@@ -35,6 +42,10 @@ HttpConnection::HttpConnection(QTcpSocket *socket, QObject *parent)
         connect(m_tcpSocket, SIGNAL(disconnected()), this, SLOT(onSocketDisconnected()));
         connect(m_tcpSocket, SIGNAL(error(QAbstractSocket::SocketError)),
                 this, SLOT(onSocketError(QAbstractSocket::SocketError)));
+
+        if (isOpen()) {
+            m_requestTimer->start();
+        }
     }
 }
 
@@ -51,7 +62,14 @@ HttpConnection::HttpConnection(localsend::PosixTlsSocket *socket, QObject *paren
     , m_chunkState(Chunk_ReadSize)
     , m_currentChunkSize(0)
     , m_currentChunkRead(0)
+    , m_requestTimer(new QTimer(this))
+    , m_requestTimeoutMs(DEFAULT_REQUEST_TIMEOUT_MS)
+    , m_isUploadStream(false)
 {
+    m_requestTimer->setSingleShot(true);
+    m_requestTimer->setInterval(m_requestTimeoutMs);
+    connect(m_requestTimer, SIGNAL(timeout()), this, SLOT(onRequestTimeout()));
+
     if (m_tlsSocket) {
         m_tlsSocket->setParent(this);
         m_tlsSocket->setReadBufferSize(MAX_BUFFER_CHUNK);
@@ -71,6 +89,10 @@ HttpConnection::HttpConnection(localsend::PosixTlsSocket *socket, QObject *paren
         connect(m_tlsSocket, SIGNAL(disconnected()), this, SLOT(onSocketDisconnected()));
         connect(m_tlsSocket, SIGNAL(tlsError(int,QString)),
                 this, SLOT(onTlsError(int,QString)));
+
+        if (isOpen()) {
+            m_requestTimer->start();
+        }
     }
 }
 
@@ -101,6 +123,32 @@ QString HttpConnection::negotiatedTlsVersion() const
 QString HttpConnection::negotiatedCipher() const
 {
     return m_tlsSocket ? m_tlsSocket->negotiatedCipher() : QString();
+}
+
+void HttpConnection::setRequestTimeout(int timeoutMs)
+{
+    m_requestTimeoutMs = timeoutMs;
+    if (m_requestTimer) {
+        m_requestTimer->setInterval(timeoutMs);
+        if (m_requestTimer->isActive()) {
+            m_requestTimer->start();
+        }
+    }
+}
+
+void HttpConnection::stopRequestTimeout()
+{
+    if (m_requestTimer && m_requestTimer->isActive()) {
+        m_requestTimer->stop();
+    }
+}
+
+void HttpConnection::setUploadStream(bool isUpload)
+{
+    m_isUploadStream = isUpload;
+    if (isUpload) {
+        stopRequestTimeout();
+    }
 }
 
 qint64 HttpConnection::bytesAvailable() const
@@ -178,6 +226,7 @@ void HttpConnection::respond(int status, const QByteArray &contentType, const QB
         return;
     }
 
+    stopRequestTimeout();
     m_state = State_Responded;
 
     QByteArray response;
@@ -212,6 +261,7 @@ void HttpConnection::abort()
     if (m_state == State_Closed) {
         return;
     }
+    stopRequestTimeout();
     m_state = State_Closed;
     abortRaw();
     emit disconnected();
@@ -220,6 +270,12 @@ void HttpConnection::abort()
 
 void HttpConnection::onReadyRead()
 {
+    if (m_state == State_ReadingHeaders || (m_state == State_ReadingBody && !m_isUploadStream)) {
+        if (m_requestTimer && m_requestTimer->isActive()) {
+            m_requestTimer->start();
+        }
+    }
+
     if (m_state == State_ReadingHeaders) {
         qint64 bytesAvail = bytesAvailable();
         if (bytesAvail <= 0) {
@@ -269,6 +325,7 @@ void HttpConnection::onSocketDisconnected()
     if (m_state == State_Closed) {
         return;
     }
+    stopRequestTimeout();
     m_state = State_Closed;
     emit disconnected();
     deleteLater();
@@ -284,6 +341,15 @@ void HttpConnection::onTlsError(int code, const QString &message)
     Q_UNUSED(code);
     Q_UNUSED(message);
     abort();
+}
+
+void HttpConnection::onRequestTimeout()
+{
+    if (m_state == State_ReadingHeaders || (m_state == State_ReadingBody && !m_isUploadStream)) {
+        stopRequestTimeout();
+        sendErrorResponse(408, "Request Timeout");
+        abort();
+    }
 }
 
 void HttpConnection::processHeaderBuffer()
@@ -336,6 +402,7 @@ void HttpConnection::processHeaderBuffer()
     // If no body is expected, finish immediately
     if (m_head.contentLength == 0 || (m_head.contentLength == -1 && !m_head.chunked)) {
         m_state = State_WaitingResponse;
+        stopRequestTimeout();
         emit requestFinished();
     } else if (m_bodyAllowed) {
         m_state = State_ReadingBody;
@@ -474,6 +541,7 @@ void HttpConnection::processFixedBody()
 
     if (m_bodyBytesRead == m_head.contentLength) {
         m_state = State_WaitingResponse;
+        stopRequestTimeout();
         emit requestFinished();
     } else if (m_bodyBytesRead > m_head.contentLength) {
         sendErrorResponse(400, "Actual body size exceeded Content-Length");
@@ -550,6 +618,7 @@ void HttpConnection::processChunkedBody()
             if (m_bodyBuffer.startsWith("\r\n")) {
                 m_bodyBuffer.remove(0, 2);
                 m_state = State_WaitingResponse;
+                stopRequestTimeout();
                 emit requestFinished();
                 return;
             }
@@ -557,6 +626,7 @@ void HttpConnection::processChunkedBody()
             if (trailerEnd != -1) {
                 m_bodyBuffer.remove(0, trailerEnd + 4);
                 m_state = State_WaitingResponse;
+                stopRequestTimeout();
                 emit requestFinished();
                 return;
             }
@@ -583,6 +653,7 @@ QByteArray HttpConnection::statusReason(int status)
         case 401: return "Unauthorized";
         case 403: return "Forbidden";
         case 404: return "Not Found";
+        case 408: return "Request Timeout";
         case 409: return "Conflict";
         case 413: return "Payload Too Large";
         case 417: return "Expectation Failed";

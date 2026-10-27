@@ -107,6 +107,8 @@ void ReceiveServer::onHeadersReady(const HttpRequestHead &head)
         int httpStatus = 200;
         QString error;
         m_connStates[conn].isUpload = true;
+        conn->setUploadStream(true);
+        conn->stopRequestTimeout();
 
         if (!beginUpload(head, &httpStatus, &error)) {
             conn->respond(httpStatus, "text/plain", error.toUtf8());

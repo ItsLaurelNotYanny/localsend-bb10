@@ -6288,6 +6288,169 @@ void testHttpServerTlsSetupFailureAndSwitchIsolationH4B()
     TEST_PASS();
 }
 
+void testHttpConnectionRequestTimeoutAndSlotReclamationH4C()
+{
+    TEST_CASE("H4-C - Enforce request header and control body read deadlines and reclaim slots");
+
+    HttpServer server;
+    ASSERT_TRUE(server.listen(QHostAddress::LocalHost, 0), "server listen failed");
+
+    // 1. Idle request: connects but sends nothing
+    QTcpSocket idleClient;
+    idleClient.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketConnected(&idleClient), "idleClient connect failed");
+
+    QTime t;
+    t.start();
+    while (server.activeConnectionsCount() < 1 && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(server.activeConnectionsCount() == 1, "server has 1 active connection");
+
+    foreach (HttpConnection *conn, server.findChildren<HttpConnection*>()) {
+        conn->setRequestTimeout(50);
+    }
+
+    t.start();
+    while (server.activeConnectionsCount() > 0 && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(server.activeConnectionsCount() == 0, "idle connection slot must be reclaimed");
+    idleClient.close();
+
+    // 2. Partial header: sends incomplete request line/headers and stops
+    QTcpSocket partialHeaderClient;
+    partialHeaderClient.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketConnected(&partialHeaderClient), "partialHeaderClient connect failed");
+    partialHeaderClient.write("GET /api/localsend/v2/info HTTP/1.1\r\nHost: local");
+    partialHeaderClient.flush();
+
+    t.start();
+    while (server.activeConnectionsCount() < 1 && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(server.activeConnectionsCount() == 1, "server has 1 active connection for partial header");
+
+    foreach (HttpConnection *conn, server.findChildren<HttpConnection*>()) {
+        conn->setRequestTimeout(50);
+    }
+
+    t.start();
+    while (server.activeConnectionsCount() > 0 && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(server.activeConnectionsCount() == 0, "partial header connection slot must be reclaimed");
+    partialHeaderClient.close();
+
+    // 3. Partial control body: sends full headers with Content-Length 100 but only sends partial body
+    TestHttpReceiver receiver;
+    QObject::connect(&server, SIGNAL(connectionOpened(HttpConnection*)),
+                     &receiver, SLOT(onConnection(HttpConnection*)));
+
+    QTcpSocket partialBodyClient;
+    partialBodyClient.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketConnected(&partialBodyClient), "partialBodyClient connect failed");
+
+    QByteArray headReq = "POST /api/localsend/v2/register HTTP/1.1\r\n"
+                         "Host: 127.0.0.1\r\n"
+                         "Content-Type: application/json\r\n"
+                         "Content-Length: 100\r\n\r\n"
+                         "{\"alias\":";
+    partialBodyClient.write(headReq);
+    partialBodyClient.flush();
+
+    t.start();
+    while ((!receiver.headersReceived || server.activeConnectionsCount() < 1) && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(receiver.headersReceived, "headers should be received");
+    ASSERT_TRUE(receiver.lastConn != 0, "lastConn should not be null");
+
+    receiver.lastConn->allowBody();
+    receiver.lastConn->setRequestTimeout(50);
+
+    t.start();
+    while (server.activeConnectionsCount() > 0 && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(server.activeConnectionsCount() == 0, "partial body connection slot must be reclaimed");
+    partialBodyClient.close();
+
+    // 4. Fill 8 stalled connections, verify 9th is rejected, wait for timeout, verify 9th succeeds
+    QList<QTcpSocket*> stalledClients;
+    for (int i = 0; i < HttpServer::MAX_ACTIVE_CONNECTIONS; ++i) {
+        QTcpSocket *c = new QTcpSocket();
+        c->connectToHost(QHostAddress::LocalHost, server.serverPort());
+        ASSERT_TRUE(waitSocketConnected(c), "stalled client connect failed");
+        c->write("GET /api/localsend/v2/info HTTP/1.1\r\nHost: local");
+        c->flush();
+        stalledClients.append(c);
+    }
+
+    t.start();
+    while (server.activeConnectionsCount() < HttpServer::MAX_ACTIVE_CONNECTIONS && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(server.activeConnectionsCount() == HttpServer::MAX_ACTIVE_CONNECTIONS, "all 8 connections filled");
+
+    QTcpSocket client9;
+    client9.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketReadyRead(&client9), "client9 must receive 503");
+    QByteArray resp503 = client9.readAll();
+    ASSERT_TRUE(resp503.contains("503 Service Unavailable"), "expected 503");
+    client9.close();
+
+    foreach (HttpConnection *conn, server.findChildren<HttpConnection*>()) {
+        conn->setRequestTimeout(50);
+    }
+
+    t.start();
+    while (server.activeConnectionsCount() > 0 && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(server.activeConnectionsCount() == 0, "all 8 stalled connections must be reclaimed");
+
+    for (int i = 0; i < stalledClients.size(); ++i) {
+        delete stalledClients.at(i);
+    }
+
+    // Reset receiver state
+    receiver.headersReceived = false;
+    receiver.requestFinishedReceived = false;
+    receiver.lastConn = 0;
+
+    QTcpSocket validClient;
+    validClient.connectToHost(QHostAddress::LocalHost, server.serverPort());
+    ASSERT_TRUE(waitSocketConnected(&validClient), "valid client connect failed");
+    validClient.write("GET /api/localsend/v2/info HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+    validClient.flush();
+
+    t.start();
+    while (!receiver.requestFinishedReceived && t.elapsed() < 1000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(receiver.requestFinishedReceived, "requestFinished should be received");
+    ASSERT_TRUE(receiver.lastConn != 0, "lastConn valid");
+    receiver.lastConn->respond(200, "application/json", "{\"status\":\"ok\"}");
+
+    ASSERT_TRUE(waitSocketReadyRead(&validClient), "valid client response");
+    QByteArray resp200 = validClient.readAll();
+    ASSERT_TRUE(resp200.contains("200 OK"), "valid request must succeed with 200 OK");
+    validClient.close();
+
+    server.stop();
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -6408,6 +6571,7 @@ int main(int argc, char **argv)
     testHttpServerPlaintextFallbackWhenConfiguredH4();
     testReceiveServerHttpsSourceIpBindingAndCrossSourceIsolationH4A();
     testHttpServerTlsSetupFailureAndSwitchIsolationH4B();
+    testHttpConnectionRequestTimeoutAndSlotReclamationH4C();
 
     std::cout << "================================================" << std::endl;
     std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;

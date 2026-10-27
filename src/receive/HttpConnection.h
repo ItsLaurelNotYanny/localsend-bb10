@@ -6,6 +6,7 @@
 #include <QByteArray>
 #include <QMap>
 #include <QHostAddress>
+#include <QTimer>
 #include "protocol/ProtocolTypes.h"
 
 namespace localsend {
@@ -36,6 +37,8 @@ public:
         Chunk_ReadTrailers
     };
 
+    static const int DEFAULT_REQUEST_TIMEOUT_MS = 10000;
+
     explicit HttpConnection(QTcpSocket *socket, QObject *parent = 0);
     explicit HttpConnection(localsend::PosixTlsSocket *socket, QObject *parent = 0);
     virtual ~HttpConnection();
@@ -49,6 +52,12 @@ public:
     QString peerFingerprint() const;
     QString negotiatedTlsVersion() const;
     QString negotiatedCipher() const;
+
+    void setRequestTimeout(int timeoutMs);
+    int requestTimeout() const { return m_requestTimeoutMs; }
+    void stopRequestTimeout();
+    void setUploadStream(bool isUpload);
+    bool isUploadStream() const { return m_isUploadStream; }
 
     QTcpSocket *socket() const { return m_tcpSocket; }
     localsend::PosixTlsSocket *tlsSocket() const { return m_tlsSocket; }
@@ -71,6 +80,7 @@ private slots:
     void onSocketDisconnected();
     void onSocketError(QAbstractSocket::SocketError error);
     void onTlsError(int code, const QString &message);
+    void onRequestTimeout();
 
 private:
     void processHeaderBuffer();
@@ -109,6 +119,10 @@ private:
     ChunkState m_chunkState;
     qint64 m_currentChunkSize;
     qint64 m_currentChunkRead;
+
+    QTimer *m_requestTimer;
+    int m_requestTimeoutMs;
+    bool m_isUploadStream;
 };
 
 #endif // HTTP_CONNECTION_H
