@@ -6,6 +6,7 @@ TabbedPane {
     // TAB 1: SEND & RADAR
     Tab {
         title: "Send"
+        imageSource: "asset:///icons/ic_send.png"
         Page {
             titleBar: TitleBar {
                 title: "LocalSend BB10"
@@ -232,6 +233,7 @@ TabbedPane {
     // TAB 2: TRANSFERS & RECEIVE
     Tab {
         title: "Transfers"
+        imageSource: "asset:///icons/ic_transfers.png"
         Page {
             titleBar: TitleBar {
                 title: "Transfer Activity"
@@ -496,6 +498,7 @@ TabbedPane {
     // TAB 3: SETTINGS & ABOUT
     Tab {
         title: "Settings"
+        imageSource: "asset:///icons/ic_settings.png"
         Page {
             titleBar: TitleBar {
                 title: "Settings"

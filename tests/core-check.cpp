@@ -6588,6 +6588,21 @@ void testUiConfiguredHttpsPlainDisplayH4E()
     ASSERT_TRUE(mainQmlContent.contains("\"Protocol: \" + (app.isHttps ? \"HTTPS\" : \"HTTP (Plaintext)\")"),
                 "main.qml must display plain HTTPS protocol in settings");
 
+    ASSERT_TRUE(mainQmlContent.contains("imageSource: \"asset:///icons/ic_send.png\""),
+                "main.qml must set Send tab icon");
+    ASSERT_TRUE(mainQmlContent.contains("imageSource: \"asset:///icons/ic_transfers.png\""),
+                "main.qml must set Transfers tab icon");
+    ASSERT_TRUE(mainQmlContent.contains("imageSource: \"asset:///icons/ic_settings.png\""),
+                "main.qml must set Settings tab icon");
+
+    QString iconsDir = "assets/icons/";
+    if (!QFile::exists(iconsDir + "ic_send.png")) {
+        iconsDir = "../assets/icons/";
+    }
+    ASSERT_TRUE(QFile::exists(iconsDir + "ic_send.png"), "ic_send.png must exist");
+    ASSERT_TRUE(QFile::exists(iconsDir + "ic_transfers.png"), "ic_transfers.png must exist");
+    ASSERT_TRUE(QFile::exists(iconsDir + "ic_settings.png"), "ic_settings.png must exist");
+
     TEST_PASS();
 }
 
