@@ -6262,6 +6262,26 @@ void testHttpServerTlsSetupFailureAndSwitchIsolationH4B()
     ASSERT_TRUE(settings.value("network/protocol").toString() == "http", "stored protocol must become http");
     ASSERT_FALSE(httpApp.httpServer()->isSecure(), "httpServer must no longer be secure");
 
+    // Switch back to HTTPS to test identity rotation failure isolation while running HTTPS
+    switchOk = httpApp.setProtocol("https", &switchErr, true);
+    ASSERT_TRUE(switchOk, "setProtocol('https') restore must succeed");
+
+    // 7. Identity rotation failure preserves existing valid identity and does not publish unserved pin
+    QString badRotateDir = tempDir + "/bad_rotate_dir";
+    {
+        QFile f(badRotateDir);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly), "create bad rotate file");
+        f.write("not a directory");
+        f.close();
+    }
+    QString origFingerprint = httpApp.localInfo().fingerprint;
+    ASSERT_FALSE(origFingerprint.isEmpty(), "origFingerprint must not be empty");
+    httpApp.setIdentityStorageDirectory(badRotateDir);
+    ASSERT_TRUE(httpApp.localInfo().fingerprint == origFingerprint, "failed identity update must preserve existing fingerprint");
+    ASSERT_TRUE(httpApp.localIdentity().fingerprint() == origFingerprint, "localIdentity must retain old fingerprint");
+    ASSERT_TRUE(settings.value("security/identityDir").toString() == validIdDir, "settings identityDir must retain old valid path");
+    ASSERT_TRUE(settings.value("device/fingerprint").toString() == origFingerprint, "settings fingerprint must retain old fingerprint");
+
     httpApp.stop();
     app.stop();
     QDir(tempDir).removeRecursively();

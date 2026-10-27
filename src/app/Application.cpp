@@ -60,30 +60,39 @@ void Application::setIdentityStorageDirectory(const QString &path)
     if (path.trimmed().isEmpty() || m_identityStorageDir == path) {
         return;
     }
+
+    LocalIdentity candidate;
+    QString loadErr;
+    if (!LocalIdentity::loadOrCreate(path, &candidate, &loadErr)) {
+        m_identityInitError = loadErr;
+        qWarning() << "[Application] Failed to load candidate identity from" << path << ":" << loadErr;
+        return;
+    }
+
+    if (m_httpServer && m_localInfo.protocol == "https") {
+        QString err;
+        if (!m_httpServer->setTlsIdentity(candidate, &err)) {
+            m_identityInitError = err;
+            qWarning() << "[Application] Failed to update TLS identity:" << err;
+            return;
+        }
+        m_httpServer->setSecure(true);
+    }
+
+    m_identity = candidate;
     m_identityStorageDir = path;
+    m_identityInitError.clear();
+    m_localInfo.fingerprint = m_identity.fingerprint();
     if (m_settings) {
         m_settings->setValue("security/identityDir", path);
+        m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
         m_settings->sync();
     }
-    m_identityInitError.clear();
-    if (LocalIdentity::loadOrCreate(m_identityStorageDir, &m_identity, &m_identityInitError)) {
-        m_localInfo.fingerprint = m_identity.fingerprint();
-        if (m_settings) {
-            m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
-            m_settings->sync();
-        }
-        if (m_httpServer && m_localInfo.protocol == "https") {
-            QString err;
-            if (!m_httpServer->setTlsIdentity(m_identity, &err)) {
-                qWarning() << "[Application] Failed to update TLS identity:" << err;
-            } else {
-                m_httpServer->setSecure(true);
-            }
-        }
+    if (m_discovery) {
         m_discovery->setLocalIdentity(m_identity);
         m_discovery->updateLocalInfo(m_localInfo);
-        emit localInfoChanged(m_localInfo);
     }
+    emit localInfoChanged(m_localInfo);
 }
 
 void Application::initSettings()
