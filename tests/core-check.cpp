@@ -6451,6 +6451,106 @@ void testHttpConnectionRequestTimeoutAndSlotReclamationH4C()
     TEST_PASS();
 }
 
+void testReceiveServerPendingCancelSlotReleaseH4D()
+{
+    TEST_CASE("H4-D - Pending local cancellation releases transfer slot and permits immediate next transfer");
+
+    QString tempDir = QString("/tmp/localsend_test_h4d_%1").arg(QDateTime::currentMSecsSinceEpoch());
+    QDir().mkpath(tempDir);
+
+    QSettings settings(tempDir + "/test.ini", QSettings::IniFormat);
+    settings.setValue("network/protocol", "http");
+    settings.setValue("receive/destinationDir", tempDir);
+
+    localsend::Application app(0, &settings);
+    app.setPort(0);
+
+    QString startErr;
+    ASSERT_TRUE(app.start(&startErr), "app start failed");
+
+    DeviceInfo senderInfo;
+    senderInfo.alias = "Sender";
+    senderInfo.version = "2.2";
+    senderInfo.deviceModel = "TestClient";
+    senderInfo.deviceType = "desktop";
+    senderInfo.fingerprint = "client-fingerprint";
+    senderInfo.port = 53317;
+    senderInfo.protocol = "http";
+
+    FileMeta fm;
+    fm.id = "f1";
+    fm.fileName = "test.bin";
+    fm.size = 5;
+    fm.fileType = "application/octet-stream";
+
+    QString encErr;
+    QByteArray prepareBody = ProtocolJson::encodePrepareRequest(senderInfo, fm, &encErr);
+    ASSERT_TRUE(!prepareBody.isEmpty(), "encode prepare request failed");
+
+    // 1. First prepare request
+    QTcpSocket client1;
+    client1.connectToHost("127.0.0.1", app.httpServer()->serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client1), "client1 connect failed");
+
+    QByteArray prepReq = "POST /api/localsend/v2/prepare-upload HTTP/1.1\r\n"
+                         "Host: 127.0.0.1\r\nContent-Type: application/json\r\n"
+                         "Content-Length: " + QByteArray::number(prepareBody.size()) + "\r\n\r\n" + prepareBody;
+    client1.write(prepReq);
+    client1.flush();
+
+    QTime t;
+    t.start();
+    while ((!app.receiveServer()->hasPendingOffer() || !app.isTransferActive()) && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(app.receiveServer()->hasPendingOffer(), "server must have pending offer");
+    ASSERT_TRUE(app.isTransferActive(), "application transfer slot must be active");
+
+    // 2. Local cancel before consent (using default cancelLocal() with empty ID)
+    app.receiveServer()->cancelLocal();
+
+    ASSERT_TRUE(waitSocketReadyRead(&client1), "client1 expected 403 on cancel");
+    QByteArray resp1 = client1.readAll();
+    ASSERT_TRUE(resp1.contains("403 Forbidden"), "cancelled offer returns 403");
+    client1.close();
+
+    // Verify both pending offer and application transfer slot are released
+    ASSERT_FALSE(app.receiveServer()->hasPendingOffer(), "pending offer must be cleared");
+    ASSERT_FALSE(app.isTransferActive(), "application transfer slot must be released after cancelLocal");
+
+    // 3. Immediate second prepare request on new connection must succeed (no 409 Conflict)
+    QTcpSocket client2;
+    client2.connectToHost("127.0.0.1", app.httpServer()->serverPort());
+    ASSERT_TRUE(waitSocketConnected(&client2), "client2 connect failed");
+    client2.write(prepReq);
+    client2.flush();
+
+    t.start();
+    while ((!app.receiveServer()->hasPendingOffer() || !app.isTransferActive()) && t.elapsed() < 2000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        usleep(5000);
+    }
+    ASSERT_TRUE(app.receiveServer()->hasPendingOffer(), "second prepare must create pending offer");
+    ASSERT_TRUE(app.isTransferActive(), "application slot must be active for second prepare");
+
+    // 4. Cancel with explicit matching request ID
+    QString offerId = app.receiveServer()->pendingRequestId();
+    app.receiveServer()->cancelLocal(offerId);
+
+    ASSERT_TRUE(waitSocketReadyRead(&client2), "client2 expected 403 on cancel-id");
+    QByteArray resp2 = client2.readAll();
+    ASSERT_TRUE(resp2.contains("403 Forbidden"), "cancelled offer returns 403");
+    client2.close();
+
+    ASSERT_FALSE(app.receiveServer()->hasPendingOffer(), "pending offer must be cleared after cancelLocal(id)");
+    ASSERT_FALSE(app.isTransferActive(), "application transfer slot must be released after cancelLocal(id)");
+
+    app.stop();
+    QDir(tempDir).removeRecursively();
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -6572,6 +6672,7 @@ int main(int argc, char **argv)
     testReceiveServerHttpsSourceIpBindingAndCrossSourceIsolationH4A();
     testHttpServerTlsSetupFailureAndSwitchIsolationH4B();
     testHttpConnectionRequestTimeoutAndSlotReclamationH4C();
+    testReceiveServerPendingCancelSlotReleaseH4D();
 
     std::cout << "================================================" << std::endl;
     std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;

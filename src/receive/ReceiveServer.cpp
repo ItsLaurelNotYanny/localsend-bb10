@@ -383,10 +383,11 @@ bool ReceiveServer::accept(const QString &requestId, const QString &fileId)
 
 void ReceiveServer::reject(const QString &requestId)
 {
-    if (m_pendingOffer.requestId != requestId) {
+    if (m_pendingOffer.requestId.isEmpty() || m_pendingOffer.requestId != requestId) {
         return;
     }
 
+    QString idToRelease = requestId;
     m_consentTimer->stop();
     HttpConnection *conn = m_pendingOffer.connection;
     clearPendingOffer();
@@ -396,7 +397,7 @@ void ReceiveServer::reject(const QString &requestId)
     }
 
     if (m_app) {
-        m_app->endTransfer(requestId);
+        m_app->endTransfer(idToRelease);
     }
 }
 
@@ -577,7 +578,8 @@ bool ReceiveServer::finishUpload(QString *savedPath, int *httpStatus, QString *e
 void ReceiveServer::cancelLocal(const QString &requestId)
 {
     if (!m_pendingOffer.requestId.isEmpty() && (requestId.isEmpty() || m_pendingOffer.requestId == requestId)) {
-        reject(m_pendingOffer.requestId);
+        QString targetId = m_pendingOffer.requestId;
+        reject(targetId);
         return;
     }
 
@@ -609,7 +611,8 @@ void ReceiveServer::handleCancel(const QString &sessionId, const QHostAddress &p
 void ReceiveServer::onNetworkLost()
 {
     if (hasPendingOffer()) {
-        reject(m_pendingOffer.requestId);
+        QString targetId = m_pendingOffer.requestId;
+        reject(targetId);
     }
     if (hasActiveSession()) {
         cancelLocal(m_activeSession.requestId);
