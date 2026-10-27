@@ -5507,7 +5507,7 @@ private:
 
 void testHttpServerInboundHttpsHandshakeAndInfoH4()
 {
-    TEST_CASE("H4 - HttpServer inbound HTTPS TLS 1.3 handshake and /info endpoint");
+    TEST_CASE("H4 - HttpServer inbound HTTPS handshake, matching pin verification, and /info endpoint");
     QString idDir = "/tmp/localsend_h4_srv_info_id";
     QDir(idDir).removeRecursively();
 
@@ -5719,7 +5719,7 @@ void testReceiveServerHttpsPrepareAndAsyncConsentH4()
 
 void testReceiveServerHttpsStreamingUploadAndSha256H4()
 {
-    TEST_CASE("H4 - ReceiveServer HTTPS streaming upload, backpressure, and SHA-256 verification");
+    TEST_CASE("H4 - ReceiveServer HTTPS 64 KiB streaming upload and SHA-256 integrity verification");
     QString idDir = "/tmp/localsend_h4_srv_stream_id";
     QString rxDir = "/tmp/localsend_h4_stream_rx";
     QDir(idDir).removeRecursively();
@@ -5835,7 +5835,7 @@ void testReceiveServerHttpsStreamingUploadAndSha256H4()
 
 void testHttpServerTlsHandshakeTimeoutAndCapacityH4()
 {
-    TEST_CASE("H4 - HttpServer TLS handshake timeout and active connection capacity bounds");
+    TEST_CASE("H4 - HttpServer TLS handshake timeout and single-stalled slot recovery");
     QString idDir = "/tmp/localsend_h4_srv_tm_id";
     QDir(idDir).removeRecursively();
 
@@ -5899,7 +5899,7 @@ void testHttpServerTlsHandshakeTimeoutAndCapacityH4()
 
 void testDiscoveryManagerHttpsBroadcastAndFingerprintH4()
 {
-    TEST_CASE("H4 - DiscoveryManager announcement carries protocol 'https' and certificate fingerprint");
+    TEST_CASE("H4 - DiscoveryManager announcement encoding serializes protocol 'https' and certificate fingerprint");
     QString idDir = "/tmp/localsend_h4_dm_bcast_id";
     QDir(idDir).removeRecursively();
 
@@ -5950,14 +5950,18 @@ void testUiControllerHttpsPeerSupportAndCertManagementH4()
     ASSERT_TRUE(controller.certificateFingerprint() == app.localIdentity().fingerprint(),
                 "certificateFingerprint matches local identity");
 
-    // Register a valid HTTPS peer
+    // Register a valid HTTPS peer on a controlled loopback endpoint
+    QTcpServer dummyPeerServer;
+    ASSERT_TRUE(dummyPeerServer.listen(QHostAddress::LocalHost, 0), "dummy peer server listen");
+    quint16 dummyPort = dummyPeerServer.serverPort();
+
     DeviceInfo httpsPeer;
     httpsPeer.alias = "Secure Peer";
     httpsPeer.deviceModel = "Passport";
     httpsPeer.fingerprint = QString(64, 'd');
-    httpsPeer.port = 53317;
+    httpsPeer.port = dummyPort;
     httpsPeer.protocol = "https";
-    app.discoveryManager()->handleIncomingRegister(httpsPeer, QHostAddress("192.168.1.188"));
+    app.discoveryManager()->handleIncomingRegister(httpsPeer, QHostAddress::LocalHost);
 
     // Set a file to send
     QTemporaryFile tmpFile;
@@ -5973,6 +5977,7 @@ void testUiControllerHttpsPeerSupportAndCertManagementH4()
     ASSERT_TRUE(controller.transferState() == "Preparing", "transfer state must transition to Preparing");
 
     controller.cancelTransfer();
+    dummyPeerServer.close();
     app.stop();
     QDir(idDir).removeRecursively();
     TEST_PASS();
