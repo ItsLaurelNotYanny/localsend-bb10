@@ -8,6 +8,10 @@
 #include <QHostAddress>
 #include "protocol/ProtocolTypes.h"
 
+namespace localsend {
+class PosixTlsSocket;
+}
+
 class HttpConnection : public QObject {
     Q_OBJECT
 
@@ -33,11 +37,22 @@ public:
     };
 
     explicit HttpConnection(QTcpSocket *socket, QObject *parent = 0);
+    explicit HttpConnection(localsend::PosixTlsSocket *socket, QObject *parent = 0);
     virtual ~HttpConnection();
 
     const HttpRequestHead &requestHead() const { return m_head; }
     ConnectionState state() const { return m_state; }
-    QTcpSocket *socket() const { return m_socket; }
+
+    bool isSecure() const { return m_isSecure; }
+    QHostAddress peerAddress() const { return m_peerAddress; }
+    quint16 peerPort() const { return m_peerPort; }
+    QString peerFingerprint() const;
+    QString negotiatedTlsVersion() const;
+    QString negotiatedCipher() const;
+
+    QTcpSocket *socket() const { return m_tcpSocket; }
+    localsend::PosixTlsSocket *tlsSocket() const { return m_tlsSocket; }
+    QIODevice *device() const;
 
 public slots:
     void allowBody(); // Send 100 Continue if requested, and start streaming body
@@ -55,6 +70,7 @@ private slots:
     void onReadyRead();
     void onSocketDisconnected();
     void onSocketError(QAbstractSocket::SocketError error);
+    void onTlsError(int code, const QString &message);
 
 private:
     void processHeaderBuffer();
@@ -65,7 +81,19 @@ private:
     void sendErrorResponse(int status, const QByteArray &message);
     static QByteArray statusReason(int status);
 
-    QTcpSocket *m_socket;
+    qint64 bytesAvailable() const;
+    QByteArray readRaw(qint64 maxLen);
+    qint64 writeRaw(const QByteArray &data);
+    void flushRaw();
+    void disconnectRaw();
+    void abortRaw();
+    bool isOpen() const;
+
+    QTcpSocket *m_tcpSocket;
+    localsend::PosixTlsSocket *m_tlsSocket;
+    bool m_isSecure;
+    QHostAddress m_peerAddress;
+    quint16 m_peerPort;
     ConnectionState m_state;
     HttpRequestHead m_head;
 

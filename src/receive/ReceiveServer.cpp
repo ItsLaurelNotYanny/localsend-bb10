@@ -212,8 +212,8 @@ void ReceiveServer::handleRegisterRoute(HttpConnection *conn, const QByteArray &
         return;
     }
 
-    if (m_discovery && conn->socket()) {
-        m_discovery->handleIncomingRegister(peerInfo, conn->socket()->peerAddress());
+    if (m_discovery) {
+        m_discovery->handleIncomingRegister(peerInfo, conn->peerAddress());
     }
 
     DeviceInfo info = m_app ? m_app->localInfo() : DeviceInfo();
@@ -275,9 +275,7 @@ void ReceiveServer::handlePrepareUploadRoute(HttpConnection *conn, const QByteAr
 
     m_pendingOffer.requestId = requestId;
     m_pendingOffer.peer.info = req.info;
-    if (conn->socket()) {
-        m_pendingOffer.peer.address = conn->socket()->peerAddress();
-    }
+    m_pendingOffer.peer.address = conn->peerAddress();
     m_pendingOffer.files = req.files;
     m_pendingOffer.connection = conn;
 
@@ -289,7 +287,7 @@ void ReceiveServer::handlePrepareUploadRoute(HttpConnection *conn, const QByteAr
 void ReceiveServer::handleCancelRoute(HttpConnection *conn, const HttpRequestHead &head)
 {
     QString sessionId = getUrlQueryItem(head.target, "sessionId");
-    QHostAddress peerAddr = conn->socket() ? conn->socket()->peerAddress() : QHostAddress();
+    QHostAddress peerAddr = conn ? conn->peerAddress() : QHostAddress();
 
     if (!sessionId.isEmpty() && sessionId == m_activeSession.sessionId) {
         handleCancel(sessionId, peerAddr);

@@ -69,10 +69,13 @@ struct HttpRequestHead {
     QHostAddress peerAddress;
     qint64 contentLength; // -1 when absent
     bool chunked;
+    bool isSecure;
+    QString peerFingerprint;
 
     HttpRequestHead()
         : contentLength(-1)
         , chunked(false)
+        , isSecure(false)
     {
     }
 };

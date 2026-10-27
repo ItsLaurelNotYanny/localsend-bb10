@@ -23,6 +23,9 @@ class UiController : public QObject {
     Q_PROPERTY(int devicePort READ devicePort NOTIFY devicePortChanged)
     Q_PROPERTY(QString receiveDirectory READ receiveDirectory NOTIFY receiveDirectoryChanged)
     Q_PROPERTY(QString appVersion READ appVersion CONSTANT)
+    Q_PROPERTY(QString certificateFingerprint READ certificateFingerprint NOTIFY certificateFingerprintChanged)
+    Q_PROPERTY(bool isHttps READ isHttps NOTIFY isHttpsChanged)
+    Q_PROPERTY(QString serverProtocol READ serverProtocol NOTIFY serverProtocolChanged)
 
     // Peer list property
     Q_PROPERTY(QVariantList peers READ peers NOTIFY peersChanged)
@@ -69,6 +72,9 @@ public:
     int devicePort() const;
     QString receiveDirectory() const;
     QString appVersion() const { return "v0.1.1.7"; }
+    QString certificateFingerprint() const;
+    bool isHttps() const;
+    QString serverProtocol() const;
     QVariantList peers() const { return m_peers; }
     int peerCount() const { return m_peers.size(); }
     int peersRevision() const { return m_peersRevision; }
@@ -133,6 +139,9 @@ signals:
     void selectedIncomingFileIdChanged();
     void lastSavedFilePathChanged();
     void lastErrorChanged();
+    void certificateFingerprintChanged();
+    void isHttpsChanged();
+    void serverProtocolChanged();
     void transferFinished(const QString &message);
 
 private slots:
@@ -140,6 +149,7 @@ private slots:
 
     // Application slots
     void onTransferSlotChanged(bool busy, const QString &activeRequestId);
+    void onLocalInfoChanged(const DeviceInfo &info);
 
     // DiscoveryManager slots
     void onPeerUpdated(const PeerDevice &peer);

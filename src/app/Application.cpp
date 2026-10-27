@@ -70,11 +70,14 @@ void Application::setIdentityStorageDirectory(const QString &path)
         m_localInfo.fingerprint = m_identity.fingerprint();
         if (m_settings) {
             m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
-        m_discovery->setLocalIdentity(m_identity);
             m_settings->sync();
         }
-        m_discovery->updateLocalInfo(m_localInfo);
+        if (m_httpServer && m_localInfo.protocol == "https") {
+            m_httpServer->setTlsIdentity(m_identity);
+            m_httpServer->setSecure(true);
+        }
         m_discovery->setLocalIdentity(m_identity);
+        m_discovery->updateLocalInfo(m_localInfo);
         emit localInfoChanged(m_localInfo);
     }
 }
@@ -108,10 +111,16 @@ void Application::initSettings()
     }
     m_localInfo.port = static_cast<quint16>(portVal);
     m_localInfo.version = "2.2";
-    m_localInfo.protocol = "http";
     m_localInfo.deviceModel = "BlackBerry Passport";
     m_localInfo.deviceType = "mobile";
     m_localInfo.download = false;
+
+    // Default to HTTPS when valid identity is available
+    QString protoSetting = m_settings->value("network/protocol", "https").toString().toLower();
+    if (protoSetting != "http" && protoSetting != "https") {
+        protoSetting = "https";
+    }
+    m_localInfo.protocol = (protoSetting == "https" && m_identity.isValid()) ? "https" : protoSetting;
 
     // 4. Storage directory
 #if defined(Q_OS_BLACKBERRY) || defined(__QNX__) || defined(BB_CASCADES)
@@ -174,6 +183,14 @@ bool Application::start(QString *error)
 
     // Attach receive server to HTTP server
     m_receiveServer->attach(m_httpServer);
+
+    // Configure HTTPS on HttpServer if identity is valid and protocol is https
+    if (m_identity.isValid() && m_localInfo.protocol == "https") {
+        m_httpServer->setTlsIdentity(m_identity);
+        m_httpServer->setSecure(true);
+    } else {
+        m_httpServer->setSecure(false);
+    }
 
     // Start HTTP server on configured port
     if (!m_httpServer->listen(QHostAddress::Any, m_localInfo.port, error)) {
@@ -255,6 +272,44 @@ bool Application::setPort(quint16 port, QString *error)
         m_settings->sync();
     }
     m_discovery->updateLocalInfo(m_localInfo);
+    emit localInfoChanged(m_localInfo);
+    return true;
+}
+
+bool Application::setProtocol(const QString &protocol, QString *error, bool persist)
+{
+    QString proto = protocol.toLower();
+    if (proto != "http" && proto != "https") {
+        if (error) *error = "Invalid protocol; must be 'http' or 'https'";
+        return false;
+    }
+    if (proto == "https" && !m_identity.isValid()) {
+        if (error) *error = "Cannot enable HTTPS: local identity certificate is not valid";
+        return false;
+    }
+    if (isTransferActive()) {
+        if (error) *error = "Cannot change protocol while transfer is active";
+        return false;
+    }
+
+    m_localInfo.protocol = proto;
+    if (persist && m_settings) {
+        m_settings->setValue("network/protocol", proto);
+        m_settings->sync();
+    }
+
+    if (m_httpServer) {
+        if (proto == "https") {
+            m_httpServer->setTlsIdentity(m_identity);
+            m_httpServer->setSecure(true);
+        } else {
+            m_httpServer->setSecure(false);
+        }
+    }
+
+    if (m_discovery) {
+        m_discovery->updateLocalInfo(m_localInfo);
+    }
     emit localInfoChanged(m_localInfo);
     return true;
 }

@@ -38,16 +38,16 @@ Container {
             }
             Label {
                 visible: cardRoot.isHttps
-                text: "HTTPS not supported in MVP"
+                text: "HTTPS (TLS 1.3)"
                 textStyle.base: SystemDefaults.TextStyles.SmallText
-                textStyle.color: Color.create("#E53E3E")
+                textStyle.color: Color.create("#38A169")
             }
         }
 
         // Right: Send button
         Button {
             text: "Send"
-            enabled: app.hasSelectedFile && !app.transferActive && !cardRoot.isHttps
+            enabled: app.hasSelectedFile && !app.transferActive
             layoutProperties: StackLayoutProperties {
                 spaceQuota: 1.0
             }

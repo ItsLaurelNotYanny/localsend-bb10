@@ -32,6 +32,8 @@ public:
     DeviceInfo localInfo() const;
     void setAlias(const QString &alias);
     bool setPort(quint16 port, QString *error = 0);
+    bool setProtocol(const QString &protocol, QString *error = 0, bool persist = true);
+    QString protocol() const { return m_localInfo.protocol; }
     void setReceiveDirectory(const QString &path);
     QString receiveDirectory() const { return m_receiveDirectory; }
 

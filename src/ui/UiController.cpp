@@ -41,9 +41,7 @@ UiController::UiController(Application *app, QObject *parent)
 
     // Connect Application signals
     connect(m_app, SIGNAL(localInfoChanged(DeviceInfo)),
-            this, SIGNAL(deviceAliasChanged()));
-    connect(m_app, SIGNAL(localInfoChanged(DeviceInfo)),
-            this, SIGNAL(devicePortChanged()));
+            this, SLOT(onLocalInfoChanged(DeviceInfo)));
     connect(m_app, SIGNAL(transferSlotChanged(bool,QString)),
             this, SLOT(onTransferSlotChanged(bool,QString)));
 
@@ -122,6 +120,31 @@ int UiController::devicePort() const
 QString UiController::receiveDirectory() const
 {
     return m_app->receiveDirectory();
+}
+
+QString UiController::certificateFingerprint() const
+{
+    return m_app ? m_app->localInfo().fingerprint : QString();
+}
+
+bool UiController::isHttps() const
+{
+    return m_app ? (m_app->localInfo().protocol.toLower() == "https") : false;
+}
+
+QString UiController::serverProtocol() const
+{
+    return m_app ? m_app->localInfo().protocol : "http";
+}
+
+void UiController::onLocalInfoChanged(const DeviceInfo &info)
+{
+    Q_UNUSED(info);
+    emit deviceAliasChanged();
+    emit devicePortChanged();
+    emit certificateFingerprintChanged();
+    emit isHttpsChanged();
+    emit serverProtocolChanged();
 }
 
 bool UiController::transferActive() const
@@ -266,12 +289,6 @@ bool UiController::sendSelectedFile(const QString &fingerprint)
 
     if (peer.info.fingerprint.isEmpty()) {
         m_lastError = "Target peer device not found";
-        emit lastErrorChanged();
-        return false;
-    }
-
-    if (peer.info.protocol.toLower() == "https") {
-        m_lastError = "Target peer requires HTTPS which is unsupported in this MVP";
         emit lastErrorChanged();
         return false;
     }
@@ -798,9 +815,9 @@ void UiController::populatePeers(QObject *containerObj)
 
         if (isHttps) {
             bb::cascades::Label *httpsLabel = new bb::cascades::Label();
-            httpsLabel->setText("HTTPS not supported in MVP");
+            httpsLabel->setText("HTTPS (TLS 1.3)");
             httpsLabel->textStyle()->setBase(bb::cascades::SystemDefaults::TextStyles::smallText());
-            httpsLabel->textStyle()->setColor(bb::cascades::Color::fromARGB(0xFFE53E3E));
+            httpsLabel->textStyle()->setColor(bb::cascades::Color::fromARGB(0xFF38A169));
             left->add(httpsLabel);
         }
         row->add(left);
@@ -808,7 +825,7 @@ void UiController::populatePeers(QObject *containerObj)
         // Right column: Send button
         bb::cascades::Button *sendBtn = new bb::cascades::Button();
         sendBtn->setText("Send");
-        sendBtn->setEnabled(hasSelectedFile() && !transferActive() && !isHttps);
+        sendBtn->setEnabled(hasSelectedFile() && !transferActive());
         sendBtn->setProperty("peerFingerprint", fp);
         sendBtn->setVerticalAlignment(bb::cascades::VerticalAlignment::Center);
         bb::cascades::StackLayoutProperties *btnProps = new bb::cascades::StackLayoutProperties();

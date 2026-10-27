@@ -56,9 +56,15 @@ TabbedPane {
                             textStyle.color: Color.White
                         }
                         Label {
-                            text: app.networkStatus + " • Port " + app.devicePort + " • " + app.appVersion
+                            text: (app.isHttps ? "HTTPS (TLS 1.3) • " : "HTTP • ") + app.networkStatus + " • Port " + app.devicePort + " • " + app.appVersion
                             textStyle.base: SystemDefaults.TextStyles.SmallText
                             textStyle.color: Color.create("#68D391")
+                        }
+                        Label {
+                            visible: app.certificateFingerprint.length > 0
+                            text: "SHA-256: " + app.certificateFingerprint
+                            textStyle.base: SystemDefaults.TextStyles.SmallText
+                            textStyle.color: Color.create("#CBD5E0")
                         }
                     }
 
@@ -533,6 +539,26 @@ TabbedPane {
                         text: app.receiveDirectory
                         textStyle.base: SystemDefaults.TextStyles.SmallText
                         textStyle.color: Color.create("#4A5568")
+                    }
+
+                    Divider {}
+
+                    Header {
+                        title: "Security & Certificate"
+                    }
+                    Label {
+                        text: "Protocol: " + (app.isHttps ? "HTTPS (TLS 1.3 Active)" : "HTTP (Plaintext)")
+                        textStyle.base: SystemDefaults.TextStyles.BodyText
+                    }
+                    Label {
+                        text: "Certificate Fingerprint (SHA-256):"
+                        textStyle.base: SystemDefaults.TextStyles.SmallText
+                        textStyle.color: Color.create("#718096")
+                    }
+                    Label {
+                        text: app.certificateFingerprint.length > 0 ? app.certificateFingerprint : "No certificate loaded"
+                        textStyle.base: SystemDefaults.TextStyles.SmallText
+                        textStyle.color: Color.create("#2B6CB0")
                     }
 
                     Divider {}

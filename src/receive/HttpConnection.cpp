@@ -1,10 +1,14 @@
 #include "receive/HttpConnection.h"
+#include "security/PosixTlsSocket.h"
 
 #include <QStringList>
 
 HttpConnection::HttpConnection(QTcpSocket *socket, QObject *parent)
     : QObject(parent)
-    , m_socket(socket)
+    , m_tcpSocket(socket)
+    , m_tlsSocket(0)
+    , m_isSecure(false)
+    , m_peerPort(0)
     , m_state(State_ReadingHeaders)
     , m_expect100(false)
     , m_bodyAllowed(false)
@@ -13,23 +17,124 @@ HttpConnection::HttpConnection(QTcpSocket *socket, QObject *parent)
     , m_currentChunkSize(0)
     , m_currentChunkRead(0)
 {
-    if (m_socket) {
-        m_socket->setParent(this);
-        m_socket->setReadBufferSize(MAX_BUFFER_CHUNK);
-        m_head.peerAddress = m_socket->peerAddress();
+    if (m_tcpSocket) {
+        m_tcpSocket->setParent(this);
+        m_tcpSocket->setReadBufferSize(MAX_BUFFER_CHUNK);
+        m_peerAddress = m_tcpSocket->peerAddress();
+        m_peerPort = m_tcpSocket->peerPort();
+        m_head.peerAddress = m_peerAddress;
+        m_head.isSecure = false;
 
-        connect(m_socket, SIGNAL(readyRead()), this, SLOT(onReadyRead()));
-        connect(m_socket, SIGNAL(disconnected()), this, SLOT(onSocketDisconnected()));
-        connect(m_socket, SIGNAL(error(QAbstractSocket::SocketError)),
+        connect(m_tcpSocket, SIGNAL(readyRead()), this, SLOT(onReadyRead()));
+        connect(m_tcpSocket, SIGNAL(disconnected()), this, SLOT(onSocketDisconnected()));
+        connect(m_tcpSocket, SIGNAL(error(QAbstractSocket::SocketError)),
                 this, SLOT(onSocketError(QAbstractSocket::SocketError)));
+    }
+}
+
+HttpConnection::HttpConnection(localsend::PosixTlsSocket *socket, QObject *parent)
+    : QObject(parent)
+    , m_tcpSocket(0)
+    , m_tlsSocket(socket)
+    , m_isSecure(true)
+    , m_peerPort(0)
+    , m_state(State_ReadingHeaders)
+    , m_expect100(false)
+    , m_bodyAllowed(false)
+    , m_bodyBytesRead(0)
+    , m_chunkState(Chunk_ReadSize)
+    , m_currentChunkSize(0)
+    , m_currentChunkRead(0)
+{
+    if (m_tlsSocket) {
+        m_tlsSocket->setParent(this);
+        m_tlsSocket->setReadBufferSize(MAX_BUFFER_CHUNK);
+        m_peerAddress = m_tlsSocket->peerAddress();
+        m_peerPort = m_tlsSocket->peerPort();
+        m_head.peerAddress = m_peerAddress;
+        m_head.isSecure = true;
+        m_head.peerFingerprint = m_tlsSocket->peerFingerprint();
+
+        connect(m_tlsSocket, SIGNAL(readyRead()), this, SLOT(onReadyRead()));
+        connect(m_tlsSocket, SIGNAL(disconnected()), this, SLOT(onSocketDisconnected()));
+        connect(m_tlsSocket, SIGNAL(tlsError(int,QString)),
+                this, SLOT(onTlsError(int,QString)));
     }
 }
 
 HttpConnection::~HttpConnection()
 {
-    if (m_socket && m_socket->isOpen()) {
-        m_socket->abort();
+    if (isOpen()) {
+        abortRaw();
     }
+}
+
+QIODevice *HttpConnection::device() const
+{
+    if (m_tlsSocket) return m_tlsSocket;
+    if (m_tcpSocket) return m_tcpSocket;
+    return 0;
+}
+
+QString HttpConnection::peerFingerprint() const
+{
+    return m_tlsSocket ? m_tlsSocket->peerFingerprint() : QString();
+}
+
+QString HttpConnection::negotiatedTlsVersion() const
+{
+    return m_tlsSocket ? m_tlsSocket->negotiatedTlsVersion() : QString();
+}
+
+QString HttpConnection::negotiatedCipher() const
+{
+    return m_tlsSocket ? m_tlsSocket->negotiatedCipher() : QString();
+}
+
+qint64 HttpConnection::bytesAvailable() const
+{
+    if (m_tlsSocket) return m_tlsSocket->bytesAvailable();
+    if (m_tcpSocket) return m_tcpSocket->bytesAvailable();
+    return 0;
+}
+
+QByteArray HttpConnection::readRaw(qint64 maxLen)
+{
+    if (m_tlsSocket) return m_tlsSocket->read(maxLen);
+    if (m_tcpSocket) return m_tcpSocket->read(maxLen);
+    return QByteArray();
+}
+
+qint64 HttpConnection::writeRaw(const QByteArray &data)
+{
+    if (m_tlsSocket) return m_tlsSocket->write(data);
+    if (m_tcpSocket) return m_tcpSocket->write(data);
+    return -1;
+}
+
+void HttpConnection::flushRaw()
+{
+    if (m_tlsSocket) m_tlsSocket->flush();
+    else if (m_tcpSocket) m_tcpSocket->flush();
+}
+
+void HttpConnection::disconnectRaw()
+{
+    if (m_tlsSocket) m_tlsSocket->disconnectFromHost();
+    else if (m_tcpSocket) m_tcpSocket->disconnectFromHost();
+}
+
+void HttpConnection::abortRaw()
+{
+    if (m_tlsSocket) m_tlsSocket->abort();
+    else if (m_tcpSocket) m_tcpSocket->abort();
+}
+
+bool HttpConnection::isOpen() const
+{
+    if (m_tlsSocket) return m_tlsSocket->isOpen();
+    if (m_tcpSocket) return m_tcpSocket->isOpen();
+    return false;
 }
 
 void HttpConnection::allowBody()
@@ -38,9 +143,9 @@ void HttpConnection::allowBody()
         return;
     }
 
-    if (m_expect100 && m_socket && m_socket->isOpen()) {
-        m_socket->write("HTTP/1.1 100 Continue\r\n\r\n");
-        m_socket->flush();
+    if (m_expect100 && isOpen()) {
+        writeRaw("HTTP/1.1 100 Continue\r\n\r\n");
+        flushRaw();
         m_expect100 = false;
     }
 
@@ -50,14 +155,14 @@ void HttpConnection::allowBody()
     processBodyData();
 
     // Drain any pending socket data if state remains ReadingBody
-    if (m_state == State_ReadingBody && m_socket && m_socket->bytesAvailable() > 0) {
+    if (m_state == State_ReadingBody && bytesAvailable() > 0) {
         onReadyRead();
     }
 }
 
 void HttpConnection::respond(int status, const QByteArray &contentType, const QByteArray &body)
 {
-    if (m_state == State_Responded || m_state == State_Closed || !m_socket || !m_socket->isOpen()) {
+    if (m_state == State_Responded || m_state == State_Closed || !isOpen()) {
         return;
     }
 
@@ -85,9 +190,9 @@ void HttpConnection::respond(int status, const QByteArray &contentType, const QB
         response.append(body);
     }
 
-    m_socket->write(response);
-    m_socket->flush();
-    m_socket->disconnectFromHost();
+    writeRaw(response);
+    flushRaw();
+    disconnectRaw();
 }
 
 void HttpConnection::abort()
@@ -96,9 +201,7 @@ void HttpConnection::abort()
         return;
     }
     m_state = State_Closed;
-    if (m_socket) {
-        m_socket->abort();
-    }
+    abortRaw();
     emit disconnected();
     deleteLater();
 }
@@ -106,7 +209,7 @@ void HttpConnection::abort()
 void HttpConnection::onReadyRead()
 {
     if (m_state == State_ReadingHeaders) {
-        qint64 bytesAvail = m_socket->bytesAvailable();
+        qint64 bytesAvail = bytesAvailable();
         if (bytesAvail <= 0) {
             return;
         }
@@ -115,27 +218,27 @@ void HttpConnection::onReadyRead()
             sendErrorResponse(431, "Request Header Fields Too Large");
             return;
         }
-        QByteArray chunk = m_socket->read(toRead);
+        QByteArray chunk = readRaw(toRead);
         m_headerBuffer.append(chunk);
         processHeaderBuffer();
     } else if (m_state == State_AwaitingBodyPermission) {
         // Buffer arriving body data before permission is granted, bounded to MAX_BUFFER_CHUNK
-        qint64 bytesAvail = m_socket->bytesAvailable();
+        qint64 bytesAvail = bytesAvailable();
         if (bytesAvail <= 0) {
             return;
         }
         qint64 toRead = qMin(bytesAvail, static_cast<qint64>(MAX_BUFFER_CHUNK));
-        QByteArray chunk = m_socket->read(toRead);
+        QByteArray chunk = readRaw(toRead);
         if (m_bodyBuffer.size() + chunk.size() > MAX_BUFFER_CHUNK) {
             sendErrorResponse(413, "Body buffer exceeded before permission");
             return;
         }
         m_bodyBuffer.append(chunk);
     } else if (m_state == State_ReadingBody) {
-        while (m_socket && m_socket->bytesAvailable() > 0 && m_state == State_ReadingBody) {
-            qint64 bytesAvail = m_socket->bytesAvailable();
+        while (isOpen() && bytesAvailable() > 0 && m_state == State_ReadingBody) {
+            qint64 bytesAvail = bytesAvailable();
             qint64 toRead = qMin(bytesAvail, static_cast<qint64>(MAX_BUFFER_CHUNK));
-            QByteArray chunk = m_socket->read(toRead);
+            QByteArray chunk = readRaw(toRead);
             if (m_bodyBuffer.size() + chunk.size() > MAX_BUFFER_CHUNK * 2) {
                 sendErrorResponse(413, "Body buffer exceeded limit");
                 return;
@@ -145,7 +248,7 @@ void HttpConnection::onReadyRead()
         }
     } else {
         // Discard extra data after requestFinished or response
-        m_socket->read(qMin(m_socket->bytesAvailable(), static_cast<qint64>(MAX_BUFFER_CHUNK)));
+        readRaw(qMin(bytesAvailable(), static_cast<qint64>(MAX_BUFFER_CHUNK)));
     }
 }
 
@@ -161,11 +264,14 @@ void HttpConnection::onSocketDisconnected()
 
 void HttpConnection::onSocketError(QAbstractSocket::SocketError)
 {
-    if (m_state != State_Closed) {
-        m_state = State_Closed;
-        emit disconnected();
-        deleteLater();
-    }
+    abort();
+}
+
+void HttpConnection::onTlsError(int code, const QString &message)
+{
+    Q_UNUSED(code);
+    Q_UNUSED(message);
+    abort();
 }
 
 void HttpConnection::processHeaderBuffer()
