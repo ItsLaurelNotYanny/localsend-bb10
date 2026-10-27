@@ -6551,6 +6551,41 @@ void testReceiveServerPendingCancelSlotReleaseH4D()
     TEST_PASS();
 }
 
+void testUiConfiguredHttpsPlainDisplayH4E()
+{
+    TEST_CASE("H4-E - UI configuration and peer badges display plain HTTPS without hardcoded TLS 1.3");
+
+    QString peerCardPath = "assets/PeerCard.qml";
+    if (!QFile::exists(peerCardPath)) {
+        peerCardPath = "../assets/PeerCard.qml";
+    }
+    QString mainQmlPath = "assets/main.qml";
+    if (!QFile::exists(mainQmlPath)) {
+        mainQmlPath = "../assets/main.qml";
+    }
+
+    QFile peerCardFile(peerCardPath);
+    ASSERT_TRUE(peerCardFile.open(QIODevice::ReadOnly | QIODevice::Text), "open PeerCard.qml");
+    QString peerCardContent = QString::fromUtf8(peerCardFile.readAll());
+    peerCardFile.close();
+
+    ASSERT_TRUE(!peerCardContent.contains("HTTPS (TLS 1.3)"), "PeerCard.qml must not hardcode TLS 1.3");
+    ASSERT_TRUE(peerCardContent.contains("\"HTTPS\""), "PeerCard.qml must display plain HTTPS");
+
+    QFile mainQmlFile(mainQmlPath);
+    ASSERT_TRUE(mainQmlFile.open(QIODevice::ReadOnly | QIODevice::Text), "open main.qml");
+    QString mainQmlContent = QString::fromUtf8(mainQmlFile.readAll());
+    mainQmlFile.close();
+
+    ASSERT_TRUE(!mainQmlContent.contains("HTTPS (TLS 1.3)"), "main.qml must not hardcode TLS 1.3 in header");
+    ASSERT_TRUE(!mainQmlContent.contains("TLS 1.3 Active"), "main.qml must not hardcode TLS 1.3 Active in settings");
+    ASSERT_TRUE(mainQmlContent.contains("\"HTTPS • \""), "main.qml must display plain HTTPS header");
+    ASSERT_TRUE(mainQmlContent.contains("\"Protocol: \" + (app.isHttps ? \"HTTPS\" : \"HTTP (Plaintext)\")"),
+                "main.qml must display plain HTTPS protocol in settings");
+
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -6673,6 +6708,7 @@ int main(int argc, char **argv)
     testHttpServerTlsSetupFailureAndSwitchIsolationH4B();
     testHttpConnectionRequestTimeoutAndSlotReclamationH4C();
     testReceiveServerPendingCancelSlotReleaseH4D();
+    testUiConfiguredHttpsPlainDisplayH4E();
 
     std::cout << "================================================" << std::endl;
     std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;

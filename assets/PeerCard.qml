@@ -38,7 +38,7 @@ Container {
             }
             Label {
                 visible: cardRoot.isHttps
-                text: "HTTPS (TLS 1.3)"
+                text: "HTTPS"
                 textStyle.base: SystemDefaults.TextStyles.SmallText
                 textStyle.color: Color.create("#38A169")
             }

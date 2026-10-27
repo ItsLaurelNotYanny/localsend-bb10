@@ -815,7 +815,7 @@ void UiController::populatePeers(QObject *containerObj)
 
         if (isHttps) {
             bb::cascades::Label *httpsLabel = new bb::cascades::Label();
-            httpsLabel->setText("HTTPS (TLS 1.3)");
+            httpsLabel->setText("HTTPS");
             httpsLabel->textStyle()->setBase(bb::cascades::SystemDefaults::TextStyles::smallText());
             httpsLabel->textStyle()->setColor(bb::cascades::Color::fromARGB(0xFF38A169));
             left->add(httpsLabel);

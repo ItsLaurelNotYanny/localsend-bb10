@@ -56,7 +56,7 @@ TabbedPane {
                             textStyle.color: Color.White
                         }
                         Label {
-                            text: (app.isHttps ? "HTTPS (TLS 1.3) • " : "HTTP • ") + app.networkStatus + " • Port " + app.devicePort + " • " + app.appVersion
+                            text: (app.isHttps ? "HTTPS • " : "HTTP • ") + app.networkStatus + " • Port " + app.devicePort + " • " + app.appVersion
                             textStyle.base: SystemDefaults.TextStyles.SmallText
                             textStyle.color: Color.create("#68D391")
                         }
@@ -547,7 +547,7 @@ TabbedPane {
                         title: "Security & Certificate"
                     }
                     Label {
-                        text: "Protocol: " + (app.isHttps ? "HTTPS (TLS 1.3 Active)" : "HTTP (Plaintext)")
+                        text: "Protocol: " + (app.isHttps ? "HTTPS" : "HTTP (Plaintext)")
                         textStyle.base: SystemDefaults.TextStyles.BodyText
                     }
                     Label {
