@@ -34,44 +34,58 @@ void HttpServer::destroyTlsContext()
     }
 }
 
-void HttpServer::setTlsIdentity(const localsend::LocalIdentity &identity)
+bool HttpServer::setTlsIdentity(const localsend::LocalIdentity &identity, QString *error)
 {
-    destroyTlsContext();
     if (!identity.isValid()) {
+        destroyTlsContext();
         m_isSecure = false;
-        return;
+        if (error) {
+            *error = "Invalid TLS identity certificate or key";
+        }
+        return false;
     }
 
-    m_tlsContext = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
-    if (!m_tlsContext) {
+    posix_tls_context_t *newCtx = posix_tls_context_create(POSIX_TLS_POLICY_P2P);
+    if (!newCtx) {
+        if (error) {
+            *error = "Failed to create posix_tls_context";
+        }
         qWarning() << "[HttpServer] Failed to create posix_tls_context_t";
-        m_isSecure = false;
-        return;
+        return false;
     }
 
     int rc = posix_tls_context_set_credentials(
-        m_tlsContext,
+        newCtx,
         identity.certPem().constData(), static_cast<size_t>(identity.certPem().size()),
         identity.keyPem().constData(), static_cast<size_t>(identity.keyPem().size()));
 
     if (rc != POSIX_TLS_OK) {
+        if (error) {
+            *error = QString("Failed to configure server identity credentials: code %1").arg(rc);
+        }
         qWarning() << "[HttpServer] Failed to configure server identity credentials:" << rc;
-        destroyTlsContext();
-        m_isSecure = false;
-        return;
+        posix_tls_context_destroy(newCtx);
+        return false;
     }
 
+    destroyTlsContext();
+    m_tlsContext = newCtx;
     m_isSecure = true;
+    return true;
 }
 
-void HttpServer::setSecure(bool secure)
+bool HttpServer::setSecure(bool secure, QString *error)
 {
     if (secure && !m_tlsContext) {
+        if (error) {
+            *error = "Cannot enable TLS without valid credentials context";
+        }
         qWarning() << "[HttpServer] Cannot enable TLS without valid credentials context";
         m_isSecure = false;
-        return;
+        return false;
     }
     m_isSecure = secure;
+    return true;
 }
 
 bool HttpServer::listen(const QHostAddress &address, quint16 port, QString *error)

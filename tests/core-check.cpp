@@ -6173,6 +6173,101 @@ void testReceiveServerHttpsSourceIpBindingAndCrossSourceIsolationH4A()
     TEST_PASS();
 }
 
+void testHttpServerTlsSetupFailureAndSwitchIsolationH4B()
+{
+    TEST_CASE("H4-B - TLS configuration failure propagation, startup listener suppression, and switch rollback");
+
+    // 1. HttpServer::setTlsIdentity with invalid identity fails closed
+    HttpServer server;
+    QString err;
+    localsend::LocalIdentity invalidIdentity;
+    ASSERT_FALSE(server.setTlsIdentity(invalidIdentity, &err), "setTlsIdentity with invalid identity must fail");
+    ASSERT_FALSE(server.isSecure(), "isSecure must be false on invalid identity");
+    ASSERT_TRUE(err.contains("Invalid TLS identity"), "error message must report invalid identity");
+
+    // 2. HttpServer::setSecure(true) without credentials context fails closed
+    ASSERT_FALSE(server.setSecure(true, &err), "setSecure(true) without context must fail");
+    ASSERT_FALSE(server.isSecure(), "isSecure must remain false");
+    ASSERT_TRUE(err.contains("Cannot enable TLS"), "error message must report missing context");
+
+    // 3. Application::start() with protocol 'https' and missing/invalid identity fails before listening
+    QString tempDir = QDir::tempPath() + QString("/localsend_test_h4b_%1").arg(QDateTime::currentMSecsSinceEpoch());
+    QDir().mkpath(tempDir);
+    QString iniPath = tempDir + "/settings.ini";
+
+    QString badIdDir = tempDir + "/bad_id_file";
+    QFile badFile(badIdDir);
+    ASSERT_TRUE(badFile.open(QIODevice::WriteOnly), "create bad file");
+    badFile.write("blocking directory");
+    badFile.close();
+
+    QSettings settings(iniPath, QSettings::IniFormat);
+    settings.setValue("network/protocol", "https");
+    settings.setValue("security/identityDir", badIdDir);
+    settings.sync();
+
+    localsend::Application app(0, &settings);
+    app.setIdentityStorageDirectory(badIdDir);
+    ASSERT_FALSE(app.localIdentity().isValid(), "identity must be invalid");
+    app.setPort(0);
+
+    QString startErr;
+    bool startOk = app.start(&startErr);
+    ASSERT_FALSE(startOk, "start() with https protocol and invalid identity must fail");
+    ASSERT_FALSE(app.httpServer()->isListening(), "httpServer must NOT be listening on failed TLS startup");
+    ASSERT_FALSE(app.httpServer()->isSecure(), "httpServer must not be marked secure");
+    ASSERT_FALSE(startErr.isEmpty(), "startError must not be empty");
+
+    // 4. Application starting with 'http' must succeed even when identity is missing
+    settings.setValue("network/protocol", "http");
+    settings.setValue("security/identityDir", badIdDir);
+    settings.sync();
+    localsend::Application httpApp(0, &settings);
+    httpApp.setIdentityStorageDirectory(badIdDir);
+    ASSERT_FALSE(httpApp.localIdentity().isValid(), "httpApp identity must be invalid");
+    httpApp.setPort(0);
+    startOk = httpApp.start(&startErr);
+    ASSERT_TRUE(startOk, QString("start() with http protocol must succeed without valid identity: %1").arg(startErr).toLocal8Bit().constData());
+    ASSERT_TRUE(httpApp.httpServer()->isListening(), "httpServer must be listening in http mode");
+    ASSERT_FALSE(httpApp.httpServer()->isSecure(), "httpServer must not be secure");
+    ASSERT_TRUE(httpApp.protocol() == "http", "protocol must be http");
+
+    // 5. Switching from HTTP to HTTPS with invalid identity fails and preserves HTTP state
+    QString switchErr;
+    bool switchOk = httpApp.setProtocol("https", &switchErr, true);
+    ASSERT_FALSE(switchOk, "setProtocol('https') with invalid identity must fail");
+    ASSERT_FALSE(switchErr.isEmpty(), "switchErr must report reason");
+    ASSERT_TRUE(httpApp.protocol() == "http", "protocol must remain http after failed switch");
+    ASSERT_TRUE(settings.value("network/protocol").toString() == "http", "stored protocol must remain http");
+    ASSERT_TRUE(httpApp.httpServer()->isListening(), "httpServer must remain listening in http mode");
+    ASSERT_FALSE(httpApp.httpServer()->isSecure(), "httpServer must remain not secure");
+
+    // 6. Generating valid identity allows switching to HTTPS and back
+    QString validIdDir = tempDir + "/valid_identity";
+    localsend::LocalIdentity validId;
+    ASSERT_TRUE(localsend::LocalIdentity::loadOrCreate(validIdDir, &validId), "create valid identity");
+    httpApp.setIdentityStorageDirectory(validIdDir);
+
+    switchOk = httpApp.setProtocol("https", &switchErr, true);
+    ASSERT_TRUE(switchOk, "setProtocol('https') with valid identity must succeed");
+    ASSERT_TRUE(httpApp.protocol() == "https", "protocol must become https");
+    ASSERT_TRUE(settings.value("network/protocol").toString() == "https", "stored protocol must become https");
+    ASSERT_TRUE(httpApp.httpServer()->isSecure(), "httpServer must be marked secure");
+    ASSERT_TRUE(httpApp.httpServer()->isListening(), "httpServer must be listening");
+
+    // Switching back to HTTP succeeds cleanly
+    switchOk = httpApp.setProtocol("http", &switchErr, true);
+    ASSERT_TRUE(switchOk, "setProtocol('http') must succeed");
+    ASSERT_TRUE(httpApp.protocol() == "http", "protocol must become http");
+    ASSERT_TRUE(settings.value("network/protocol").toString() == "http", "stored protocol must become http");
+    ASSERT_FALSE(httpApp.httpServer()->isSecure(), "httpServer must no longer be secure");
+
+    httpApp.stop();
+    app.stop();
+    QDir(tempDir).removeRecursively();
+    TEST_PASS();
+}
+
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
@@ -6292,6 +6387,7 @@ int main(int argc, char **argv)
     testUiControllerHttpsPeerSupportAndCertManagementH4();
     testHttpServerPlaintextFallbackWhenConfiguredH4();
     testReceiveServerHttpsSourceIpBindingAndCrossSourceIsolationH4A();
+    testHttpServerTlsSetupFailureAndSwitchIsolationH4B();
 
     std::cout << "================================================" << std::endl;
     std::cout << "Total: " << g_testCount << ", Passed: " << g_passCount << ", Failed: " << g_failCount << std::endl;

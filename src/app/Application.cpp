@@ -73,8 +73,12 @@ void Application::setIdentityStorageDirectory(const QString &path)
             m_settings->sync();
         }
         if (m_httpServer && m_localInfo.protocol == "https") {
-            m_httpServer->setTlsIdentity(m_identity);
-            m_httpServer->setSecure(true);
+            QString err;
+            if (!m_httpServer->setTlsIdentity(m_identity, &err)) {
+                qWarning() << "[Application] Failed to update TLS identity:" << err;
+            } else {
+                m_httpServer->setSecure(true);
+            }
         }
         m_discovery->setLocalIdentity(m_identity);
         m_discovery->updateLocalInfo(m_localInfo);
@@ -150,17 +154,28 @@ bool Application::start(QString *error)
         return false;
     }
 
-    if (!m_identityInitError.isEmpty() || !m_identity.isValid()) {
-        if (!LocalIdentity::loadOrCreate(identityStorageDirectory(), &m_identity, &m_identityInitError)) {
-            if (error) {
-                *error = QString("Local TLS identity error: %1").arg(m_identityInitError);
+    if (m_localInfo.protocol == "https") {
+        if (!m_identityInitError.isEmpty() || !m_identity.isValid()) {
+            if (!LocalIdentity::loadOrCreate(identityStorageDirectory(), &m_identity, &m_identityInitError)) {
+                if (error) {
+                    *error = QString("Local TLS identity error: %1").arg(m_identityInitError);
+                }
+                return false;
             }
-            return false;
+            m_localInfo.fingerprint = m_identity.fingerprint();
+            m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
+            m_discovery->setLocalIdentity(m_identity);
+            m_settings->sync();
         }
-        m_localInfo.fingerprint = m_identity.fingerprint();
-        m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
-        m_discovery->setLocalIdentity(m_identity);
-        m_settings->sync();
+    } else {
+        if (!m_identity.isValid()) {
+            if (LocalIdentity::loadOrCreate(identityStorageDirectory(), &m_identity, &m_identityInitError)) {
+                m_localInfo.fingerprint = m_identity.fingerprint();
+                m_settings->setValue("device/fingerprint", m_localInfo.fingerprint);
+                m_discovery->setLocalIdentity(m_identity);
+                m_settings->sync();
+            }
+        }
     }
 
     // Ensure receive directory exists
@@ -185,9 +200,19 @@ bool Application::start(QString *error)
     m_receiveServer->attach(m_httpServer);
 
     // Configure HTTPS on HttpServer if identity is valid and protocol is https
-    if (m_identity.isValid() && m_localInfo.protocol == "https") {
-        m_httpServer->setTlsIdentity(m_identity);
-        m_httpServer->setSecure(true);
+    if (m_localInfo.protocol == "https") {
+        if (!m_identity.isValid()) {
+            if (error) {
+                *error = "Cannot start HTTPS: local identity certificate is not valid";
+            }
+            return false;
+        }
+        if (!m_httpServer->setTlsIdentity(m_identity, error)) {
+            return false;
+        }
+        if (!m_httpServer->setSecure(true, error)) {
+            return false;
+        }
     } else {
         m_httpServer->setSecure(false);
     }
@@ -288,28 +313,37 @@ bool Application::setProtocol(const QString &protocol, QString *error, bool pers
         if (error) *error = "Invalid protocol; must be 'http' or 'https'";
         return false;
     }
-    if (proto == "https" && !m_identity.isValid()) {
-        if (error) *error = "Cannot enable HTTPS: local identity certificate is not valid";
-        return false;
+    if (proto == m_localInfo.protocol && (!m_httpServer || m_httpServer->isSecure() == (proto == "https"))) {
+        return true;
     }
     if (isTransferActive()) {
         if (error) *error = "Cannot change protocol while transfer is active";
         return false;
     }
 
+    if (proto == "https") {
+        if (!m_identity.isValid()) {
+            if (error) *error = "Cannot enable HTTPS: local identity certificate is not valid";
+            return false;
+        }
+        if (m_httpServer) {
+            if (!m_httpServer->setTlsIdentity(m_identity, error)) {
+                return false;
+            }
+            if (!m_httpServer->setSecure(true, error)) {
+                return false;
+            }
+        }
+    } else {
+        if (m_httpServer) {
+            m_httpServer->setSecure(false);
+        }
+    }
+
     m_localInfo.protocol = proto;
     if (persist && m_settings) {
         m_settings->setValue("network/protocol", proto);
         m_settings->sync();
-    }
-
-    if (m_httpServer) {
-        if (proto == "https") {
-            m_httpServer->setTlsIdentity(m_identity);
-            m_httpServer->setSecure(true);
-        } else {
-            m_httpServer->setSecure(false);
-        }
     }
 
     if (m_discovery) {

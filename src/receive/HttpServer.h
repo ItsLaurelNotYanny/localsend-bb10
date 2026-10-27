@@ -44,8 +44,8 @@ public:
     explicit HttpServer(QObject *parent = 0);
     virtual ~HttpServer();
 
-    void setTlsIdentity(const localsend::LocalIdentity &identity);
-    void setSecure(bool secure);
+    bool setTlsIdentity(const localsend::LocalIdentity &identity, QString *error = 0);
+    bool setSecure(bool secure, QString *error = 0);
     bool isSecure() const { return m_isSecure; }
 
     void setHandshakeTimeout(int timeoutMs) { m_handshakeTimeoutMs = timeoutMs; }
