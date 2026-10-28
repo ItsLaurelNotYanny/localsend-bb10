@@ -78,6 +78,7 @@ echo "Package: ${BAR_FILE}"
 echo "Method:  ${METHOD}"
 
 if [ "${METHOD}" == "deploy" ]; then
+    USE_CONTAINER=false
     if ! command -v blackberry-deploy >/dev/null 2>&1; then
         if [ -d "${HOME}/bbndk/host_10_3_1_12/win32/x86/usr/bin" ]; then
             export PATH="${HOME}/bbndk/features/com.qnx.tools.jre.linux.x86_64_1.7.0.51/jre/bin:${HOME}/bbndk/host_10_3_1_12/win32/x86/usr/bin:$PATH"
@@ -85,22 +86,36 @@ if [ "${METHOD}" == "deploy" ]; then
     fi
 
     if ! command -v blackberry-deploy >/dev/null 2>&1; then
-        echo "ERROR: blackberry-deploy not found in PATH."
-        echo "Please source bbndk-env.sh or use '--method ssh' on rooted devices."
-        exit 1
+        if command -v docker >/dev/null 2>&1 && docker image inspect bb10-native-dev:local >/dev/null 2>&1; then
+            USE_CONTAINER=true
+        else
+            echo "ERROR: blackberry-deploy not found in PATH and container bb10-native-dev:local not available."
+            echo "Please source bbndk-env.sh or install Docker."
+            exit 1
+        fi
     fi
 
     DEPLOY_ARGS=(-installApp)
     if [ "${LAUNCH_APP}" = true ]; then
         DEPLOY_ARGS+=(-launchApp)
     fi
-    DEPLOY_ARGS+=(-device "${DEVICE_IP}" -package "${BAR_FILE}")
+    DEPLOY_ARGS+=(-device "${DEVICE_IP}")
     if [ -n "${DEVICE_PASSWORD}" ]; then
         DEPLOY_ARGS+=(-password "${DEVICE_PASSWORD}")
     fi
 
     echo "Running blackberry-deploy..."
-    blackberry-deploy "${DEPLOY_ARGS[@]}"
+    if [ "${USE_CONTAINER}" = true ]; then
+        BAR_ABS="$(cd "$(dirname "${BAR_FILE}")" && pwd)/$(basename "${BAR_FILE}")"
+        BAR_DIR="$(dirname "${BAR_ABS}")"
+        BAR_NAME="$(basename "${BAR_ABS}")"
+        docker run --rm --net host \
+            -v "${BAR_DIR}:/pkg:ro" \
+            bb10-native-dev:local \
+            blackberry-deploy "${DEPLOY_ARGS[@]}" -package "/pkg/${BAR_NAME}"
+    else
+        blackberry-deploy "${DEPLOY_ARGS[@]}" -package "${BAR_FILE}"
+    fi
     echo "Successfully installed ${BAR_FILE} on ${DEVICE_IP}!"
 
 elif [ "${METHOD}" == "ssh" ]; then

@@ -24,22 +24,32 @@ if [ ! -d "${BBNDK_PATH}" ] && [ -d "/opt/bbndk" ]; then
     BBNDK_PATH="/opt/bbndk"
 fi
 
-# Prefer containerized toolchain if available
-if [ -n "${CONTAINER_CLI}" ] && [ -d "${BBNDK_PATH}" ]; then
-    echo "Using containerized toolchain via ${CONTAINER_CLI} (bb10-toolchain:latest)..."
-    if ! ${CONTAINER_CLI} image inspect bb10-toolchain:latest >/dev/null 2>&1; then
-        echo "Building bb10-toolchain container image..."
-        ${CONTAINER_CLI} build -t bb10-toolchain:latest -f "${ROOT_DIR}/docker/bb10-toolchain/Dockerfile" "${ROOT_DIR}/docker/bb10-toolchain"
-    fi
+# Prefer containerized bb10-native-dev:local toolchain if available
+if command -v docker >/dev/null 2>&1 && docker image inspect bb10-native-dev:local >/dev/null 2>&1; then
+    echo "Using verified containerized toolchain bb10-native-dev:local..."
+    
+    # 1. Cross-compile QNX ARMv7 binary and verify symbol isolation
+    bash "${ROOT_DIR}/scripts/build_qnx.sh"
 
-    ${CONTAINER_CLI} run --rm \
-        -v "${BBNDK_PATH}:/bbndk:z" \
-        -v "${ROOT_DIR}:/workspace:z" \
+    # 2. Stage binary for Cascades packaging
+    rm -rf "${ROOT_DIR}/arm/o.le-v7"
+    mkdir -p "${ROOT_DIR}/arm/o.le-v7"
+    cp -f "${ROOT_DIR}/build-qnx/localsend-bb10" "${ROOT_DIR}/arm/o.le-v7/localsend-bb10"
+    cp -f "${ROOT_DIR}/build-qnx/localsend-bb10" "${ROOT_DIR}/arm/o.le-v7/localsend-bb10.so"
+
+    # 3. Package BAR using container nativepackager
+    echo "Packaging BAR archive..."
+    docker run --rm --network none --user "$(id -u):$(id -g)" \
+        -v "${ROOT_DIR}:/workspace" \
         -w /workspace \
-        bb10-toolchain:latest \
-        /workspace/docker/bb10-toolchain/bin/bb10-build /workspace
+        bb10-native-dev:local \
+        blackberry-nativepackager -package localsend-bb10.bar -devMode bar-descriptor.xml
 
     echo "=== Build and Packaging Complete ==="
+    echo "Artifact: ${ROOT_DIR}/localsend-bb10.bar"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "${ROOT_DIR}/localsend-bb10.bar"
+    fi
     exit 0
 fi
 
