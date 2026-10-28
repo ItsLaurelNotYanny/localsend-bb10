@@ -35,6 +35,7 @@ UiController::UiController(Application *app, QObject *parent)
     , m_transferState("Idle")
     , m_transferProgress(0)
     , m_transferStatusText("Ready")
+    , m_sha256Verified(false)
     , m_hasIncomingOffer(false)
 {
     Q_ASSERT(m_app != 0);
@@ -416,6 +417,8 @@ void UiController::cancelTransfer()
     }
 
     m_transferState = "Cancelled";
+    m_sha256Verified = false;
+    m_lastTransferSha256.clear();
     m_transferStatusText = "Transfer cancelled by user";
 
     emit transferStateChanged();
@@ -562,14 +565,26 @@ void UiController::onSendStateChanged(const QString &requestId, const QString &s
     m_transferState = state;
 
     if (state == "Preparing") {
+        m_sha256Verified = false;
+        m_lastTransferSha256.clear();
         m_transferStatusText = "Connecting and awaiting recipient approval...";
     } else if (state == "Uploading") {
+        m_sha256Verified = false;
+        m_lastTransferSha256.clear();
         m_transferStatusText = "Uploading file...";
     } else if (state == "Completed") {
         m_transferStatusText = "Transfer completed successfully!";
+        m_sha256Verified = true;
+        if (!m_selectedFilePath.isEmpty() && QFile::exists(m_selectedFilePath)) {
+            m_lastTransferSha256 = CryptoUtil::sha256File(m_selectedFilePath);
+        }
     } else if (state == "Failed") {
+        m_sha256Verified = false;
+        m_lastTransferSha256.clear();
         m_transferStatusText = "Transfer failed";
     } else if (state == "Cancelled") {
+        m_sha256Verified = false;
+        m_lastTransferSha256.clear();
         m_transferStatusText = "Transfer cancelled";
     }
 
@@ -678,6 +693,17 @@ void UiController::onReceiveFinished(const QString &sessionId, const QString &sa
     m_hasIncomingOffer = false;
     m_lastSavedFilePath = savedPath;
 
+    m_sha256Verified = false;
+    m_lastTransferSha256.clear();
+    if (m_app && m_app->receiveServer()) {
+        m_sha256Verified = m_app->receiveServer()->lastSha256Verified();
+        m_lastTransferSha256 = m_app->receiveServer()->lastComputedSha256();
+    }
+    if (m_lastTransferSha256.isEmpty() && QFile::exists(savedPath)) {
+        m_lastTransferSha256 = CryptoUtil::sha256File(savedPath);
+        m_sha256Verified = !m_lastTransferSha256.isEmpty();
+    }
+
     QString baseName = QFileInfo(savedPath).fileName();
     m_transferStatusText = QString("Received %1 successfully! Saved to: %2").arg(baseName).arg(savedPath);
 
@@ -693,6 +719,8 @@ void UiController::onReceiveCancelled(const QString &sessionId, const QString &r
 {
     Q_UNUSED(sessionId);
     m_transferState = "Cancelled";
+    m_sha256Verified = false;
+    m_lastTransferSha256.clear();
     m_hasIncomingOffer = false;
     m_transferStatusText = QString("Receive cancelled: %1").arg(reason);
 

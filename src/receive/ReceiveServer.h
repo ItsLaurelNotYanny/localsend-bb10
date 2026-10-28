@@ -52,6 +52,8 @@ public:
     bool hasActiveSession() const { return !m_activeSession.sessionId.isEmpty(); }
     QString activeSessionId() const { return m_activeSession.sessionId; }
     QString activeRequestId() const { return m_activeSession.requestId; }
+    QString lastComputedSha256() const { return m_lastComputedSha256; }
+    bool lastSha256Verified() const { return m_lastSha256Verified; }
 
 signals:
     // T05
@@ -130,6 +132,9 @@ private:
     QTimer *m_consentTimer;     // 120s awaiting user consent
     QTimer *m_idleUploadTimer;  // 60s awaiting upload start after consent
     QTimer *m_inactivityTimer;  // 30s stalled upload timeout
+
+    QString m_lastComputedSha256;
+    bool m_lastSha256Verified;
 };
 
 #endif // RECEIVE_SERVER_H

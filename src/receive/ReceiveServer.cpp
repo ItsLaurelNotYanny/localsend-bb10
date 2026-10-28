@@ -20,6 +20,7 @@ ReceiveServer::ReceiveServer(localsend::Application *app,
     , m_consentTimer(new QTimer(this))
     , m_idleUploadTimer(new QTimer(this))
     , m_inactivityTimer(new QTimer(this))
+    , m_lastSha256Verified(false)
 {
     m_pendingOffer.connection = 0;
 
@@ -510,8 +511,10 @@ bool ReceiveServer::finishUpload(QString *savedPath, int *httpStatus, QString *e
     }
 
     // Verify SHA-256 if supplied
+    QString computed = m_activeSession.shaCtx.finalHex();
+    bool verified = false;
+
     if (!m_activeSession.meta.sha256.trimmed().isEmpty()) {
-        QString computed = m_activeSession.shaCtx.finalHex();
         if (computed.compare(m_activeSession.meta.sha256.trimmed(), Qt::CaseInsensitive) != 0) {
             if (httpStatus) *httpStatus = 422;
             if (error) *error = QString("SHA-256 mismatch: declared %1, computed %2")
@@ -521,7 +524,12 @@ bool ReceiveServer::finishUpload(QString *savedPath, int *httpStatus, QString *e
             emit receiveFailed(failedSessionId, *error);
             return false;
         }
+        verified = true;
+    } else {
+        verified = !computed.isEmpty();
     }
+    m_lastComputedSha256 = computed;
+    m_lastSha256Verified = verified;
 
     bool flushOk = m_activeSession.partFile->flush();
     if (!flushOk || m_activeSession.partFile->error() != QFile::NoError) {

@@ -439,6 +439,7 @@ TabbedPane {
                         }
 
                         Button {
+                            visible: app.transferActive
                             text: "Cancel Transfer"
                             enabled: app.transferActive
                             horizontalAlignment: HorizontalAlignment.Fill
@@ -447,8 +448,35 @@ TabbedPane {
                             }
                         }
 
+                        // SHA-256 Integrity Verification Badge
+                        Container {
+                            visible: app.sha256Verified && app.transferState == "Completed"
+                            topMargin: 8.0
+                            bottomMargin: 8.0
+                            topPadding: 10.0
+                            bottomPadding: 10.0
+                            leftPadding: 14.0
+                            rightPadding: 14.0
+                            background: Color.create("#22543D")
+                            horizontalAlignment: HorizontalAlignment.Fill
+
+                            Label {
+                                text: "SHA-256: Verified ✓"
+                                textStyle.base: SystemDefaults.TextStyles.TitleText
+                                textStyle.color: Color.White
+                                horizontalAlignment: HorizontalAlignment.Center
+                            }
+                            Label {
+                                visible: app.lastTransferSha256.length > 0
+                                text: app.lastTransferSha256
+                                textStyle.base: SystemDefaults.TextStyles.SmallText
+                                textStyle.color: Color.create("#9AE6B4")
+                                horizontalAlignment: HorizontalAlignment.Center
+                            }
+                        }
+
                         Label {
-                            visible: app.lastSavedFilePath.length > 0
+                            visible: app.lastSavedFilePath.length > 0 && app.transferState == "Completed"
                             text: "Saved file:\n" + app.lastSavedFilePath
                             textStyle.base: SystemDefaults.TextStyles.SmallText
                             textStyle.color: Color.create("#2B6CB0")
@@ -456,7 +484,7 @@ TabbedPane {
                         }
 
                         Button {
-                            visible: app.lastSavedFilePath.length > 0
+                            visible: app.lastSavedFilePath.length > 0 && app.transferState == "Completed"
                             text: "Open Received File"
                             horizontalAlignment: HorizontalAlignment.Fill
                             topMargin: 8.0

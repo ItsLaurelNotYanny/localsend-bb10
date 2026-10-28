@@ -45,6 +45,8 @@ class UiController : public QObject {
     Q_PROPERTY(QString transferState READ transferState NOTIFY transferStateChanged)
     Q_PROPERTY(int transferProgress READ transferProgress NOTIFY transferProgressChanged)
     Q_PROPERTY(QString transferStatusText READ transferStatusText NOTIFY transferStatusTextChanged)
+    Q_PROPERTY(bool sha256Verified READ sha256Verified NOTIFY transferStateChanged)
+    Q_PROPERTY(QString lastTransferSha256 READ lastTransferSha256 NOTIFY transferStateChanged)
 
     // Incoming offer prompt
     Q_PROPERTY(bool hasIncomingOffer READ hasIncomingOffer NOTIFY incomingOfferChanged)
@@ -71,7 +73,7 @@ public:
     QString deviceAlias() const;
     int devicePort() const;
     QString receiveDirectory() const;
-    QString appVersion() const { return "v0.2.0 (Build 2)"; }
+    QString appVersion() const { return "v0.2.0 (Build 3)"; }
     QString certificateFingerprint() const;
     bool isHttps() const;
     QString serverProtocol() const;
@@ -90,6 +92,8 @@ public:
     QString transferState() const { return m_transferState; }
     int transferProgress() const { return m_transferProgress; }
     QString transferStatusText() const { return m_transferStatusText; }
+    bool sha256Verified() const { return m_sha256Verified; }
+    QString lastTransferSha256() const { return m_lastTransferSha256; }
 
     bool hasIncomingOffer() const { return m_hasIncomingOffer; }
     QString incomingPeerAlias() const { return m_incomingPeerAlias; }
@@ -193,6 +197,8 @@ private:
     QString m_transferState;
     int m_transferProgress;
     QString m_transferStatusText;
+    bool m_sha256Verified;
+    QString m_lastTransferSha256;
 
     bool m_hasIncomingOffer;
     QString m_incomingPeerAlias;

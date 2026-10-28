@@ -6594,6 +6594,12 @@ void testUiConfiguredHttpsPlainDisplayH4E()
                 "main.qml must set Transfers tab icon");
     ASSERT_TRUE(mainQmlContent.contains("imageSource: \"asset:///icons/ic_settings.png\""),
                 "main.qml must set Settings tab icon");
+    ASSERT_TRUE(mainQmlContent.contains("SHA-256: Verified"),
+                "main.qml must display SHA-256 verified badge");
+    ASSERT_TRUE(mainQmlContent.contains("app.sha256Verified"),
+                "main.qml must check sha256Verified");
+    ASSERT_TRUE(mainQmlContent.contains("app.lastTransferSha256"),
+                "main.qml must display lastTransferSha256");
 
     QString iconsDir = "assets/icons/";
     if (!QFile::exists(iconsDir + "ic_send.png")) {
