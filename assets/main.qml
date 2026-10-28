@@ -61,12 +61,6 @@ TabbedPane {
                             textStyle.base: SystemDefaults.TextStyles.SmallText
                             textStyle.color: Color.create("#68D391")
                         }
-                        Label {
-                            visible: app.certificateFingerprint.length > 0
-                            text: "SHA-256: " + app.certificateFingerprint
-                            textStyle.base: SystemDefaults.TextStyles.SmallText
-                            textStyle.color: Color.create("#CBD5E0")
-                        }
                     }
 
                     Divider {}
@@ -554,14 +548,10 @@ TabbedPane {
                         textStyle.base: SystemDefaults.TextStyles.BodyText
                     }
                     Label {
-                        text: "Certificate Fingerprint (SHA-256):"
+                        visible: app.isHttps
+                        text: "TLS Certificate: Active (Self-Signed X.509)"
                         textStyle.base: SystemDefaults.TextStyles.SmallText
                         textStyle.color: Color.create("#718096")
-                    }
-                    Label {
-                        text: app.certificateFingerprint.length > 0 ? app.certificateFingerprint : "No certificate loaded"
-                        textStyle.base: SystemDefaults.TextStyles.SmallText
-                        textStyle.color: Color.create("#2B6CB0")
                     }
 
                     Divider {}
@@ -597,7 +587,7 @@ TabbedPane {
                         textStyle.base: SystemDefaults.TextStyles.TitleText
                     }
                     Label {
-                        text: "Version 0.1.1 (Build 7)\nProtocol v2.2 Compliant\nNative Qt 4.8.5 & Cascades C++03"
+                        text: app.appVersion + "\nProtocol v2.2 Compliant (HTTPS)\nNative Qt 4.8.5 & Cascades C++03"
                         textStyle.base: SystemDefaults.TextStyles.BodyText
                         textStyle.color: Color.create("#718096")
                     }
