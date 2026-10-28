@@ -39,7 +39,7 @@ tests/*.pcap
 /tmp/localsend-*
 tests/fixtures/
 data/
-screenshots/
+/screenshots/
 *.pem
 __pycache__/
 *.pyc

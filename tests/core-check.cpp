@@ -324,7 +324,7 @@ void testPrepareRequestValidSingleFile()
 
     const FileMeta &meta = req.files.value("file-abc");
     ASSERT_TRUE(meta.size == 10485760, "size must be 10485760 (10 MiB)");
-    ASSERT_TRUE(meta.fileName == QString::fromUtf8("测试 document 1.bin"), "unicode filename mismatch");
+    ASSERT_TRUE(meta.fileName == QString::fromUtf8("\346\265\213\350\257\225 document 1.bin"), "unicode filename mismatch");
     ASSERT_TRUE(meta.sha256 == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "sha256 mismatch");
 
     TEST_PASS();
@@ -1743,7 +1743,7 @@ void testEndToEndBidirectionalTransfer()
 
     // 2. Setup Sender & create test file with Chinese name
     QDir("/tmp/localsend_tx_test").mkpath(".");
-    QString txFilePath = "/tmp/localsend_tx_test/测试传输文件.bin";
+    QString txFilePath = "/tmp/localsend_tx_test/\346\265\213\350\257\225\344\274\240\350\276\223\346\226\207\344\273\266.bin";
     QFile txFile(txFilePath);
     ASSERT_TRUE(txFile.open(QIODevice::WriteOnly), "txFile open failed");
     QByteArray testPayload(65536, 'E'); // 64 KiB test payload
@@ -2038,14 +2038,14 @@ void testAppUnwritableSettingsReportsError()
             QSettings s(iniPath, QSettings::IniFormat);
             localsend::Application app(0, &s);
             originalFp = app.localInfo().fingerprint;
-            app.setAlias(QString::fromUtf8("黑莓Passport测试机"));
+            app.setAlias(QString::fromUtf8("\351\273\221\350\216\223Passport\346\265\213\350\257\225\346\234\272"));
         }
 
         {
             QSettings s2(iniPath, QSettings::IniFormat);
             localsend::Application app2(0, &s2);
             ASSERT_TRUE(app2.localInfo().fingerprint == originalFp, "fingerprint must persist across processes");
-            ASSERT_TRUE(app2.localInfo().alias == QString::fromUtf8("黑莓Passport测试机"), "Chinese alias must persist intact");
+            ASSERT_TRUE(app2.localInfo().alias == QString::fromUtf8("\351\273\221\350\216\223Passport\346\265\213\350\257\225\346\234\272"), "Chinese alias must persist intact");
         }
     }
 
@@ -5042,7 +5042,7 @@ void testSendHttpsSuccessfulUploadAndAckH3()
     peer.info.fingerprint = mockServer.identity.fingerprint();
 
     QByteArray payload(32768, 'X'); // 32 KiB binary payload
-    QString testFilePath = "/tmp/localsend_h3_测试文件.bin";
+    QString testFilePath = "/tmp/localsend_h3_\346\265\213\350\257\225\346\226\207\344\273\266.bin";
     QFile f(testFilePath);
     ASSERT_TRUE(f.open(QIODevice::WriteOnly), "create test file failed");
     f.write(payload);

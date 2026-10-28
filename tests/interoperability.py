@@ -31,7 +31,7 @@ def generate_fixtures(output_dir: str, include_100m: bool = False):
     fixtures = [
         ("0b.bin", 0, b""),
         ("1k.bin", 1024, bytes([i % 256 for i in range(1024)])),
-        ("测试文件_照片.png", 2048, bytes([(i * 13) % 256 for i in range(2048)])),
+        ("\u6d4b\u8bd5\u6587\u4ef6_\u7167\u7247.png", 2048, bytes([(i * 13) % 256 for i in range(2048)])),
         ("notes with spaces.txt", 1024, bytes([(i * 7) % 256 for i in range(1024)])),
     ]
 
