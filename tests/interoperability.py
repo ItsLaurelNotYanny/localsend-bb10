@@ -445,8 +445,21 @@ def send_file(target_host: str, port: int, file_path: str):
             hasher.update(chunk)
     file_sha = hasher.hexdigest()
 
-    base_url = f"http://target_host:{port}"
-    print(f"Sending '{file_name}' ({file_size} bytes, sha256: {file_sha[:12]}...) to {target_host}:{port}...")
+    # Determine protocol scheme (auto-detect HTTPS vs HTTP)
+    scheme = "http"
+    ssl_context = None
+    try:
+        import ssl
+        test_ctx = ssl._create_unverified_context()
+        test_req = urllib.request.Request(f"https://{target_host}:{port}/api/localsend/v2/info")
+        with urllib.request.urlopen(test_req, context=test_ctx, timeout=3) as resp:
+            if resp.status == 200:
+                scheme = "https"
+                ssl_context = test_ctx
+    except Exception:
+        pass
+
+    print(f"Sending '{file_name}' ({file_size} bytes, sha256: {file_sha[:12]}...) to {scheme}://{target_host}:{port}...")
 
     # Step 1: POST /api/localsend/v2/prepare-upload
     prep_req = {
@@ -457,7 +470,7 @@ def send_file(target_host: str, port: int, file_path: str):
             "deviceType": "desktop",
             "fingerprint": "py-sender-rig",
             "port": DEFAULT_PORT,
-            "protocol": "http",
+            "protocol": scheme,
             "download": False
         },
         "files": {
@@ -472,7 +485,7 @@ def send_file(target_host: str, port: int, file_path: str):
     }
 
     req_data = json.dumps(prep_req).encode("utf-8")
-    prep_url = f"http://{target_host}:{port}/api/localsend/v2/prepare-upload"
+    prep_url = f"{scheme}://{target_host}:{port}/api/localsend/v2/prepare-upload"
 
     print("  [1/2] Sending prepare-upload request. Awaiting user consent on BB10 device...")
     try:
@@ -480,7 +493,7 @@ def send_file(target_host: str, port: int, file_path: str):
             "Content-Type": "application/json",
             "Content-Length": str(len(req_data))
         }, method="POST")
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, context=ssl_context, timeout=120) as resp:
             resp_body = resp.read()
             prep_resp = json.loads(resp_body.decode("utf-8"))
     except urllib.error.HTTPError as e:
@@ -501,7 +514,7 @@ def send_file(target_host: str, port: int, file_path: str):
     print(f"  [+] Offer accepted! SessionId: {session_id}, Token: {token}")
 
     # Step 2: POST /api/localsend/v2/upload streaming
-    upload_url = f"http://{target_host}:{port}/api/localsend/v2/upload?sessionId={session_id}&fileId={file_id}&token={token}"
+    upload_url = f"{scheme}://{target_host}:{port}/api/localsend/v2/upload?sessionId={session_id}&fileId={file_id}&token={token}"
     print(f"  [2/2] Streaming {file_size} bytes to device...")
 
     start_time = time.time()
@@ -511,7 +524,7 @@ def send_file(target_host: str, port: int, file_path: str):
                 "Content-Type": "application/octet-stream",
                 "Content-Length": str(file_size)
             }, method="POST")
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, context=ssl_context, timeout=60) as resp:
                 if resp.status == 200:
                     elapsed = max(0.001, time.time() - start_time)
                     speed_mbps = (file_size / (1024 * 1024)) / elapsed
