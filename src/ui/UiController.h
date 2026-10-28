@@ -73,7 +73,7 @@ public:
     QString deviceAlias() const;
     int devicePort() const;
     QString receiveDirectory() const;
-    QString appVersion() const { return "v0.2.0 (Build 3)"; }
+    QString appVersion() const { return "v0.2.0 (Build 4)"; }
     QString certificateFingerprint() const;
     bool isHttps() const;
     QString serverProtocol() const;

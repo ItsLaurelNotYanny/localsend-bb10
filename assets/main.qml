@@ -466,13 +466,6 @@ TabbedPane {
                                 textStyle.color: Color.White
                                 horizontalAlignment: HorizontalAlignment.Center
                             }
-                            Label {
-                                visible: app.lastTransferSha256.length > 0
-                                text: app.lastTransferSha256
-                                textStyle.base: SystemDefaults.TextStyles.SmallText
-                                textStyle.color: Color.create("#9AE6B4")
-                                horizontalAlignment: HorizontalAlignment.Center
-                            }
                         }
 
                         Label {
