@@ -67,10 +67,18 @@ if [ -z "${DEVICE_IP}" ]; then
     usage
 fi
 
-if [ ! -f "${BAR_FILE}" ]; then
-    echo "ERROR: BAR package not found at: ${BAR_FILE}"
-    echo "Please run scripts/build-bb10.sh first to build the package."
-    exit 1
+if [ -z "${BAR_FILE}" ] || [ ! -f "${BAR_FILE}" ]; then
+    VERSION="$(grep '<versionNumber>' "${ROOT_DIR}/bar-descriptor.xml" 2>/dev/null | sed -e 's/.*<versionNumber>\(.*\)<\/versionNumber>.*/\1/' -e 's/[[:space:]]//g' || true)"
+    BUILD="$(grep '<buildId>' "${ROOT_DIR}/bar-descriptor.xml" 2>/dev/null | sed -e 's/.*<buildId>\(.*\)<\/buildId>.*/\1/' -e 's/[[:space:]]//g' || true)"
+    if [ -n "${VERSION}" ] && [ -n "${BUILD}" ] && [ -f "${ROOT_DIR}/localsend-bb10-v${VERSION}-build${BUILD}.bar" ]; then
+        BAR_FILE="${ROOT_DIR}/localsend-bb10-v${VERSION}-build${BUILD}.bar"
+    elif [ -f "${ROOT_DIR}/localsend-bb10.bar" ]; then
+        BAR_FILE="${ROOT_DIR}/localsend-bb10.bar"
+    else
+        echo "ERROR: BAR package not found at: ${BAR_FILE}"
+        echo "Please run scripts/build-bb10.sh first to build the package."
+        exit 1
+    fi
 fi
 
 echo "=== Deploying LocalSend to BlackBerry 10 (${DEVICE_IP}) ==="

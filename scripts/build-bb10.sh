@@ -9,8 +9,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+VERSION="$(grep '<versionNumber>' "${ROOT_DIR}/bar-descriptor.xml" 2>/dev/null | sed -e 's/.*<versionNumber>\(.*\)<\/versionNumber>.*/\1/' -e 's/[[:space:]]//g' || true)"
+BUILD="$(grep '<buildId>' "${ROOT_DIR}/bar-descriptor.xml" 2>/dev/null | sed -e 's/.*<buildId>\(.*\)<\/buildId>.*/\1/' -e 's/[[:space:]]//g' || true)"
+BAR_NAME="localsend-bb10"
+if [ -n "${VERSION}" ] && [ -n "${BUILD}" ]; then
+    BAR_NAME="localsend-bb10-v${VERSION}-build${BUILD}"
+elif [ -n "${VERSION}" ]; then
+    BAR_NAME="localsend-bb10-v${VERSION}"
+fi
+VERSIONED_BAR="${ROOT_DIR}/${BAR_NAME}.bar"
+
 echo "=== Building LocalSend for BlackBerry 10 ==="
 echo "Project root: ${ROOT_DIR}"
+echo "Target BAR:   ${BAR_NAME}.bar"
 
 CONTAINER_CLI=""
 if command -v podman >/dev/null 2>&1; then
@@ -38,17 +49,21 @@ if command -v docker >/dev/null 2>&1 && docker image inspect bb10-native-dev:loc
     cp -f "${ROOT_DIR}/build-qnx/localsend-bb10" "${ROOT_DIR}/arm/o.le-v7/localsend-bb10.so"
 
     # 3. Package BAR using container nativepackager
-    echo "Packaging BAR archive..."
+    echo "Packaging BAR archive (${BAR_NAME}.bar)..."
     docker run --rm --network none --user "$(id -u):$(id -g)" \
         -v "${ROOT_DIR}:/workspace" \
         -w /workspace \
         bb10-native-dev:local \
-        blackberry-nativepackager -package localsend-bb10.bar -devMode bar-descriptor.xml
+        blackberry-nativepackager -package "${BAR_NAME}.bar" -devMode bar-descriptor.xml
+
+    # Maintain standard symlink / copy for tooling compatibility
+    cp -f "${VERSIONED_BAR}" "${ROOT_DIR}/localsend-bb10.bar"
 
     echo "=== Build and Packaging Complete ==="
-    echo "Artifact: ${ROOT_DIR}/localsend-bb10.bar"
+    echo "Versioned Package: ${VERSIONED_BAR}"
+    echo "Compatible Alias:  ${ROOT_DIR}/localsend-bb10.bar"
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "${ROOT_DIR}/localsend-bb10.bar"
+        sha256sum "${VERSIONED_BAR}"
     fi
     exit 0
 fi
@@ -93,15 +108,18 @@ cp -f "${ROOT_DIR}/liblocalsend-bb10.so.1.0.0" "${ROOT_DIR}/arm/o.le-v7/localsen
 cp -f "${ROOT_DIR}/liblocalsend-bb10.so.1.0.0" "${ROOT_DIR}/arm/o.le-v7/localsend-bb10.so"
 
 blackberry-nativepackager \
-    -package "${ROOT_DIR}/localsend-bb10.bar" \
+    -package "${VERSIONED_BAR}" \
     -devMode \
     "${ROOT_DIR}/bar-descriptor.xml" \
     -e "${ROOT_DIR}/arm/o.le-v7/localsend-bb10.so" localsend-bb10.so \
     -e "${ROOT_DIR}/icon.png" icon.png \
     -C "${ROOT_DIR}" assets
 
+cp -f "${VERSIONED_BAR}" "${ROOT_DIR}/localsend-bb10.bar"
+
 echo "=== Packaging Complete ==="
-echo "Artifact: ${ROOT_DIR}/localsend-bb10.bar"
+echo "Versioned Package: ${VERSIONED_BAR}"
+echo "Compatible Alias:  ${ROOT_DIR}/localsend-bb10.bar"
 if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "${ROOT_DIR}/localsend-bb10.bar"
+    sha256sum "${VERSIONED_BAR}"
 fi
